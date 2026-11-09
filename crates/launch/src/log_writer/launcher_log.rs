@@ -1,4 +1,4 @@
-//! The app's own log (`heronite-rs-<date>.log`).
+//! The app's own log (`hearthdeck-<date>.log`).
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -20,7 +20,7 @@ struct LauncherState {
 }
 
 /// Writes the app's log records (`log` crate) to
-/// `heronite-rs-<date>.log`, one file per day, newest [`KEEP_LAUNCHER_LOGS`]
+/// `hearthdeck-<date>.log`, one file per day, newest [`KEEP_LAUNCHER_LOGS`]
 /// kept. Several instances may append to the same day's file.
 pub struct LauncherLogger {
     paths: LogPaths,
@@ -95,14 +95,14 @@ impl LauncherLogger {
     }
 }
 
-/// Deletes all but the newest `keep` `heronite-rs-*.log` files (and their
+/// Deletes all but the newest `keep` `hearthdeck-*.log` files (and their
 /// `.old`).
 pub fn prune_launcher_logs(dir: &Path, keep: usize) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     let mut names: Vec<String> = rd
         .flatten()
         .filter_map(|e| e.file_name().to_str().map(str::to_string))
-        .filter(|n| n.starts_with("heronite-rs-") && n.ends_with(".log"))
+        .filter(|n| n.starts_with(fork_brand::KEY) && n.ends_with(".log"))
         .collect();
     names.sort();
     names.reverse();
@@ -124,7 +124,7 @@ mod tests {
         let paths = LogPaths { base: dir.path().join("base"), launcher_dir: dir.path().join("l") };
         std::fs::create_dir_all(&paths.launcher_dir).unwrap();
         for d in 1..=9 {
-            std::fs::write(paths.launcher_dir.join(format!("heronite-rs-2020-01-0{d}.log")), "x").unwrap();
+            std::fs::write(paths.launcher_dir.join(format!("{}-2020-01-0{d}.log", fork_brand::KEY)), "x").unwrap();
         }
         std::fs::write(paths.launcher_dir.join("keep-me.txt"), "x").unwrap();
         let logger = LauncherLogger::open(paths.clone(), false);
@@ -137,7 +137,7 @@ mod tests {
         let kept = crate::log_reader::list_logs(&paths, &DataPaths::at(dir.path().join("h"))).len();
         assert_eq!(kept, KEEP_LAUNCHER_LOGS);
         assert!(paths.launcher_dir.join("keep-me.txt").exists());
-        assert!(!paths.launcher_dir.join("heronite-rs-2020-01-01.log").exists());
+        assert!(!paths.launcher_dir.join(format!("{}-2020-01-01.log", fork_brand::KEY)).exists());
 
         let paths2 = LogPaths { base: dir.path().join("b2"), launcher_dir: dir.path().join("l2") };
         let off = LauncherLogger::open(paths2.clone(), true);

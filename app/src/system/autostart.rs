@@ -1,5 +1,5 @@
 //! "Start with the system": an XDG autostart entry
-//! (`~/.config/autostart/app.heronite.Heronite.desktop`) on Linux, a value of the
+//! (`~/.config/autostart/app.hearthdeck.Hero.desktop`) on Linux, a value of the
 //! user's `Run` key (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`)
 //! on Windows, that follows the `startWithSystem` global setting. The entry
 //! passes `--autostart`: only that start honours "Start minimized"
@@ -21,15 +21,15 @@ use std::path::{Path, PathBuf};
 use heronite_data::DataPaths;
 use heronite_shortcuts::desktop::quote_exec_arg;
 
-const FILE_NAME: &str = "app.heronite.Heronite.desktop";
+const FILE_NAME: &str = fork_brand::DESKTOP_FILE;
 /// The entry of the versions up to 1.0, named after their app id: removed
 /// when the entry is written or turned off, so Heronite never starts twice.
 const OLD_FILE_NAME: &str = "com.heronite.rs.desktop";
 
-/// The `Run` key of the user and the value that starts Heronite.
+/// The `Run` key of the user and the value that starts the app.
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 #[cfg(windows)]
-const RUN_VALUE: &str = "Heronite";
+const RUN_VALUE: &str = fork_brand::KEY;
 
 /// Where the entry lives.
 #[derive(Debug, PartialEq)]
@@ -62,8 +62,10 @@ fn place(data_paths: &DataPaths) -> Option<Place> {
 
 fn entry_text(exe: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Heronite\nComment=Every game you own, on Linux, in one native launcher\nExec={} --autostart\nIcon=app.heronite.Heronite\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
-        quote_exec_arg(&exe.to_string_lossy())
+        "[Desktop Entry]\nType=Application\nName={name}\nComment=Every game you own, on Linux, in one native launcher\nExec={exe} --autostart\nIcon={icon}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+        name = fork_brand::NAME,
+        exe = quote_exec_arg(&exe.to_string_lossy()),
+        icon = fork_brand::APP_ID
     )
 }
 

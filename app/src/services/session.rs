@@ -188,7 +188,7 @@ impl Session {
             }
         })
         .detach();
-        let svc = CaptureService::new(std_tx, ServiceOptions { portal_app_id: Some("app.heronite.Heronite".into()), ..Default::default() });
+        let svc = CaptureService::new(std_tx, ServiceOptions { portal_app_id: Some(fork_brand::APP_ID.into()), ..Default::default() });
         if let Some(cfg) = self.capture_cfg.clone() {
             svc.set_config(cfg);
         }

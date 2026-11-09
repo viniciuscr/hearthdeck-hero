@@ -13,7 +13,7 @@ fn show(title: &str, body: &str) -> Result<(), String> {
         return heronite_platform::flatpak::notify(title, body);
     }
     let mut notification = notify_rust::Notification::new();
-    notification.appname("Heronite").summary(title).body(body);
+    notification.appname(fork_brand::NAME).summary(title).body(body);
     // The app's icon and launcher entry (what the packages install), else
     // the notification daemon shows a generic icon.
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -23,7 +23,7 @@ fn show(title: &str, body: &str) -> Result<(), String> {
 
 /// The name of the app's icon and `.desktop` entry on Linux.
 #[cfg(all(unix, not(target_os = "macos")))]
-const APP_ID: &str = "app.heronite.Heronite";
+const APP_ID: &str = fork_brand::APP_ID;
 
 /// Shows a notification; never blocks the caller and never fails loudly.
 pub fn send(title: impl Into<String>, body: impl Into<String>) {

@@ -153,7 +153,7 @@ fn options(namespace: &str, size: Size<Pixels>, side: Side, margin: Pixels, laye
     WindowOptions {
         titlebar: None,
         window_bounds: Some(WindowBounds::Windowed(Bounds { origin: point(px(0.), px(0.)), size })),
-        app_id: Some(if layer { "app.heronite.Heronite".into() } else { format!("app.heronite.{namespace}") }),
+        app_id: Some(if layer { fork_brand::APP_ID.into() } else { format!("{}.{namespace}", fork_brand::APP_ID) }),
         window_background: WindowBackgroundAppearance::Transparent,
         kind,
         focus: !layer || keyboard,

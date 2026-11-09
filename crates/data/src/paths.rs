@@ -8,9 +8,9 @@
 use std::path::{Path, PathBuf};
 
 /// Folder name of this app under the XDG base directories.
-pub const APP_DIR: &str = "heronite";
+pub const APP_DIR: &str = fork_brand::DATA_DIR;
 /// Folder name of this app in the user's own folders (Pictures).
-pub const APP_TITLE: &str = "Heronite";
+pub const APP_TITLE: &str = fork_brand::NAME;
 
 /// File-name-safe, at most 48 characters.
 fn file_name_safe(s: &str) -> String {
@@ -29,7 +29,7 @@ fn fnv32(s: &str) -> u32 {
 
 #[derive(Debug, Clone)]
 pub struct DataPaths {
-    /// `~/.local/share/heronite` on Linux, `%APPDATA%\heronite\data` on Windows.
+    /// `~/.local/share/hearthdeck` on Linux, `%APPDATA%\hearthdeck\data` on Windows.
     pub root: PathBuf,
 }
 
@@ -43,7 +43,7 @@ impl DataPaths {
         Self { root: Self::default_root().unwrap_or_else(|| PathBuf::from(APP_DIR)) }
     }
 
-    /// `$XDG_DATA_HOME/heronite` (`%APPDATA%\heronite\data` on Windows).
+    /// `$XDG_DATA_HOME/hearthdeck` (`%APPDATA%\hearthdeck\data` on Windows).
     pub fn default_root() -> Option<PathBuf> {
         heronite_platform::dirs::data(APP_DIR)
     }
@@ -362,14 +362,14 @@ impl AppPaths {
     }
     /// The app state that belongs to a data folder: the real one for the
     /// default folder, otherwise (fixtures, `HERONITE_DATA_DIR`, tests) a
-    /// sibling `<folder>.heronite/` so state that points into a copy
+    /// sibling `<folder>.hearthdeck/` so state that points into a copy
     /// never leaks into the real config.
     pub fn for_data(data_paths: &DataPaths) -> Self {
         if data_paths.is_default() {
             return Self::detect();
         }
         let name = data_paths.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "data".into());
-        let base = data_paths.root.with_file_name(format!("{name}.heronite"));
+        let base = data_paths.root.with_file_name(format!("{name}.{}", fork_brand::KEY));
         Self { config: base.join("config"), cache: base.join("cache") }
     }
     pub fn ui_state(&self) -> PathBuf {

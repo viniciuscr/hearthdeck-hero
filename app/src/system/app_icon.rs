@@ -5,7 +5,7 @@
 //! - The main window on X11 gets it when it opens (`WindowOptions::icon`).
 //! - Everywhere else the system shows the packaged icon: the executable's on
 //!   Windows (`packaging/windows/heronite.ico`), and on Linux the one the
-//!   `.desktop` entry names, `app.heronite.Heronite`, which the launcher, the
+//!   `.desktop` entry names, `app.hearthdeck.Hero`, which the launcher, the
 //!   dock and Wayland's windows show.
 //!
 //! The pictures come from `packaging/icons/` through

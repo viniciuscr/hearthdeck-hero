@@ -82,7 +82,7 @@ pub fn spawn(
     let click = tx.clone();
     let close = tx.clone();
     let options = Options {
-        tooltip: "Heronite".into(),
+        tooltip: fork_brand::NAME.into(),
         icons: icons(dark),
         on_click: Box::new(move || {
             let _ = click.unbounded_send(click_cmd(exit_to_tray));

@@ -11,7 +11,7 @@ use super::GameLogType;
 pub struct LogPaths {
     /// The logs folder (`games/`, `runners/`).
     pub base: PathBuf,
-    /// This app's own log (`heronite-rs-<date>.log`).
+    /// This app's own log (`hearthdeck-<date>.log`).
     pub launcher_dir: PathBuf,
 }
 
@@ -36,7 +36,7 @@ impl LogPaths {
 
     /// Today's launcher log.
     pub fn launcher_log(&self, date: chrono::NaiveDate) -> PathBuf {
-        self.launcher_dir.join(format!("heronite-rs-{}.log", date.format("%Y-%m-%d")))
+        self.launcher_dir.join(format!("{}-{}.log", fork_brand::KEY, date.format("%Y-%m-%d")))
     }
 }
 
@@ -59,7 +59,7 @@ mod tests {
         assert_eq!(p.runner("legendary"), PathBuf::from("/d/logs/runners/legendary.log"));
         assert_eq!(old_path(&p.runner("legendary")), PathBuf::from("/d/logs/runners/legendary.log.old"));
         let d = chrono::NaiveDate::from_ymd_opt(2026, 10, 8).unwrap();
-        assert_eq!(p.launcher_log(d), PathBuf::from("/d/logs/launcher/heronite-rs-2026-10-08.log"));
+        assert_eq!(p.launcher_log(d), PathBuf::from(format!("/d/logs/launcher/{}-2026-10-08.log", fork_brand::KEY)));
     }
 
     #[test]

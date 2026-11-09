@@ -82,6 +82,13 @@ jobs. `fork/main` is never tagged for release with a red gate.
 - Keep the deviation surface small and stable: review
   `git diff main...fork/main --name-only` at every reconciliation.
 
+## Branding identity
+
+`crates/fork-brand` is the single source of truth: `Hearthdeck Hero`,
+`app.hearthdeck.Hero`, data folder `hearthdeck`, URL scheme `hearthdeck`,
+updater `viniciuscr/hearthdeck-hero`. Environment variables keep upstream's
+`HERONITE_*` names so upstream tooling and tests keep working.
+
 ## Deviation register
 
 Every intentional difference from upstream is recorded here. `Fork-Seam`
@@ -89,10 +96,11 @@ trailers and this table must agree.
 
 | ID | Upstream configuration item | Deviation | Status |
 |---|---|---|---|
-| F-001 | `crates/update/src/lib.rs` (`LATEST_API`, `REPO_PAGE`, `RELEASES_PAGE`) | point the updater at the fork's release channel | pending (branding) |
-| F-002 | app identity: `app.heronite.Heronite`, binary `heronite-rs`, data folder `heronite` | separate fork identity so both apps can coexist | pending (branding) |
-| F-003 | `packaging/*`, `scripts/appimage.sh`, `scripts/sign-release.sh` | fork package names and signing key | pending (branding) |
+| F-001 | `crates/update/src/lib.rs` (`LATEST_API`, `REPO_PAGE`, `RELEASES_PAGE`) | updater reads the fork's release channel | active (asset names and signing key: F-003) |
+| F-002 | app identity: `app.heronite.Heronite`, data folder `heronite`, scheme `heronite` | fork identity from `fork-brand`, so both apps coexist | active (runtime; binary and packages: F-003) |
+| F-003 | `packaging/*`, `scripts/appimage.sh`, `scripts/sign-release.sh`, binary and package names | fork packages, release asset names and signing key | pending |
 | F-004 | `.github/workflows/fork-ci.yml` | fork verification gate (new file, no upstream conflict) | active |
+| F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" | pending |
 
 ### Conflict log
 
@@ -107,6 +115,9 @@ date, upstream commit, files, and resolution.
 - Keep upstream `release.yml`, `flatpak.yml`, and `windows-packages.yml`
   **disabled** in the fork's Actions settings: they use upstream secrets and
   publish to upstream's package channels.
+- Until F-003 lands, release assets keep upstream's names (`Heronite-*`) and
+  the updater keeps upstream's public key: a fork release signed with another
+  key is rejected, which fails closed.
 - Add `fork-release.yml` only with the fork's own signing key and channels.
 - GPL-3.0-only: keep `LICENSE` and `THIRD-PARTY-NOTICES.md`, state the
   modifications in this file, and publish the source for every distributed

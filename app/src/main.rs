@@ -266,7 +266,7 @@ pub fn trim_heap_later() {
 
 fn env_logger_init() {
     // Records go to stderr and, unless `disableLogs` is on, to
-    // `heronite-rs-<date>.log` (see `heronite_launch::log_writer`).
+    // `hearthdeck-<date>.log` (see `heronite_launch::log_writer`).
     struct L {
         level: log::LevelFilter,
         file: Option<heronite_launch::log_writer::LauncherLogger>,

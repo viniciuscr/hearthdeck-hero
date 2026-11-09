@@ -12,6 +12,7 @@ log.workspace = true
 dirs = "6"
 heronite-i18n = { path = "../i18n" }
 heronite-platform = { path = "../platform" }
+fork-brand = { path = "../fork-brand" }
 libc = "0.2"
 parking_lot = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }

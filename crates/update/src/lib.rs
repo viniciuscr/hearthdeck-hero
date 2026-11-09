@@ -51,13 +51,13 @@ pub use setup::Installer;
 pub use version::Version;
 
 /// GitHub API endpoint of the latest (non-draft, non-prerelease) release.
-pub const LATEST_API: &str = "https://api.github.com/repos/RafaelGoulartB/Heronite/releases/latest";
+pub const LATEST_API: &str = fork_brand::LATEST_API;
 
 /// The project on GitHub (a star, issues, Discussions).
-pub const REPO_PAGE: &str = "https://github.com/RafaelGoulartB/Heronite";
+pub const REPO_PAGE: &str = fork_brand::REPO_PAGE;
 
 /// The releases page, for people who update by hand.
-pub const RELEASES_PAGE: &str = "https://github.com/RafaelGoulartB/Heronite/releases/latest";
+pub const RELEASES_PAGE: &str = fork_brand::RELEASES_PAGE;
 
 /// Public half of the release signing key (minisign, ed25519). The secret
 /// half lives only in the repository secret `MINISIGN_SECRET_KEY`.

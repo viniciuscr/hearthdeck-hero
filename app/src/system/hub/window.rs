@@ -185,7 +185,7 @@ fn open_main_window(cx: &mut App, started: Instant, fullscreen: bool) -> Option<
         // Linux the compositor is asked to leave the frame to the app.
         titlebar: None,
         window_decorations: Some(WindowDecorations::Client),
-        app_id: Some("app.heronite.Heronite".into()),
+        app_id: Some(fork_brand::APP_ID.into()),
         window_background: WindowBackgroundAppearance::Opaque,
         window_min_size: Some(min_size),
         // X11 only; Wayland's compositor takes the `.desktop` entry's.
@@ -195,7 +195,7 @@ fn open_main_window(cx: &mut App, started: Instant, fullscreen: bool) -> Option<
     // The library loads while the window and the GPU come up.
     crate::collection::preload_library(cx);
     let opened = gpui_kit::open_window(options, cx, |window, cx| {
-        window.set_window_title("Heronite");
+        window.set_window_title(fork_brand::NAME);
         // The close button / compositor "close": ask first when quitting
         // would leave games or post-game work behind.
         window.on_window_should_close(cx, |_, cx| allow_user_close(cx));

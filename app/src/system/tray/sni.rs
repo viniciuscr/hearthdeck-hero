@@ -50,11 +50,11 @@ impl HeroniteTray {
 
 impl ksni::Tray for HeroniteTray {
     fn id(&self) -> String {
-        "app.heronite.Heronite".into()
+        fork_brand::APP_ID.into()
     }
 
     fn title(&self) -> String {
-        "Heronite".into()
+        fork_brand::NAME.into()
     }
 
     fn icon_name(&self) -> String {

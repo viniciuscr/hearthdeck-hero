@@ -14,7 +14,7 @@ use crate::log_writer::{old_path, GameLogType, LogPaths};
 /// What a log belongs to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LogSource {
-    /// This app (`heronite-rs-<date>.log`).
+    /// This app (`hearthdeck-<date>.log`).
     Launcher,
     /// `runners/<runner>.log`.
     Runner(String),
@@ -77,7 +77,7 @@ pub fn list_logs(paths: &LogPaths, data_paths: &DataPaths) -> Vec<LogEntry> {
         .into_iter()
         .filter(|p| {
             let n = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            n.starts_with("heronite-rs-") && n.ends_with(".log")
+            n.starts_with(fork_brand::KEY) && n.ends_with(".log")
         })
         .filter_map(|p| entry(LogSource::Launcher, p))
         .collect();
@@ -272,8 +272,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let data_paths = DataPaths::at(dir.path().join("data"));
         let paths = LogPaths { base: dir.path().join("logs"), launcher_dir: dir.path().join("launcher") };
-        write(&paths.launcher_dir.join("heronite-rs-2026-10-07.log"), "old day");
-        write(&paths.launcher_dir.join("heronite-rs-2026-10-08.log"), "today");
+        write(&paths.launcher_dir.join(format!("{}-2026-10-07.log", fork_brand::KEY)), "old day");
+        write(&paths.launcher_dir.join(format!("{}-2026-10-08.log", fork_brand::KEY)), "today");
         write(&paths.launcher_dir.join("notes.txt"), "ignored");
         write(&paths.runner("legendary"), "lg");
         write(&paths.game("playnite_ab-cd", "sideload", GameLogType::Launch), "launch");
@@ -295,7 +295,9 @@ mod tests {
                 LogSource::Legacy { app_name } => format!("legacy:{app_name}"),
             })
             .collect();
-        assert_eq!(&kinds[..3], ["launcher:heronite-rs-2026-10-08.log", "launcher:heronite-rs-2026-10-07.log", "runner:legendary"]);
+        let newest = format!("launcher:{}-2026-10-08.log", fork_brand::KEY);
+        let older = format!("launcher:{}-2026-10-07.log", fork_brand::KEY);
+        assert_eq!(&kinds[..3], [newest.as_str(), older.as_str(), "runner:legendary"]);
         for want in ["game:playnite_ab-cd:sideload:launch", "game:Calluna:legendary:install", "game:Lonely:gog:launch", "legacy:emu_1"] {
             assert!(kinds.iter().any(|k| k == want), "{want} in {kinds:?}");
         }

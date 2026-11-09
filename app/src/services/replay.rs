@@ -301,7 +301,7 @@ impl ReplayService {
             signal: libc::SIGRTMIN() + 1,
             accelerator: accelerator.clone(),
             consume: true,
-            portal_app_id: Some("app.heronite.Heronite".into()),
+            portal_app_id: Some(fork_brand::APP_ID.into()),
         };
         let hotkey = GlobalHotkey::start(
             spec,

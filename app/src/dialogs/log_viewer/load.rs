@@ -203,7 +203,12 @@ impl LogViewer {
             e.path
                 .file_name()
                 .map(|n| {
-                    n.to_string_lossy().trim_start_matches("heronite-rs-").trim_end_matches(".log").trim_end_matches(".old").to_string()
+                    n.to_string_lossy()
+                        .trim_start_matches(fork_brand::KEY)
+                        .trim_start_matches('-')
+                        .trim_end_matches(".log")
+                        .trim_end_matches(".old")
+                        .to_string()
                 })
                 .unwrap_or_default()
         };

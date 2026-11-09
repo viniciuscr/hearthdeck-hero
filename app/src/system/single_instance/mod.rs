@@ -110,7 +110,7 @@ fn digest(root: &Path) -> String {
 
 /// Socket path for a data folder. `runtime_dir` is `$XDG_RUNTIME_DIR`.
 pub fn socket_path_in(runtime_dir: &Path, data_root: &Path) -> PathBuf {
-    runtime_dir.join(format!("heronite-rs-{}.sock", digest(data_root)))
+    runtime_dir.join(format!("{}-{}.sock", fork_brand::KEY, digest(data_root)))
 }
 
 /// Socket path for the current user and data folder.
@@ -118,7 +118,7 @@ pub fn socket_path(data_root: &Path) -> PathBuf {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
-        .unwrap_or_else(|| heronite_platform::dirs::user_temp("heronite-rs"));
+        .unwrap_or_else(|| heronite_platform::dirs::user_temp(fork_brand::KEY));
     let _ = std::fs::create_dir_all(&dir);
     socket_path_in(&dir, data_root)
 }
@@ -320,7 +320,8 @@ mod tests {
         let b = socket_path_in(rt, Path::new("/tmp/heronite-fixture-system"));
         assert_ne!(a, b);
         assert_eq!(a, socket_path_in(rt, Path::new("/home/u/.local/share/heronite-rs")));
-        assert!(a.starts_with(rt) && a.file_name().unwrap().to_string_lossy().starts_with("heronite-rs-"), "{}", a.display());
+        let prefix = format!("{}-", fork_brand::KEY);
+        assert!(a.starts_with(rt) && a.file_name().unwrap().to_string_lossy().starts_with(prefix.as_str()), "{}", a.display());
     }
 
     #[test]
