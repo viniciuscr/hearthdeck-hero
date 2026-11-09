@@ -1,0 +1,45 @@
+name: Fork CI
+
+# The fork's own gate for pushes to the integration baseline. Pull requests
+# into fork/main also run upstream's ci.yml (including its Windows jobs).
+on:
+  push:
+    branches: [fork/main]
+    paths-ignore: ["**.md", "assets/screenshots/**", "docs/**", "licenses/**"]
+  pull_request:
+    branches: [fork/main]
+    paths-ignore: ["**.md", "assets/screenshots/**", "docs/**", "licenses/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  check:
+    name: Format, clippy and tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: scripts/ci-deps.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/fork/main' }}
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
