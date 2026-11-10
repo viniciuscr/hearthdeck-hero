@@ -315,4 +315,14 @@ Envelope, source `stremio-core`:
   uses fixtures and a fake transport, never the network. Re-run the probe
   checklist above after installing the Stremio desktop app (or Stremio
   Service) and `mpv`.
+- **2026-11-10, Phase 5.** Native playback is implemented in
+  `crates/movies/src/player.rs`: a guarded mpv process group, a private `0700`
+  IPC directory, `--` before the URL, and `--input-gamepad=yes` only when
+  `mpv --list-options` declares it. Streams with an `infoHash` go through the
+  local Stremio service; direct URLs go straight to mpv. Progress is saved
+  locally and written back on exit. If mpv is missing or lacks gamepad
+  support, the page opens the stream in Stremio instead, so a controller still
+  works. The hardware checklist (probe 7 and an end-to-end playback) remains
+  open because neither program is installed on this machine.
+
 

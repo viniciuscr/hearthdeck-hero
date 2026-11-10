@@ -63,6 +63,7 @@ pub struct MoviesPage {
     streams_loading: bool,
     streams_error: Option<String>,
     busy: bool,
+    playing: bool,
     console_list: ListNav,
 }
 
@@ -86,6 +87,7 @@ impl MoviesPage {
             streams_loading: false,
             streams_error: None,
             busy: false,
+            playing: false,
             console_list: ListNav::default(),
         };
         page.reload(cx);
@@ -236,6 +238,42 @@ impl MoviesPage {
             Ok(()) => self.notice = None,
             Err(error) => self.notice = Some(format!("{error:#}")),
         }
+        cx.notify();
+    }
+
+    /// Plays in mpv; when native playback is unavailable (or mpv has no
+    /// gamepad support), opens the stream in Stremio instead.
+    fn play_stream(&mut self, choice: &StreamChoice, cx: &mut Context<Self>) {
+        if self.playing {
+            return;
+        }
+        let for_player = choice.clone();
+        let for_fallback = choice.clone();
+        let movie_id = self.selected.as_ref().map(|movie| movie.id.clone()).unwrap_or_default();
+        let app = self.ctx.app.clone();
+        self.playing = true;
+        self.notice = Some(tr!("Opening the player…").to_string());
+        let (tx, rx) = futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(play_native(&for_player, &movie_id, &app));
+        });
+        cx.spawn(async move |this, cx| {
+            let result = rx.await;
+            this.update(cx, |this, cx| {
+                this.playing = false;
+                match result {
+                    Ok(Ok(())) => this.notice = None,
+                    Ok(Err(error)) => {
+                        this.notice = Some(format!("{error:#}"));
+                        this.handoff_stream(&for_fallback, cx);
+                    }
+                    Err(_) => this.notice = Some(tr!("The player stopped").to_string()),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 
@@ -396,6 +434,10 @@ impl MoviesPage {
             )
             .child(div().text_size(px(16.)).font_weight(theme::W_BOLD).child(tr!("Streams")));
 
+        if self.playing {
+            column = column.child(div().text_size(px(12.5)).text_color(theme::accent()).child(tr!("Playing in mpv…")));
+        }
+
         if self.streams_loading {
             column = column.child(div().text_color(theme::text_muted()).child(tr!("Loading…")));
         } else if let Some(error) = &self.streams_error {
@@ -422,7 +464,7 @@ impl MoviesPage {
                         .bg(theme::ink_a(0.03))
                         .cursor_pointer()
                         .hover(|s| s.bg(theme::ink_a(0.06)))
-                        .on_click(cx.listener(move |this, _, _, cx| this.handoff_stream(&choice, cx)))
+                        .on_click(cx.listener(move |this, _, _, cx| this.play_stream(&choice, cx)))
                         .child(
                             div()
                                 .flex()
@@ -556,7 +598,7 @@ impl PadTarget for MoviesPage {
                     }
                 } else if let Some(index) = id.strip_prefix("stream:").and_then(|n| n.parse::<usize>().ok()) {
                     if let Some(choice) = self.streams.get(index).cloned() {
-                        self.handoff_stream(&choice, cx);
+                        self.play_stream(&choice, cx);
                     }
                 }
                 cx.notify();
@@ -614,6 +656,70 @@ fn load_streams(id: &str) -> anyhow::Result<Vec<StreamChoice>> {
 
 fn movie_item(item: &LibraryItem) -> MovieItem {
     MovieItem { id: item.id.clone(), kind: item.kind.clone(), name: item.name.clone(), poster: item.poster.clone(), ..MovieItem::default() }
+}
+
+#[cfg(unix)]
+fn play_native(choice: &StreamChoice, movie_id: &str, app: &AppPaths) -> anyhow::Result<()> {
+    use heronite_movies::player::{find_mpv, gamepad_supported, MpvSession};
+
+    let mpv = find_mpv().ok_or_else(|| anyhow::anyhow!("mpv is not installed"))?;
+    if !gamepad_supported(&mpv) {
+        anyhow::bail!("this mpv has no gamepad support");
+    }
+    let url = resolve_stream(choice)?;
+    let start = local_position(app, movie_id);
+    let mut session = MpvSession::start(&mpv, &url, start, true)?;
+    let outcome = session.wait()?;
+    record_progress(app, movie_id, &outcome);
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn play_native(_: &StreamChoice, _: &str, _: &AppPaths) -> anyhow::Result<()> {
+    anyhow::bail!("native playback is Linux-only")
+}
+
+#[cfg(unix)]
+fn resolve_stream(choice: &StreamChoice) -> anyhow::Result<String> {
+    if let Some(url) = &choice.url {
+        return Ok(url.clone());
+    }
+    let hash = choice.info_hash.as_deref().ok_or_else(|| anyhow::anyhow!("the stream has no address"))?;
+    let http = UreqTransport::new();
+    let server = heronite_movies::streaming::StreamingServer::new(&http, Endpoints::default().streaming_server)?;
+    let base = server.base_url()?;
+    server.create(hash, &[])?;
+    let url = heronite_movies::streaming::StreamingServer::stream_url(&base, hash, choice.file_idx)?;
+    Ok(url.to_string())
+}
+
+#[cfg(unix)]
+fn local_position(app: &AppPaths, movie_id: &str) -> Option<u64> {
+    let movies = store::read_movies(app);
+    store::progress_for(&movies, movie_id).map(|progress| progress.position_ms).filter(|position| *position > 0)
+}
+
+#[cfg(unix)]
+fn record_progress(app: &AppPaths, movie_id: &str, outcome: &heronite_movies::player::PlaybackOutcome) {
+    if outcome.position_ms == 0 && outcome.duration_ms == 0 {
+        return;
+    }
+    let Ok(Some(key)) = store::read_auth(app) else { return };
+    let http = UreqTransport::new();
+    let endpoints = Endpoints::default();
+    let client = DatastoreClient::new(&http, &endpoints, key);
+    let mut movies = store::read_movies(app);
+    let progress = heronite_movies::types::MovieProgress {
+        id: movie_id.to_owned(),
+        position_ms: outcome.position_ms,
+        duration_ms: outcome.duration_ms,
+        updated_at: chrono::Utc::now(),
+        finished: outcome.duration_ms > 0 && outcome.position_ms * 100 >= outcome.duration_ms * 70,
+        video_id: None,
+    };
+    if let Err(error) = heronite_movies::progress::record(&client, app, &mut movies, progress) {
+        log::warn!("saving the playback position: {error:#}");
+    }
 }
 
 fn progress_bar(progress: f32) -> Div {
