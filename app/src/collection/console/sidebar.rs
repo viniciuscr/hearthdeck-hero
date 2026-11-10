@@ -73,6 +73,7 @@ impl Item {
     pub fn parse(name: &str) -> Option<Item> {
         Some(match name {
             "collection" => Item::Go(Page::Collection),
+            "movies" => Item::Go(Page::Movies),
             "downloads" => Item::Go(Page::Downloads),
             "wine-manager" => Item::Go(Page::WineManager),
             "stores" => Item::Stores,
@@ -117,6 +118,12 @@ pub(super) fn items() -> Vec<Item> {
     }
     while out.last() == Some(&Item::Separator) {
         out.pop();
+    }
+    if Page::Movies.available() && !out.contains(&Item::Go(Page::Movies)) {
+        if out.last() == Some(&Item::Separator) {
+            out.pop();
+        }
+        out.push(Item::Go(Page::Movies));
     }
     out
 }

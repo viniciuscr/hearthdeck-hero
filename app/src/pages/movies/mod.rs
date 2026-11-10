@@ -1,6 +1,6 @@
 //! Movies page (☰ → Movies): films from the linked Stremio account and from
-//! Cinemeta. The account link lives here, not in Settings. Playback and the
-//! console layout arrive in Phases 4–5 (`docs/MOVIES.md`).
+//! Cinemeta, a stream picker from Torrentio, and the handoff to Stremio's
+//! player. The console layout is the TV one; playback through mpv is Phase 5.
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -9,18 +9,24 @@ use heronite_i18n::tr;
 use heronite_movies::account::{create_link, read_link, LinkOffer, LinkPoll};
 use heronite_movies::addon::AddonClient;
 use heronite_movies::datastore::{continue_watching, DatastoreClient, LibraryItem};
+use heronite_movies::deep_link::{player_deep_link, StreamLink};
 use heronite_movies::endpoints::Endpoints;
 use heronite_movies::store;
-use heronite_movies::types::MovieItem;
+use heronite_movies::types::{MovieItem, StreamChoice};
 use heronite_movies::UreqTransport;
 
 use super::{page_close, sheet, PageCtx, PageEvent};
+use crate::console::kit::{self, u};
+use crate::console::list::{ListNav, Outcome, Row};
+use crate::console::{hint, Btn, Hint, Pad, PadTarget};
+use crate::icons::Icon;
 use crate::services::widgets::{cover_box, Covers};
 use crate::theme;
 use crate::ui::controls::{button, ButtonKind};
 
 const MAX_W: f32 = 1320.;
 const CINEMETA: &str = "https://v3-cinemeta.strem.io/manifest.json";
+const TORRENTIO: &str = "https://torrentio.strem.fun/manifest.json";
 const COVER_W: f32 = 140.;
 const COVER_H: f32 = 210.;
 
@@ -52,7 +58,12 @@ pub struct MoviesPage {
     notice: Option<String>,
     link: Option<LinkOffer>,
     selected: Option<MovieItem>,
+    streams: Vec<StreamChoice>,
+    streams_for: Option<String>,
+    streams_loading: bool,
+    streams_error: Option<String>,
     busy: bool,
+    console_list: ListNav,
 }
 
 impl EventEmitter<PageEvent> for MoviesPage {}
@@ -70,7 +81,12 @@ impl MoviesPage {
             notice: None,
             link: None,
             selected: None,
+            streams: Vec::new(),
+            streams_for: None,
+            streams_loading: false,
+            streams_error: None,
             busy: false,
+            console_list: ListNav::default(),
         };
         page.reload(cx);
         page
@@ -171,6 +187,67 @@ impl MoviesPage {
         self.link = None;
         self.linked = false;
         self.reload(cx);
+    }
+
+    /// Opens a title: the details, its streams, and the console focus reset.
+    fn open_movie(&mut self, movie: MovieItem, cx: &mut Context<Self>) {
+        self.selected = Some(movie.clone());
+        self.streams.clear();
+        self.streams_for = Some(movie.id.clone());
+        self.streams_loading = true;
+        self.streams_error = None;
+        self.console_list.reset();
+        cx.spawn(async move |this, cx| {
+            let id = movie.id.clone();
+            let wanted = id.clone();
+            let result = cx.background_spawn(async move { load_streams(&id) }).await;
+            this.update(cx, |this, cx| {
+                if this.streams_for.as_deref() != Some(wanted.as_str()) {
+                    return;
+                }
+                this.streams_loading = false;
+                match result {
+                    Ok(mut streams) => {
+                        streams.sort_by(|a, b| b.seeders.cmp(&a.seeders).then_with(|| b.size_bytes.cmp(&a.size_bytes)));
+                        this.streams = streams;
+                    }
+                    Err(error) => this.streams_error = Some(format!("{error:#}")),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Hands the chosen stream to Stremio's player (`stremio:///player/…`).
+    fn handoff_stream(&mut self, choice: &StreamChoice, cx: &mut Context<Self>) {
+        let link = if let Some(hash) = &choice.info_hash {
+            StreamLink::torrent(hash.clone(), choice.file_idx)
+        } else if let Some(url) = &choice.url {
+            StreamLink::url(url.clone())
+        } else {
+            self.notice = Some(tr!("This stream has no playable address").to_string());
+            cx.notify();
+            return;
+        };
+        let link = StreamLink { name: choice.name.clone(), description: choice.description.clone(), ..link };
+        match player_deep_link(&link).and_then(|uri| heronite_platform::shell::open(uri.as_str()).map_err(anyhow::Error::from)) {
+            Ok(()) => self.notice = None,
+            Err(error) => self.notice = Some(format!("{error:#}")),
+        }
+        cx.notify();
+    }
+
+    /// The title's own page in Stremio, the verified fallback target.
+    fn open_details(&mut self, movie: &MovieItem, cx: &mut Context<Self>) {
+        let kind = if movie.kind.is_empty() { "movie" } else { movie.kind.as_str() };
+        let uri = format!("stremio:///detail/{kind}/{}", movie.id);
+        match heronite_platform::shell::open(uri.as_str()) {
+            Ok(()) => self.notice = None,
+            Err(error) => self.notice = Some(format!("{error:#}")),
+        }
+        cx.notify();
     }
 
     fn render_home(&mut self, window: &Window, cx: &mut Context<Self>) -> Div {
@@ -275,10 +352,7 @@ impl MoviesPage {
                     .flex_col()
                     .gap(px(6.))
                     .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.selected = Some(movie.clone());
-                        cx.notify();
-                    }))
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_movie(movie.clone(), cx)))
                     .child(cover_box(src, COVER_W, COVER_H))
                     .child(div().text_size(px(12.5)).truncate().child(item.movie.name.clone()))
                     .children(item.progress.map(progress_bar)),
@@ -295,32 +369,209 @@ impl MoviesPage {
     fn render_details(&mut self, movie: &MovieItem, window: &Window, cx: &mut Context<Self>) -> Div {
         let src = self.covers.get(movie.poster.as_deref(), 220., 330., window.scale_factor());
         let year = movie.year.clone().unwrap_or_default();
-        div().flex().items_start().gap(px(24.)).child(cover_box(src, 220., 330.)).child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_w_0()
-                .gap(px(10.))
-                .child(div().text_size(px(24.)).font_weight(theme::W_BOLD).child(movie.name.clone()))
-                .children((!year.is_empty()).then(|| div().text_size(px(12.5)).text_color(theme::text_muted()).child(year)))
-                .children(movie.description.clone().map(|text| div().text_size(px(13.)).text_color(theme::text_primary()).child(text)))
-                .child(button("movies-back", ButtonKind::Glass, tr!("Back")).on_click(cx.listener(|this, _, _, cx| {
-                    this.selected = None;
-                    cx.notify();
-                }))),
-        )
+        let for_details = movie.clone();
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .gap(px(10.))
+            .child(div().text_size(px(24.)).font_weight(theme::W_BOLD).child(movie.name.clone()))
+            .children((!year.is_empty()).then(|| div().text_size(px(12.5)).text_color(theme::text_muted()).child(year)))
+            .children(movie.description.clone().map(|text| div().text_size(px(13.)).text_color(theme::text_primary()).child(text)))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        button("movies-open-stremio", ButtonKind::Glass, tr!("Open in Stremio"))
+                            .on_click(cx.listener(move |this, _, _, cx| this.open_details(&for_details, cx))),
+                    )
+                    .child(button("movies-back", ButtonKind::Ghost, tr!("Back")).on_click(cx.listener(|this, _, _, cx| {
+                        this.selected = None;
+                        this.console_list.reset();
+                        cx.notify();
+                    }))),
+            )
+            .child(div().text_size(px(16.)).font_weight(theme::W_BOLD).child(tr!("Streams")));
+
+        if self.streams_loading {
+            column = column.child(div().text_color(theme::text_muted()).child(tr!("Loading…")));
+        } else if let Some(error) = &self.streams_error {
+            column = column
+                .child(div().text_color(theme::danger_text()).child(tr!("Could not load the streams")))
+                .child(div().text_size(px(11.5)).text_color(theme::text_muted()).child(error.clone()));
+        } else if self.streams.is_empty() {
+            column = column.child(div().text_color(theme::text_muted()).child(tr!("No streams found")));
+        } else {
+            for (index, choice) in self.streams.iter().enumerate() {
+                let choice = choice.clone();
+                let name = choice.name.clone().unwrap_or_else(|| choice.addon.clone());
+                let description = choice.description.clone().unwrap_or_default();
+                let meta = stream_meta(&choice);
+                column = column.child(
+                    div()
+                        .id(format!("stream-{index}"))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(12.))
+                        .p(px(10.))
+                        .rounded(px(10.))
+                        .bg(theme::ink_a(0.03))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(theme::ink_a(0.06)))
+                        .on_click(cx.listener(move |this, _, _, cx| this.handoff_stream(&choice, cx)))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_w_0()
+                                .child(div().text_size(px(13.)).truncate().child(name))
+                                .child(div().text_size(px(11.5)).text_color(theme::text_muted()).truncate().child(description)),
+                        )
+                        .child(div().text_size(px(11.5)).text_color(theme::text_muted()).child(meta)),
+                );
+            }
+        }
+
+        div().flex().items_start().gap(px(24.)).child(cover_box(src, 220., 330.)).child(column)
+    }
+
+    fn console_rows(&self) -> Vec<Row> {
+        let mut rows = Vec::new();
+        if let Some(movie) = &self.selected {
+            rows.push(Row::header(movie.name.clone()));
+            rows.push(Row::action("details", tr!("Open in Stremio")).icon(Icon::OpenInNew));
+            rows.push(Row::header(tr!("Streams")));
+            if self.streams_loading {
+                rows.push(Row::info("loading", tr!("Loading…"), ""));
+            } else if let Some(error) = &self.streams_error {
+                rows.push(Row::info("error", tr!("Could not load the streams"), error.clone()));
+            } else if self.streams.is_empty() {
+                rows.push(Row::info("none", tr!("No streams found"), ""));
+            } else {
+                for (index, choice) in self.streams.iter().enumerate() {
+                    rows.push(
+                        Row::action(format!("stream:{index}"), choice.name.clone().unwrap_or_else(|| choice.addon.clone()))
+                            .desc(choice.description.clone().unwrap_or_default())
+                            .icon(Icon::PlayArrow),
+                    );
+                }
+            }
+            rows.push(Row::action("back", tr!("Back")).icon(Icon::ChevronLeft));
+        } else {
+            if !self.linked {
+                rows.push(Row::action("link", tr!("Link with a code")).icon(Icon::Add));
+            }
+            for (shelf_index, shelf) in self.shelves.iter().enumerate() {
+                if shelf.items.is_empty() {
+                    continue;
+                }
+                rows.push(Row::header(shelf.title.clone()));
+                for (item_index, item) in shelf.items.iter().enumerate() {
+                    rows.push(
+                        Row::action(format!("movie:{shelf_index}:{item_index}"), item.movie.name.clone())
+                            .desc(item.movie.year.clone().unwrap_or_default())
+                            .icon(Icon::PlayArrow),
+                    );
+                }
+            }
+        }
+        rows
+    }
+
+    pub(super) fn render_console(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
+        let rows = self.console_rows();
+        let mut column = div()
+            .relative()
+            .flex()
+            .flex_col()
+            .size_full()
+            .child(div().flex().flex_none().items_center().h(u(76.)).px(u(46.)).child(kit::title(tr!("Movies"), 30.)));
+        if let Some(offer) = &self.link {
+            let mut qr = div().flex().items_center().gap(u(18.)).px(u(46.)).pb(u(12.));
+            if let Some(code) = crate::ui::qr::qr_code(&offer.link, 6.0) {
+                qr = qr.child(code);
+            }
+            qr = qr.child(
+                div().flex().flex_col().gap(u(6.)).child(kit::title(tr!("Code {code}", code = offer.code.clone()), 22.)).child(
+                    div()
+                        .text_size(u(14.))
+                        .text_color(theme::text_muted())
+                        .child(tr!("Scan the code with the Stremio app, or open {link}", link = offer.link.clone())),
+                ),
+            );
+            column = column.child(qr);
+        }
+        column =
+            column.child(div().flex_1().min_h_0().px(u(46.)).pb(u(16.)).child(self.console_list.render("console-movies", &rows, true)));
+        column.into_any_element()
     }
 }
 
 impl Render for MoviesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if crate::console::active() {
+            return self.render_console(window, cx);
+        }
         self.covers.drop_evicted(window);
         let column = match self.selected.clone() {
             Some(movie) => self.render_details(&movie, window, cx),
             None => self.render_home(window, cx),
         };
         sheet("page-movies", "", None, None, MAX_W, window, page_close(cx), column).into_any_element()
+    }
+}
+
+impl PadTarget for MoviesPage {
+    fn on_pad(&mut self, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if pad == Pad::B {
+            if self.selected.is_some() {
+                self.selected = None;
+                self.console_list.reset();
+                cx.notify();
+                return true;
+            }
+            return false;
+        }
+        let rows = self.console_rows();
+        match self.console_list.on_pad(pad, &rows) {
+            Outcome::Activate(id) => {
+                let id = id.to_string();
+                if id == "back" {
+                    self.selected = None;
+                    self.console_list.reset();
+                } else if id == "details" {
+                    if let Some(movie) = self.selected.clone() {
+                        self.open_details(&movie, cx);
+                    }
+                } else if id == "link" {
+                    self.start_link(cx);
+                } else if let Some((shelf, item)) = parse_pair(&id, "movie:") {
+                    if let Some(movie) = self.shelves.get(shelf).and_then(|s| s.items.get(item)).map(|item| item.movie.clone()) {
+                        self.open_movie(movie, cx);
+                    }
+                } else if let Some(index) = id.strip_prefix("stream:").and_then(|n| n.parse::<usize>().ok()) {
+                    if let Some(choice) = self.streams.get(index).cloned() {
+                        self.handoff_stream(&choice, cx);
+                    }
+                }
+                cx.notify();
+                true
+            }
+            Outcome::Ignored => false,
+            _ => {
+                cx.notify();
+                true
+            }
+        }
+    }
+
+    fn hints(&self, _: &App) -> Vec<Hint> {
+        vec![hint(Btn::A, tr!("Select")), hint(Btn::B, tr!("Back"))]
     }
 }
 
@@ -354,6 +605,13 @@ fn load(app: AppPaths) -> anyhow::Result<Loaded> {
     Ok(Loaded { linked, shelves })
 }
 
+fn load_streams(id: &str) -> anyhow::Result<Vec<StreamChoice>> {
+    let http = UreqTransport::new();
+    let mut addon = AddonClient::new(&http, TORRENTIO)?;
+    addon.manifest()?;
+    addon.stream("movie", id)
+}
+
 fn movie_item(item: &LibraryItem) -> MovieItem {
     MovieItem { id: item.id.clone(), kind: item.kind.clone(), name: item.name.clone(), poster: item.poster.clone(), ..MovieItem::default() }
 }
@@ -365,4 +623,32 @@ fn progress_bar(progress: f32) -> Div {
         .rounded_full()
         .bg(theme::ink_a(0.12))
         .child(div().h_full().rounded_full().bg(theme::accent()).w(px(COVER_W * progress.clamp(0., 1.))))
+}
+
+fn stream_meta(choice: &StreamChoice) -> String {
+    let mut parts = Vec::new();
+    if let Some(seeders) = choice.seeders {
+        parts.push(format!("👤 {seeders}"));
+    }
+    if let Some(size) = choice.size_bytes {
+        parts.push(size_text(size));
+    }
+    parts.join(" \u{b7} ")
+}
+
+fn size_text(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes / GIB)
+    } else {
+        format!("{:.0} MiB", bytes / MIB)
+    }
+}
+
+fn parse_pair(id: &str, prefix: &str) -> Option<(usize, usize)> {
+    let rest = id.strip_prefix(prefix)?;
+    let (shelf, item) = rest.split_once(':')?;
+    Some((shelf.parse().ok()?, item.parse().ok()?))
 }

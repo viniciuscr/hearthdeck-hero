@@ -706,6 +706,7 @@ impl CollectionView {
             Page::Movies => {
                 let v = cx.new(|cx| pages::movies::MoviesPage::new(ctx, window, cx));
                 self.pages.subs.push(cx.subscribe_in(&v, window, Self::on_page_event));
+                self.pages.hooks.insert(Page::Movies, crate::console::PadHook::new(&v));
                 self.pages.movies = Some(v.into());
             }
             Page::Statistics => {
