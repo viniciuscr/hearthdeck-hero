@@ -13,6 +13,7 @@ pub mod downloads;
 pub mod emulators;
 pub mod epic;
 pub mod methods;
+pub mod movies;
 pub mod settings;
 pub mod side_nav;
 pub mod stats;
@@ -35,6 +36,8 @@ use crate::ui::{glass, icon};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Page {
     Collection,
+    /// Stremio-backed films (crate `heronite-movies`).
+    Movies,
     Downloads,
     WineManager,
     Epic,
@@ -61,6 +64,7 @@ impl Page {
     pub fn title(self) -> &'static str {
         match self {
             Page::Collection => tr!("Collection"),
+            Page::Movies => tr!("Movies"),
             Page::Downloads => tr!("Downloads"),
             Page::WineManager => tr!("Wine Manager"),
             Page::Epic => tr!("Epic Games"),
@@ -82,6 +86,7 @@ impl Page {
     pub fn icon(self) -> Icon {
         match self {
             Page::Collection => Icon::GridView,
+            Page::Movies => Icon::Videocam,
             Page::Downloads => Icon::Download,
             Page::WineManager => Icon::WineBar,
             Page::Epic => Icon::BrandEpicGames,
@@ -104,6 +109,7 @@ impl Page {
         use heronite_platform::{supported, Feature};
         match self {
             Page::Collection | Page::Statistics | Page::Settings | Page::Steam => true,
+            Page::Movies => heronite_movies::available(),
             Page::Downloads => heronite_platform::features::any_store(),
             Page::Epic => supported(Feature::EpicStore),
             Page::Gog => supported(Feature::GogStore),
@@ -130,6 +136,7 @@ impl Page {
     pub fn from_debug(s: &str) -> Option<Page> {
         match s {
             "collection" => Some(Page::Collection),
+            "movies" => Some(Page::Movies),
             "downloads" => Some(Page::Downloads),
             "wine" => Some(Page::WineManager),
             "epic" => Some(Page::Epic),

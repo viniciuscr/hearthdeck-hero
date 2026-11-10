@@ -220,6 +220,7 @@ fn page_name_en(p: Page) -> &'static str {
         Page::Rockstar => "rockstar games",
         Page::Emulators => "emulators",
         Page::Statistics => "statistics",
+        Page::Movies => "movies",
         Page::Settings => "settings",
     }
 }

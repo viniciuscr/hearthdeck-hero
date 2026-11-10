@@ -1,0 +1,16 @@
+{
+  "Check": "Comprobar",
+  "Code {code}": "Código {code}",
+  "Continue watching": "Seguir viendo",
+  "Could not load the movies": "No se pudieron cargar las películas",
+  "Link with a code": "Conectar con un código",
+  "Linked": "Conectado",
+  "Movies": "Películas",
+  "No movies to show yet.": "Aún no hay películas.",
+  "Not linked": "No conectado",
+  "Not linked yet": "Aún no conectado",
+  "Popular": "Populares",
+  "Scan the code with the Stremio app, or open {link}": "Escanea el código con la app de Stremio o abre {link}",
+  "Stremio account": "Cuenta de Stremio",
+  "Unlink": "Desconectar"
+}

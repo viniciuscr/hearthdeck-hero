@@ -33,6 +33,7 @@ pub struct Pages {
     rockstar: Option<AnyView>,
     emulators: Option<AnyView>,
     stats: Option<AnyView>,
+    movies: Option<AnyView>,
     settings: Option<AnyView>,
     subs: Vec<Subscription>,
     meta: NavMeta,
@@ -341,6 +342,7 @@ impl CollectionView {
                         None => Trailing::Meta(tr!("Idle").to_string(), false),
                     },
                     Page::Statistics => Trailing::Meta(meta.month.clone().unwrap_or_else(pending), false),
+                    Page::Movies => Trailing::None,
                     Page::Epic
                     | Page::Gog
                     | Page::Amazon
@@ -362,10 +364,12 @@ impl CollectionView {
                 // runs them. The stores are one "Stores" row (their pages
                 // list each other).
                 let stores = this.pages.stores_page();
-                for (i, group) in
-                    [&[Page::Collection, Page::Downloads, Page::Statistics][..], &[stores, Page::Emulators, Page::WineManager][..]]
-                        .into_iter()
-                        .enumerate()
+                for (i, group) in [
+                    &[Page::Collection, Page::Movies, Page::Downloads, Page::Statistics][..],
+                    &[stores, Page::Emulators, Page::WineManager][..],
+                ]
+                .into_iter()
+                .enumerate()
                 {
                     if i > 0 {
                         p = p.child(menu_separator());
@@ -523,6 +527,11 @@ impl CollectionView {
                     v.update(cx, |p, _| p.hidden(window));
                 }
             }
+            Page::Movies => {
+                if let Some(v) = p.movies.clone().and_then(|v| v.downcast::<pages::movies::MoviesPage>().ok()) {
+                    v.update(cx, |p, _| p.hidden(window));
+                }
+            }
             Page::Settings => {
                 if let Some(v) = p.settings.clone().and_then(|v| v.downcast::<pages::settings::SettingsPage>().ok()) {
                     v.update(cx, |p, _| p.hidden(window));
@@ -563,6 +572,11 @@ impl CollectionView {
             Page::Ea => set_client_shown::<pages::clients::EaKind>(&p.ea, true, cx),
             Page::Ubisoft => set_client_shown::<pages::clients::UbisoftKind>(&p.ubisoft, true, cx),
             Page::Rockstar => set_client_shown::<pages::clients::RockstarKind>(&p.rockstar, true, cx),
+            Page::Movies => {
+                if let Some(v) = p.movies.clone().and_then(|v| v.downcast::<pages::movies::MoviesPage>().ok()) {
+                    v.update(cx, |p, cx| p.set_shown(true, cx));
+                }
+            }
             _ => {}
         }
     }
@@ -609,6 +623,7 @@ impl CollectionView {
             Page::Rockstar => self.pages.rockstar.is_none(),
             Page::Emulators => self.pages.emulators.is_none(),
             Page::Statistics => self.pages.stats.is_none(),
+            Page::Movies => self.pages.movies.is_none(),
             Page::Settings => self.pages.settings.is_none(),
         };
         if !slot_empty {
@@ -688,6 +703,11 @@ impl CollectionView {
                 self.pages.hooks.insert(Page::Emulators, crate::console::PadHook::new(&v));
                 self.pages.emulators = Some(v.into());
             }
+            Page::Movies => {
+                let v = cx.new(|cx| pages::movies::MoviesPage::new(ctx, window, cx));
+                self.pages.subs.push(cx.subscribe_in(&v, window, Self::on_page_event));
+                self.pages.movies = Some(v.into());
+            }
             Page::Statistics => {
                 let v = cx.new(|cx| pages::stats::StatsPage::new(ctx, window, cx));
                 self.pages.subs.push(cx.subscribe_in(&v, window, Self::on_page_event));
@@ -748,6 +768,7 @@ impl CollectionView {
         let p = &self.pages;
         match page {
             Page::Collection => {}
+            Page::Movies => {}
             Page::Downloads => run::<pages::downloads::DownloadsPage>(&p.downloads, id, window, cx),
             Page::WineManager => run::<pages::wine_manager::WineManagerPage>(&p.wine, id, window, cx),
             Page::Epic => run::<pages::epic::EpicPage>(&p.epic, id, window, cx),
@@ -775,6 +796,7 @@ impl CollectionView {
         let p = &self.pages;
         match self.page {
             Page::Collection => false,
+            Page::Movies => false,
             Page::Downloads => modal::<pages::downloads::DownloadsPage>(&p.downloads, cx),
             Page::WineManager => modal::<pages::wine_manager::WineManagerPage>(&p.wine, cx),
             Page::Epic => modal::<pages::epic::EpicPage>(&p.epic, cx),
@@ -832,6 +854,7 @@ impl CollectionView {
         let p = &self.pages;
         let closed = match self.page {
             Page::Collection => return,
+            Page::Movies => false,
             Page::Downloads => close::<pages::downloads::DownloadsPage>(&p.downloads, window, cx),
             Page::WineManager => close::<pages::wine_manager::WineManagerPage>(&p.wine, window, cx),
             Page::Epic => close::<pages::epic::EpicPage>(&p.epic, window, cx),
@@ -952,6 +975,7 @@ impl CollectionView {
     pub(super) fn render_page_view(&self) -> Option<AnyElement> {
         let view = match self.page {
             Page::Collection => return None,
+            Page::Movies => self.pages.movies.clone(),
             Page::Downloads => self.pages.downloads.clone(),
             Page::WineManager => self.pages.wine.clone(),
             Page::Epic => self.pages.epic.clone(),
@@ -974,6 +998,7 @@ impl CollectionView {
     pub(super) fn render_page(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let view = match self.page {
             Page::Collection => return None,
+            Page::Movies => self.pages.movies.clone(),
             Page::Downloads => self.pages.downloads.clone(),
             Page::WineManager => self.pages.wine.clone(),
             Page::Epic => self.pages.epic.clone(),

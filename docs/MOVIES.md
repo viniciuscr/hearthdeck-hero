@@ -280,7 +280,7 @@ Envelope, source `stremio-core`:
 
 | ID | Files | Deviation | Status |
 |---|---|---|---|
-| F-006 | `app/src/pages/mod.rs`, `app/src/collection/nav.rs`, `app/src/collection/console/mod.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/palette/*` | `Page::Movies` variant, console `Screen` route, sidebar/palette entries (closed enums; one arm each) | pending |
+| F-006 | `app/src/pages/mod.rs`, `app/src/collection/nav.rs`, `app/src/collection/palette/*` | `Page::Movies`, nav and palette arms (one arm each); console route in Phase 4 | active |
 
 ## Phase 0 probe checklist
 
