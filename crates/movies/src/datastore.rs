@@ -4,7 +4,7 @@
 //! document is replaced whole, so every write reads first and merges into the
 //! full item (see `docs/MOVIES.md`).
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -162,6 +162,33 @@ pub fn progress_changes(client: &DatastoreClient<'_>, progress: &MovieProgress) 
     };
     merge_progress(&mut item, progress, now);
     Ok(vec![item])
+}
+
+/// Reads, merges and writes one record. On failure the caller keeps the local
+/// progress and retries later; nothing is deleted or partially updated.
+pub fn write_progress(client: &DatastoreClient<'_>, progress: &MovieProgress) -> Result<LibraryItem> {
+    let changes = progress_changes(client, progress)?;
+    client.put(&changes)?;
+    changes.into_iter().next().ok_or_else(|| anyhow!("progress produced no change"))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Probe {
+    /// Nothing in the library; there is no record to send unchanged.
+    Empty,
+    /// The full record was accepted by `datastorePut` unchanged.
+    Verified { items: usize },
+}
+
+/// Proves the write envelope by sending the first existing record unchanged.
+/// Do this once before the first real progress write (docs/MOVIES.md).
+pub fn probe_put(client: &DatastoreClient<'_>) -> Result<Probe> {
+    let items = client.get_all()?;
+    let Some(first) = items.first() else {
+        return Ok(Probe::Empty);
+    };
+    client.put(std::slice::from_ref(first))?;
+    Ok(Probe::Verified { items: 1 })
 }
 
 #[cfg(test)]

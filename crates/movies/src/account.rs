@@ -3,11 +3,12 @@
 //! The code is single-use and short-lived. Neither the code nor the resulting
 //! key is ever put in an error or a log line.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
 use url::Url;
 
+use crate::addon::Manifest;
 use crate::auth::AuthKey;
 use crate::http::Transport;
 
@@ -57,6 +58,37 @@ pub fn read_link(http: &dyn Transport, link_base: &Url, code: &str) -> Result<Li
         Some(key) if !key.is_empty() => Ok(LinkPoll::Linked(AuthKey::new(key))),
         _ => Ok(LinkPoll::Pending),
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonDescriptor {
+    pub transport_url: String,
+    pub manifest: Manifest,
+}
+
+impl AddonDescriptor {
+    pub fn serves(&self, resource: &str) -> bool {
+        self.manifest.has_resource(resource)
+    }
+}
+
+/// The addons installed on the linked account. The stream resource is what
+/// playback asks; catalogs still come from Cinemeta.
+pub fn addon_collection(http: &dyn Transport, api: &Url, key: &AuthKey) -> Result<Vec<AddonDescriptor>> {
+    let url = api.join("addonCollectionGet")?;
+    let body = serde_json::json!({"authKey": key, "update": false});
+    let bytes = http.post_json(&url, &body)?;
+    let value: Value = serde_json::from_slice(&bytes).context("addonCollectionGet answered non-JSON")?;
+    if let Some(error) = value.get("error") {
+        bail!("Stremio addonCollectionGet: {}", error_text(error));
+    }
+    let result = value.get("result").ok_or_else(|| anyhow!("addonCollectionGet answered without a result"))?;
+    serde_json::from_value(result.clone()).context("addon collection")
+}
+
+fn error_text(error: &Value) -> String {
+    error.get("message").and_then(Value::as_str).unwrap_or("request failed").to_owned()
 }
 
 #[cfg(test)]

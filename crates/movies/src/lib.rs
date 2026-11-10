@@ -10,6 +10,7 @@ pub mod datastore;
 pub mod endpoints;
 pub mod http;
 pub mod player;
+pub mod progress;
 pub mod store;
 pub mod streaming;
 pub mod types;

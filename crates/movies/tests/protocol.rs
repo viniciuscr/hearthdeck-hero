@@ -7,11 +7,12 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use url::Url;
 
-use heronite_movies::account::{create_link, read_link, LinkPoll};
+use heronite_movies::account::{addon_collection, create_link, read_link, LinkPoll};
 use heronite_movies::addon::AddonClient;
-use heronite_movies::datastore::{continue_watching, DatastoreClient};
+use heronite_movies::datastore::{continue_watching, probe_put, write_progress, DatastoreClient, Probe};
 use heronite_movies::endpoints::Endpoints;
 use heronite_movies::streaming::StreamingServer;
+use heronite_movies::types::MovieProgress;
 use heronite_movies::{AuthKey, Transport};
 
 const HASH: &str = "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c";
@@ -52,7 +53,9 @@ impl Transport for Fake {
 
     fn post_json(&self, url: &Url, body: &Value) -> Result<Vec<u8>> {
         self.calls.lock().unwrap().push((url.path().to_owned(), Some(body.clone())));
-        if url.path().ends_with("datastorePut") {
+        if url.path().ends_with("addonCollectionGet") {
+            Ok(include_str!("fixtures/addon_collection.json").as_bytes().to_vec())
+        } else if url.path().ends_with("datastorePut") {
             Ok(br#"{"result":{"success":true}}"#.to_vec())
         } else {
             Ok(include_str!("fixtures/datastore.json").as_bytes().to_vec())
@@ -118,4 +121,36 @@ fn the_streaming_server_creates_a_torrent_and_builds_the_stream_url() {
     assert_eq!(fake.body("/create")["torrent"]["infoHash"], HASH);
     let url = StreamingServer::stream_url(&Url::parse("http://127.0.0.1:11470/").unwrap(), HASH, Some(1)).unwrap();
     assert_eq!(url.as_str(), format!("http://127.0.0.1:11470/{HASH}/1"));
+}
+
+#[test]
+fn the_account_addon_collection_keeps_stream_addons() {
+    let fake = Fake::new();
+    let endpoints = Endpoints::default();
+    let addons = addon_collection(&fake, &endpoints.api, &AuthKey::new("test-session-key")).unwrap();
+    assert_eq!(addons.len(), 1);
+    assert!(addons[0].serves("stream"));
+    assert_eq!(addons[0].transport_url, "https://torrentio.strem.fun/manifest.json");
+}
+
+#[test]
+fn progress_writes_the_full_record_and_the_probe_is_a_no_op() {
+    let fake = Fake::new();
+    let endpoints = Endpoints::default();
+    let client = DatastoreClient::new(&fake, &endpoints, AuthKey::new("test-session-key"));
+    let progress = MovieProgress {
+        id: "tt26657236".into(),
+        position_ms: 100,
+        duration_ms: 200,
+        updated_at: chrono::Utc::now(),
+        finished: false,
+        video_id: None,
+    };
+    let item = write_progress(&client, &progress).unwrap();
+    assert_eq!(item.id, "tt26657236");
+    assert_eq!(item.state.time_offset, 100);
+    let body = fake.body("datastorePut");
+    assert_eq!(body["changes"][0]["futureTop"], true);
+    assert_eq!(body["changes"][0]["state"]["timeOffset"], 100);
+    assert_eq!(probe_put(&client).unwrap(), Probe::Verified { items: 1 });
 }
