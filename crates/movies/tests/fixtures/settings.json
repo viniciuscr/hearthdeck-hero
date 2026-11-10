@@ -1,0 +1,13 @@
+{
+  "baseUrl": "http://127.0.0.1:11470/",
+  "values": {
+    "serverVersion": "0.1.21",
+    "cacheRoot": "/tmp/stremio-cache",
+    "btMaxConnections": 55,
+    "btHandshakeTimeout": 5000,
+    "btRequestTimeout": 5000,
+    "btDownloadSpeedSoftLimit": 0,
+    "btDownloadSpeedHardLimit": 0,
+    "btMinPeersForStable": 5
+  }
+}

@@ -306,3 +306,13 @@ Envelope, source `stremio-core`:
 - **P3:** `Page::Movies` desktop page, loader, locales, account surface; gate green.
 - **P4:** console route, picker, handoff; controller ownership verified.
 - **P5:** native mpv, streaming server, gamepad modes; hardware checklist green.
+
+## Probe log
+
+- **2026-11-10, CachyOS (the TV machine).** `mpv` and Stremio are not
+  installed; `/opt`, `PATH` and the Flatpak list have neither. Phase 0 probes
+  are blocked until they are installed. Phase 1 proceeded because every test
+  uses fixtures and a fake transport, never the network. Re-run the probe
+  checklist above after installing the Stremio desktop app (or Stremio
+  Service) and `mpv`.
+

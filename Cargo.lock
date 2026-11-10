@@ -3888,6 +3888,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "heronite-movies"
+version = "1.5.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "heronite-data",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "heronite-overlay"
 version = "1.5.0"
 dependencies = [
@@ -8958,6 +8973,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

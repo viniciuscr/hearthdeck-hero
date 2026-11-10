@@ -1,0 +1,29 @@
+{
+  "result": [
+    {
+      "_id": "tt26657236",
+      "name": "Backrooms",
+      "type": "movie",
+      "poster": "https://images.metahub.space/poster/small/tt26657236/img",
+      "posterShape": "poster",
+      "removed": true,
+      "temp": true,
+      "_ctime": "2026-09-01T00:00:00Z",
+      "_mtime": "2026-09-28T18:26:29.322320491Z",
+      "futureTop": true,
+      "state": {
+        "lastWatched": "2026-09-09T19:49:06.859Z",
+        "timeWatched": 0,
+        "timeOffset": 2271644,
+        "overallTimeWatched": 0,
+        "timesWatched": 0,
+        "flaggedWatched": 0,
+        "duration": 6628768,
+        "video_id": "tt26657236",
+        "watched": "",
+        "noNotif": false,
+        "futureState": 7
+      }
+    }
+  ]
+}

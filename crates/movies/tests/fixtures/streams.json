@@ -1,0 +1,13 @@
+{
+  "streams": [
+    {
+      "name": "Torrentio",
+      "title": "1080p\n👤 123 💾 1.5 GB",
+      "infoHash": "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "filename": "film.mkv"
+      }
+    }
+  ]
+}

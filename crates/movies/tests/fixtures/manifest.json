@@ -1,0 +1,9 @@
+{
+  "id": "community.torrentio",
+  "name": "Torrentio",
+  "description": "Torrent streams",
+  "resources": ["stream"],
+  "types": ["movie"],
+  "idPrefixes": ["tt"],
+  "catalogs": []
+}
