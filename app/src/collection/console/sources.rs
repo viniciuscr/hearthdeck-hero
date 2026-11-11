@@ -179,6 +179,7 @@ impl CollectionView {
             "status" => status_is(lib, g, value),
             "category" => self.categories.contains(value, &g.runner, &g.app_name),
             "type" => watch_kind(g) == value,
+            "genre" => g.metadata.as_ref().is_some_and(|metadata| metadata.genres.iter().any(|genre| genre.eq_ignore_ascii_case(value))),
             "store" => g.source_label == value,
             "platform" => self.organize().platform(g) == value,
             _ => true,

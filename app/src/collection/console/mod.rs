@@ -184,6 +184,14 @@ impl CollectionView {
         self.switch_console(on, true, window, cx);
     }
 
+    /// Drops the console tab/filter state that belonged to the previous space.
+    pub(super) fn reset_space_state(&mut self) {
+        self.console.tab_navs.clear();
+        self.console.filters = None;
+        self.console.results = false;
+        self.console.search.clear();
+    }
+
     /// [`set_console`](Self::set_console); `go_fullscreen`: entering switches
     /// the window to fullscreen when console mode asks for it (`false`: it
     /// was opened that way).

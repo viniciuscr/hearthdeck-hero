@@ -78,6 +78,11 @@ impl CollectionView {
             primary = primary.desc(step.label());
         }
         let mut rows = vec![primary];
+        // Watch titles have no install, status, saves, settings, playtime or
+        // manage rows: they open in the provider from the single Play action.
+        if !self.space.capabilities().install {
+            return rows;
+        }
         // The actions the user added; one that plays waits for the game to end.
         for a in self.actions_of(&g.key) {
             if a.plays() && playing {
@@ -467,7 +472,13 @@ impl CollectionView {
             }
             Outcome::Activate(id) if id.starts_with("ua:") => self.run_user_action(key, &id["ua:".len()..], cx),
             Outcome::Activate(id) => match id.as_ref() {
-                "primary" => self.install_or_play(key, window, cx),
+                "primary" => {
+                    if self.space.capabilities().install {
+                        self.install_or_play(key, window, cx);
+                    } else {
+                        self.primary_action_on(&g, cx);
+                    }
+                }
                 "x:manual-install" => self.open_manual_install(key, window, cx),
                 "x:ludusavi" => self.open_ludusavi_backup(key, cx),
                 "x:steam-uninstall" => self.open_steam_uninstall(key, window, cx),

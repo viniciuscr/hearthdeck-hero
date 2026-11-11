@@ -316,6 +316,7 @@ impl CollectionView {
         self.selected = None;
         self.focus = None;
         self.console.screen = console::Screen::Tabs;
+        self.reset_space_state();
         self.images.clear_failed();
         self.reload(cx);
         cx.notify();

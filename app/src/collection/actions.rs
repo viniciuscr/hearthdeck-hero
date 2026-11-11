@@ -238,7 +238,7 @@ impl CollectionView {
     /// client's or an Xbox game opens what installs it.
     pub(super) fn primary_action_on(&mut self, game: &heronite_data::collection::Game, cx: &mut Context<Self>) {
         let key = game.key.as_str();
-        if game.runner == "stremio" {
+        if !self.space.capabilities().install {
             self.open_stremio(game, cx);
             return;
         }

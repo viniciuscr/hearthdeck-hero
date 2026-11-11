@@ -52,6 +52,11 @@ fn current_space() -> Space {
     }
 }
 
+/// The space whose console prefs are active (Settings uses it).
+pub fn active_space() -> Space {
+    current_space()
+}
+
 fn watch_path(app: &AppPaths) -> PathBuf {
     app.config.join("console-watch.json")
 }
@@ -197,6 +202,9 @@ pub fn apply(app: &AppPaths, theme: ConsoleTheme, based_on: Option<&str>) -> Con
 
 /// Forgets the copies in memory (console mode ended and Settings is closed).
 pub fn forget() {
+    // Desktop Settings after console mode must edit the Games theme; the
+    // Watch page selects its space explicitly with `prefs_for`.
+    SPACE.store(GAMES, Ordering::Relaxed);
     *PREFS.lock().unwrap_or_else(|e| e.into_inner()) = [None, None];
 }
 
