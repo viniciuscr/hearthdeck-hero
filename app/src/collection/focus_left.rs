@@ -51,17 +51,24 @@ impl CollectionView {
             }])
             .children(cover.map(|src| img(src).size_full().rounded(px(12.)).object_fit(ObjectFit::Cover)));
 
-        let controls = div()
-            .flex()
-            .flex_col()
-            .gap(px(10.))
-            .min_w_0()
-            .child(self.play_area(vm, epic, cx))
-            .child(self.focus_status_row(vm, vh, cx))
-            .children(self.left_off_card(&vm.key, cx))
-            .child(self.rating_row(&vm.key, cx))
-            .child(self.facts_card(vm, cx))
-            .children(self.copies_card(&vm.key, cx));
+        let controls = div().flex().flex_col().gap(px(10.)).min_w_0();
+        let caps = self.space.capabilities();
+        let mut controls = controls.child(self.play_area(vm, epic, cx));
+        if caps.status {
+            controls = controls.child(self.focus_status_row(vm, vh, cx));
+        }
+        if caps.offers {
+            controls = controls.children(self.left_off_card(&vm.key, cx));
+        }
+        if caps.rating {
+            controls = controls.child(self.rating_row(&vm.key, cx));
+        }
+        if caps.facts {
+            controls = controls.child(self.facts_card(vm, cx));
+        }
+        if caps.copies {
+            controls = controls.children(self.copies_card(&vm.key, cx));
+        }
 
         if lay.narrow {
             return div().flex().items_start().gap(px(20.)).child(cover).child(controls.flex_1().max_w(px(380.))).into_any_element();
@@ -81,14 +88,17 @@ impl CollectionView {
         };
         let (label, ic) = if vm.playing {
             (tr!("Stop"), Icon::Stop)
-        } else if vm.installed {
+        } else if vm.installed || !self.space.capabilities().install {
             (tr!("Play"), Icon::PlayArrow)
         } else {
             (tr!("Install"), Icon::Download)
         };
+        let caps = self.space.capabilities();
         let key = vm.key.clone();
         // The way to start Play uses, when it is not the default.
-        let option = (vm.installed && !vm.playing).then(|| self.facts.launch_current.as_ref().map(|o| o.label().to_string())).flatten();
+        let option = (caps.install && vm.installed && !vm.playing)
+            .then(|| self.facts.launch_current.as_ref().map(|o| o.label().to_string()))
+            .flatten();
         let play = (!hide_play).then(|| {
             div()
                 .id("focus-play")
@@ -124,7 +134,7 @@ impl CollectionView {
                 }))
         });
         // Installed, with other ways to start or actions: an arrow with them.
-        let more = if vm.installed && !vm.playing { self.launch_more_button(&vm.key, cx) } else { None };
+        let more = if caps.install && vm.installed && !vm.playing { self.launch_more_button(&vm.key, cx) } else { None };
         let play = match (play, more) {
             (Some(play), Some(more)) => {
                 let row = div()

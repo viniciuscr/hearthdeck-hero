@@ -128,6 +128,38 @@ pub enum Space {
     Watch,
 }
 
+/// What a space offers in a game page and its action menus. The theme decides
+/// how it looks; these decide which code-generated actions exist at all.
+#[derive(Clone, Copy, Debug)]
+pub struct SpaceCapabilities {
+    pub install: bool,
+    pub status: bool,
+    pub offers: bool,
+    pub rating: bool,
+    pub facts: bool,
+    pub copies: bool,
+    pub manage: bool,
+}
+
+impl Space {
+    pub fn capabilities(self) -> SpaceCapabilities {
+        match self {
+            Space::Games => {
+                SpaceCapabilities { install: true, status: true, offers: true, rating: true, facts: true, copies: true, manage: true }
+            }
+            Space::Watch => SpaceCapabilities {
+                install: false,
+                status: false,
+                offers: false,
+                rating: false,
+                facts: false,
+                copies: false,
+                manage: false,
+            },
+        }
+    }
+}
+
 pub struct CollectionView {
     started: Instant,
     first_frame_logged: bool,

@@ -99,7 +99,9 @@ impl CollectionView {
         if !self.game_notes(key, 1).is_empty() {
             tabs.push(Tab::Journal);
         }
-        tabs.push(Tab::Manage);
+        if self.space.capabilities().manage {
+            tabs.push(Tab::Manage);
+        }
         tabs
     }
 

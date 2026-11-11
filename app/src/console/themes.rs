@@ -20,6 +20,7 @@ use heronite_data::json_store;
 use heronite_data::paths::AppPaths;
 
 use crate::collection::Space;
+use crate::console::space_theme::project;
 use crate::console::watch_theme::watch_theme;
 
 const GAMES: u8 = 0;
@@ -57,7 +58,11 @@ fn watch_path(app: &AppPaths) -> PathBuf {
 
 fn load(app: &AppPaths, space: Space) -> ConsolePrefs {
     match space {
-        Space::Games => ConsolePrefs::load(app),
+        Space::Games => {
+            let mut prefs = ConsolePrefs::load(app);
+            prefs.theme = project(prefs.theme, Space::Games);
+            prefs
+        }
         Space::Watch => {
             let path = watch_path(app);
             let saved = match json_store::read_value(&path) {
@@ -78,7 +83,7 @@ fn load(app: &AppPaths, space: Space) -> ConsolePrefs {
                     prefs
                 }
             };
-            prefs.theme = prefs.theme.normalized();
+            prefs.theme = project(prefs.theme.normalized(), Space::Watch);
             prefs
         }
     }
@@ -170,7 +175,7 @@ pub fn update_for(app: &AppPaths, space: Space, change: impl FnOnce(&mut Console
         let mut cur = PREFS.lock().unwrap_or_else(|e| e.into_inner());
         let p = cur[index(space)].get_or_insert_with(|| load(app, space));
         change(p);
-        p.theme = std::mem::take(&mut p.theme).normalized();
+        p.theme = project(std::mem::take(&mut p.theme).normalized(), space);
         p.clone()
     };
     if space == current_space() && super::active() {

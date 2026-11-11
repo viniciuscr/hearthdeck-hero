@@ -102,9 +102,21 @@ impl Item {
 /// next to another.
 pub(super) fn items() -> Vec<Item> {
     let theme = crate::console::look::theme();
+    // The space switcher is shell-level, not theme data: Collection and Watch
+    // stay at the top of every theme.
     let mut out: Vec<Item> = Vec::new();
+    if Page::Collection.available() {
+        out.push(Item::Go(Page::Collection));
+    }
+    if heronite_watch::available() {
+        out.push(Item::Space(Space::Watch));
+    }
     for spec in &theme.menu.items {
         let Some(item) = Item::parse(&spec.item) else { continue };
+        // Space items are prepended above; a theme cannot own or duplicate them.
+        if matches!(item, Item::Space(_)) || item == Item::Go(Page::Collection) {
+            continue;
+        }
         let available = match item {
             Item::Go(page) => page.available(),
             Item::Space(_) => true,
@@ -127,12 +139,6 @@ pub(super) fn items() -> Vec<Item> {
     }
     while out.last() == Some(&Item::Separator) {
         out.pop();
-    }
-    if !out.contains(&Item::Space(Space::Watch)) {
-        if out.last() == Some(&Item::Separator) {
-            out.pop();
-        }
-        out.push(Item::Space(Space::Watch));
     }
     out
 }

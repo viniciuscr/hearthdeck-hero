@@ -152,6 +152,9 @@ pub(super) fn place_flyout(fly: Div, left: bool) -> Div {
 
 impl CollectionView {
     pub(super) fn open_context_menu(&mut self, key: SharedString, position: Point<Pixels>, cx: &mut Context<Self>) {
+        if !self.space.capabilities().install {
+            return;
+        }
         let batch = self.sel.contains(&key);
         self.sel.pop = None;
         self.context_menu = Some(ContextMenuState { key, position, open: None, batch });
