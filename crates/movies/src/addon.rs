@@ -83,6 +83,7 @@ impl MetaPreview {
             runtime: self.runtime,
             genres: self.genres,
             addon: addon.to_owned(),
+            ..MovieItem::default()
         }
     }
 }

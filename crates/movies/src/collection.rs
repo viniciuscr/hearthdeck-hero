@@ -54,7 +54,10 @@ pub fn fetch(app: &AppPaths) -> Result<Vec<MovieItem>> {
     }
     let mut addon = AddonClient::new(&http, CINEMETA)?;
     addon.manifest()?;
-    movies.extend(addon.catalog("movie", "top", &[])?);
+    movies.extend(addon.catalog("movie", "top", &[])?.into_iter().map(|mut movie| {
+        movie.top = true;
+        movie
+    }));
     let mut seen = HashSet::new();
     movies.retain(|movie| seen.insert(movie.id.clone()));
     Ok(movies)
@@ -78,11 +81,35 @@ pub fn write_root(root: &Path, movies: &[MovieItem]) -> Result<()> {
     json_store::write(&paths.local_meta(), &json!({"games": local}))?;
     json_store::write(&paths.metadata(), &json!({"games": metadata}))?;
     json_store::write(&paths.art(), &json!({"games": art}))?;
+
+    // `store/timestamp.json` makes "Continue playing"/"Continue watching"
+    // read Stremio's real timestamps instead of an empty list.
+    let mut timestamps = Map::new();
+    for movie in movies {
+        if movie.last_watched.is_some() || movie.minutes_played > 0.0 {
+            timestamps.insert(
+                movie.id.clone(),
+                json!({
+                    "lastPlayed": &movie.last_watched,
+                    "totalPlayed": movie.minutes_played,
+                }),
+            );
+        }
+    }
+    json_store::write(&paths.timestamps(), &Value::Object(timestamps))?;
     Ok(())
 }
 
 fn movie_from_library(item: &crate::datastore::LibraryItem) -> MovieItem {
-    MovieItem { id: item.id.clone(), kind: item.kind.clone(), name: item.name.clone(), poster: item.poster.clone(), ..MovieItem::default() }
+    MovieItem {
+        id: item.id.clone(),
+        kind: item.kind.clone(),
+        name: item.name.clone(),
+        poster: item.poster.clone(),
+        last_watched: item.state.last_watched.map(|date| date.to_rfc3339()),
+        minutes_played: item.state.time_watched as f64 / 60_000.0,
+        ..MovieItem::default()
+    }
 }
 
 fn game_json(movie: &MovieItem) -> Value {
@@ -99,7 +126,7 @@ fn game_json(movie: &MovieItem) -> Value {
         "description": &movie.description,
         "is_installed": true,
         "install": {"platform": "movie"},
-        "extra": {"stremioType": kind},
+        "extra": {"stremioType": kind, "stremioTop": movie.top},
     })
 }
 

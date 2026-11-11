@@ -34,6 +34,15 @@ pub struct MovieItem {
     pub runtime: Option<Value>,
     #[serde(default)]
     pub genres: Vec<String>,
+    /// Cinemeta's Top catalog membership, for the “Top movies” rail.
+    #[serde(default)]
+    pub top: bool,
+    /// Stremio's last watch, for the “Continue watching” rail.
+    #[serde(default)]
+    pub last_watched: Option<String>,
+    /// Stremio's watched minutes (`timeWatched`).
+    #[serde(default)]
+    pub minutes_played: f64,
     /// The addon that supplied it, for provenance and error messages.
     #[serde(default)]
     pub addon: String,

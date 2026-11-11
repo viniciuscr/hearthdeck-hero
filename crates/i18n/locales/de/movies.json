@@ -1,4 +1,7 @@
 {
+  "Continue watching": "Weiterschauen",
   "Could not open Stremio: {error}": "Stremio konnte nicht geöffnet werden: {error}",
-  "Movies": "Filme"
+  "From the catalog": "Aus dem Katalog",
+  "Movies": "Filme",
+  "Top movies": "Top-Filme"
 }

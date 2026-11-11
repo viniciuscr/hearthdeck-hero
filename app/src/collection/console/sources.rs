@@ -228,6 +228,9 @@ impl CollectionView {
         let (k, value) = kind.split_once(':').unwrap_or((kind, ""));
         let pick = |f: &dyn Fn(&CollectionGame) -> bool| games.iter().copied().filter(|g| f(g)).collect::<Vec<_>>();
         match k {
+            "provider" if value == "top" => pick(&|g: &CollectionGame| {
+                g.game.extra.as_ref().and_then(|extra| extra.get("stremioTop")).and_then(serde_json::Value::as_bool).unwrap_or(false)
+            }),
             "recent" => {
                 let mut v = by_last_played(pick(&|g| g.last_played.is_some()));
                 v.truncate(20);

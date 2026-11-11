@@ -229,6 +229,7 @@ impl CollectionView {
     /// `go_fullscreen`: see [`switch_console`](Self::switch_console).
     fn enter_console(&mut self, go_fullscreen: bool, window: &mut Window, cx: &mut Context<Self>) {
         // The theme first: everything drawn from here on reads it.
+        console::themes::set_space(self.space);
         let mut prefs = console::themes::prefs(&self.app_paths);
         // `HERONITE_DEBUG_CONSOLE_PRESET=<theme id>` / `HERONITE_DEBUG_CONSOLE_LAYOUT=<layout>`:
         // start with that theme / every tab in that layout (not saved).

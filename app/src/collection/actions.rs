@@ -8,7 +8,7 @@ use heronite_i18n::tr;
 use heronite_launch::LaunchEvent;
 
 use super::vm::{self, GroupVm, ListItem};
-use super::{data, CollectionView, ToastAction};
+use super::{data, CollectionView, Space, ToastAction};
 use crate::services::launch_blocker::{launch_blocker, Blocker};
 
 impl CollectionView {
@@ -293,7 +293,11 @@ impl CollectionView {
     }
 
     pub(super) fn save_ui(&self) {
-        if let Err(err) = self.ui.save(&self.app_paths) {
+        let result = match self.space {
+            Space::Games => self.ui.save(&self.app_paths),
+            Space::Movies => heronite_data::json_store::write(&self.movies_ui_state_path(), &self.ui.to_value()),
+        };
+        if let Err(err) = result {
             log::warn!("saving ui state: {err:#}");
         }
     }

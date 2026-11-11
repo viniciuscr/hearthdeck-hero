@@ -51,6 +51,7 @@ impl CollectionView {
                 extras: focus_extras,
                 related_ui: self.facts.related.clone(),
                 details_ui: self.details_ui(cx),
+                space: self.space,
             },
             self.focus_actions(cx),
         )

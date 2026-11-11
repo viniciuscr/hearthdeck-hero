@@ -269,7 +269,16 @@ impl CollectionView {
         if self.space == space {
             return;
         }
+        // Each space keeps its own filters, sort and grid state.
+        self.save_ui();
         self.space = space;
+        crate::console::themes::set_space(space);
+        self.ui = self.load_ui_for(space);
+        if crate::console::active() {
+            let prefs = crate::console::themes::prefs(&self.app_paths);
+            crate::console::look::set(prefs.theme.clone());
+            self.console.tab = prefs.last_tab.min(prefs.theme.tabs.len().saturating_sub(1));
+        }
         self.lib = None;
         self.search.clear();
         self.selected = None;
@@ -278,6 +287,21 @@ impl CollectionView {
         self.images.clear_failed();
         self.reload(cx);
         cx.notify();
+    }
+
+    pub(super) fn movies_ui_state_path(&self) -> std::path::PathBuf {
+        self.app_paths.config.join("movies-ui-state.json")
+    }
+
+    fn load_ui_for(&self, space: Space) -> UiState {
+        match space {
+            Space::Games => UiState::load(&self.app_paths),
+            Space::Movies => heronite_data::json_store::read_value(&self.movies_ui_state_path())
+                .ok()
+                .filter(|value| value.is_object())
+                .map(|value| UiState::from_value(&value))
+                .unwrap_or_default(),
+        }
     }
 
     fn active_data_paths(&self) -> DataPaths {

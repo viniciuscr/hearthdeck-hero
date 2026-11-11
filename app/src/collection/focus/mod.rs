@@ -20,6 +20,7 @@ use heronite_data::appearance::Section;
 use self::description::render_html;
 use self::panels::{details_panel, details_value_width, hltb_missing_panel, hltb_panel, related_panel};
 use super::vm::{DetailRow, FocusVm};
+use super::Space;
 use crate::icons::Icon;
 use crate::theme;
 use heronite_i18n::tr;
@@ -116,6 +117,7 @@ pub(super) struct FocusProps {
     pub extras: FocusExtras,
     pub related_ui: RelatedUi,
     pub details_ui: DetailsUi,
+    pub space: Space,
 }
 
 /// Panels built outside the focus panel (see `extras.rs`).
@@ -285,6 +287,7 @@ pub(super) fn focus_panel(props: FocusProps, actions: FocusActions) -> AnyElemen
         extras,
         related_ui,
         details_ui,
+        space,
     } = props;
     let on_scroll: Rc<dyn Fn(&mut Window, &mut App)> = Rc::from(actions.on_scroll);
     let scrollbar = crate::ui::scrollbar_draggable(
@@ -326,6 +329,7 @@ pub(super) fn focus_panel(props: FocusProps, actions: FocusActions) -> AnyElemen
         achievements: extras.achievements,
         details: details_section(details, details_ui.titles, &actions.on_title),
         hltb: hltb_section(&vm, details_ui.titles, &actions.on_hltb, &actions.on_title),
+        space,
     };
     let body = body(&lay, sections);
     // Wide: the title sits above a fixed left column and the scrolling
@@ -414,12 +418,14 @@ pub(super) struct StackedProps {
     pub extras: FocusExtras,
     pub related_ui: RelatedUi,
     pub details_ui: DetailsUi,
+    pub space: Space,
 }
 
 /// The details of the focus panel in one column (the grid's drawer): no
 /// title and no left column, which the caller lays out itself.
 pub(super) fn stacked_details(props: StackedProps, actions: FocusActions) -> Div {
-    let StackedProps { vm, cover_for, html_images, width, active_facets, screenshots, timeline, extras, related_ui, details_ui } = props;
+    let StackedProps { vm, cover_for, html_images, width, active_facets, screenshots, timeline, extras, related_ui, details_ui, space } =
+        props;
     let lay = Layout { narrow: true, left_w: 0., stacked: true, main_w: width, side_w: width, offset: 0. };
     let rows = shown_rows(&vm.details, &details_ui.hidden);
     let details = details_panel(
@@ -443,6 +449,7 @@ pub(super) fn stacked_details(props: StackedProps, actions: FocusActions) -> Div
             achievements: extras.achievements,
             details: details_section(details, details_ui.titles, &actions.on_title),
             hltb: hltb_section(&vm, details_ui.titles, &actions.on_hltb, &actions.on_title),
+            space,
         },
     )
 }
@@ -476,6 +483,7 @@ struct Sections {
     achievements: Option<AnyElement>,
     details: Div,
     hltb: Option<Div>,
+    space: Space,
 }
 
 /// `column_w`: width the description images are sized for.
@@ -498,7 +506,10 @@ fn overview(vm: &FocusVm, html_images: &CoverFor, column_w: f32) -> Div {
 /// does not push them out of sight). How Long To Beat travels with
 /// "Details" but stays when it is hidden.
 fn body(lay: &Layout, s: Sections) -> Div {
-    let Sections { screenshots, overview, timeline, related, achievements, details, hltb } = s;
+    let Sections { screenshots, overview, timeline, related, achievements, details, hltb, space } = s;
+    // Films have no screenshots, HLTB, timeline or achievements in v1.
+    let (screenshots, timeline, related, achievements, hltb) =
+        if space == Space::Movies { (None, None, None, None, None) } else { (screenshots, timeline, related, achievements, hltb) };
     let look = theme::appearance().sections;
     let mut main_parts = [
         (Section::Screenshots, screenshots),
