@@ -153,9 +153,8 @@ impl Nav {
         let tokens = heronite_data::fuzzy::tokens(&folded);
         let status = f.status.checked_sub(1).and_then(|i| lib.statuses.get(i)).map(|s| s.id.clone());
         let category: std::collections::BTreeSet<String> = category_options(cats).get(f.category).cloned().flatten().into_iter().collect();
-        let watch_genres = watch_sources::genres(games);
-        let watch_providers = watch_sources::providers(games);
-        let mut games: Vec<&CollectionGame> = games
+        let all_games = games;
+        let mut games: Vec<&CollectionGame> = all_games
             .iter()
             .map(|g| g.as_ref())
             .filter(|g| match f.show {
@@ -168,26 +167,7 @@ impl Nav {
             .filter(|g| cats.matches(&category, &g.runner, &g.app_name))
             .collect();
         if watch {
-            if fixed_kind.is_none() {
-                games.retain(|g| match f.kind {
-                    1 => watch_sources::kind(g) == "movie",
-                    2 => watch_sources::kind(g) == "series",
-                    _ => true,
-                });
-            }
-            if let Some(genre) = f.genre.checked_sub(1).and_then(|i| watch_genres.get(i)) {
-                games.retain(|g| g.metadata.as_ref().is_some_and(|m| m.genres.iter().any(|x| x == genre)));
-            }
-            if let Some(provider) = f.provider.checked_sub(1).and_then(|i| watch_providers.get(i)) {
-                games.retain(|g| g.source_label == *provider);
-            }
-        }
-        if watch {
-            match f.sort {
-                1 => games.sort_by(|a, b| release_key(b).cmp(release_key(a)).then_with(|| a.title_lower.cmp(&b.title_lower))),
-                2 => games.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.title_lower.cmp(&b.title_lower))),
-                _ => games.sort_by(|a, b| a.title_lower.cmp(&b.title_lower)),
-            }
+            crate::fork::watch::filters::retain_and_sort(all_games, &mut games, f.kind, f.genre, f.provider, f.sort, fixed_kind);
         } else {
             match f.sort {
                 1 => games.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.title_lower.cmp(&b.title_lower))),
@@ -313,10 +293,6 @@ fn panel_width(vw: f32) -> f32 {
 }
 
 /// Watch titles sort by year descending: their release date is ISO or a year.
-fn release_key(game: &CollectionGame) -> &str {
-    game.metadata.as_ref().and_then(|metadata| metadata.release_date.as_deref()).unwrap_or("")
-}
-
 /// A "label  value" line of the facts under the art.
 pub(super) fn fact(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Div {
     div()

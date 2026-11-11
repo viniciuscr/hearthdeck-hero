@@ -1,5 +1,6 @@
 //! The Watch space: Stremio-backed films and series.
 
+pub mod filters;
 pub mod prefs;
 pub mod settings;
 pub mod sources;
