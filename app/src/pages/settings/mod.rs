@@ -57,7 +57,7 @@ mod section;
 mod storage;
 pub mod sysinfo;
 mod updates;
-mod watch;
+use crate::fork::watch::settings as watch;
 
 pub use advanced::open_folder;
 pub use backup::format_time;
@@ -129,7 +129,7 @@ pub fn offer(settings: EffectiveSettings, chain: Vec<ImageRef>, library: Option<
 }
 
 pub struct SettingsPage {
-    ctx: PageCtx,
+    pub(crate) ctx: PageCtx,
     /// `local_library/settings.json` as last read or written by this page.
     settings: EffectiveSettings,
     /// Last write error of the Collection sections.
@@ -156,7 +156,7 @@ pub struct SettingsPage {
     advanced: advanced::State,
     about: about::State,
     logs: logs::State,
-    watch: watch::State,
+    pub(crate) watch: watch::State,
     console_mode: Option<console_mode::State>,
     /// Console mode focus, keyboard and pickers.
     console: console::ConsoleState,

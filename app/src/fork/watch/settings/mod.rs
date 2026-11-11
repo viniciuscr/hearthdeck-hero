@@ -8,11 +8,11 @@ use heronite_i18n::tr;
 use heronite_watch::account::{create_link, read_link, LinkOffer, LinkPoll};
 use heronite_watch::{Endpoints, UreqTransport};
 
-use super::SettingsPage;
 use crate::collection::Space;
 use crate::console::list::{Outcome, Row, Value};
 use crate::console::themes;
 use crate::fork::watch::watch_theme::watch_theme;
+use crate::pages::settings::SettingsPage;
 use crate::pages::PageCtx;
 use crate::theme;
 use crate::ui::controls::{action_button, caption, card, card_box, toggle_row, ButtonKind};
@@ -249,7 +249,7 @@ fn unlink(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
 }
 
 /// Console mode: the account, the code and the rails as rows.
-pub(super) fn console_rows(d: &SettingsPage) -> Vec<Row> {
+pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
     let mut rows = Vec::new();
     rows.push(Row::info("watch-account", tr!("Stremio account"), if d.watch.linked { tr!("Linked") } else { tr!("Not linked") }));
     if d.watch.linked {
@@ -269,7 +269,7 @@ pub(super) fn console_rows(d: &SettingsPage) -> Vec<Row> {
     rows
 }
 
-pub(super) fn console_apply(d: &mut SettingsPage, outcome: Outcome, cx: &mut Context<SettingsPage>) {
+pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, cx: &mut Context<SettingsPage>) {
     match outcome {
         Outcome::Activate(id) => match id.as_ref() {
             "watch-link" => start_link(d, cx),

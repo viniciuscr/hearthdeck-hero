@@ -11,7 +11,7 @@ use heronite_i18n::{n_, tr};
 
 use super::{
     about, advanced, appearance, backup, console_mode, launchers, library, logs, metadata, mods, overlay, replay, saves, screenshots,
-    storage, watch, Section, SettingsPage,
+    storage, Section, SettingsPage,
 };
 use crate::console::kit::{self, u};
 use crate::console::list::{Outcome, Row};
@@ -19,6 +19,7 @@ use crate::console::pointer::Clickable;
 use crate::console::{hint, Btn, Hint, Pad, PadTarget};
 use crate::dialogs::settings_panel::logic::Section as HSection;
 use crate::dialogs::settings_panel::{GlobalView, SettingsPanel, Target};
+use crate::fork::watch::settings as watch;
 use crate::icons::Icon;
 use crate::theme;
 

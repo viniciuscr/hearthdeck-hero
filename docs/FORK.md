@@ -104,7 +104,7 @@ implementation rules live in `docs/WATCH.md`.
 | F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" | pending |
 | F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection `Space::Watch`, console space item and Stremio Play action | active |
 | F-007 | `crates/data/src/library.rs` | `stremio` source label | active |
-| F-008 | `app/src/console/{watch_theme,themes}.rs`, `app/src/pages/settings/{section,mod,watch}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings and one-time migration of game-shaped Watch files | active |
+| F-008 | `app/src/fork/watch/{watch_theme,space_theme,settings}`, `app/src/console/themes.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings, QR and one-time migration of game-shaped Watch files | active |
 | F-009 | `.github/workflows/{release,flatpak,windows-packages}.yml` | upstream release workflows guarded to the upstream repository | active |
 
 ### Conflict log

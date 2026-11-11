@@ -284,7 +284,8 @@ Envelope, source `stremio-core`:
 9. **One controller owner.** Suspend the shell reader on handoff; re-arm on
    return; never let two readers consume the same pad.
 10. **Reuse the house pipeline.** App image loader, `i18n` keys, `console::kit`,
-    `PadTarget`, `ui::qr_code`; no parallel implementations.
+    `PadTarget`, and the fork-owned Watch QR renderer
+    (`fork::watch::settings::qr`); no parallel implementations.
 11. **Locales in the same change request.** Every new `tr!` key lands in
     pt-BR, es and de or the i18n coverage test fails.
 12. **Cross-platform compilation.** Protocol/domain code compiles everywhere;
