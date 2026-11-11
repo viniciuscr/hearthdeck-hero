@@ -55,8 +55,13 @@ jobs:
         run: scripts/ci-deps.sh
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Use the tag version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version = \".*\"/version = \"$version\"/" Cargo.toml
+          grep -n '^version' Cargo.toml
       - name: Build
-        run: cargo build --release --locked -p heronite -p heronite-epic-login
+        run: cargo build --release -p heronite -p heronite-epic-login
       - name: Install nfpm
         run: |
           curl -fsSL -o "$RUNNER_TEMP/nfpm.tar.gz" \

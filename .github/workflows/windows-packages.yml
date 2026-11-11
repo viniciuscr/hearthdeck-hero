@@ -27,6 +27,7 @@ env:
 jobs:
   package:
     name: Installer and portable zip (x86_64)
+    if: github.repository == 'RafaelGoulartB/Heronite'
     runs-on: windows-latest
     defaults:
       run:
