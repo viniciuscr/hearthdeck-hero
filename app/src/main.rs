@@ -8,6 +8,7 @@ mod console;
 mod diagnosis;
 mod dialogs;
 mod env;
+mod fork;
 mod icons;
 mod images;
 mod language;

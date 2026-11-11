@@ -20,8 +20,8 @@ use heronite_data::json_store;
 use heronite_data::paths::AppPaths;
 
 use crate::collection::Space;
-use crate::console::space_theme::project;
-use crate::console::watch_theme::watch_theme;
+use crate::fork::watch::space_theme::project;
+use crate::fork::watch::watch_theme::watch_theme;
 
 const GAMES: u8 = 0;
 const WATCH: u8 = 1;

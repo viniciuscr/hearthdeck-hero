@@ -12,7 +12,7 @@ use super::SettingsPage;
 use crate::collection::Space;
 use crate::console::list::{Outcome, Row, Value};
 use crate::console::themes;
-use crate::console::watch_theme::watch_theme;
+use crate::fork::watch::watch_theme::watch_theme;
 use crate::pages::PageCtx;
 use crate::theme;
 use crate::ui::controls::{action_button, caption, card, card_box, toggle_row, ButtonKind};
