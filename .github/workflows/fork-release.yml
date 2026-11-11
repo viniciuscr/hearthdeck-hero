@@ -77,7 +77,7 @@ jobs:
           if-no-files-found: error
 
   arch-repo:
-    name: Publish the signed Arch repository
+    name: Publish the Arch repository
     needs: build
     runs-on: ubuntu-24.04
     steps:
@@ -87,9 +87,6 @@ jobs:
           name: release-packages
           path: dist
       - name: Build the repository database
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
           set -euo pipefail
           mkdir -p public/arch/x86_64
@@ -97,21 +94,12 @@ jobs:
           docker run --rm \
             -v "$PWD/public/arch/x86_64:/repo" \
             -w /repo \
-            -e GPG_PRIVATE_KEY \
-            -e GPG_KEY_ID \
             archlinux:base bash -euo pipefail -c '
-              pacman -Sy --noconfirm gnupg
-              printf "%s" "$GPG_PRIVATE_KEY" | gpg --batch --import
+              pacman -Sy --noconfirm
               rm -f hearthdeck.db* hearthdeck.files*
-              repo-add --sign --key "$GPG_KEY_ID" hearthdeck.db.tar.gz *.pkg.tar.zst
+              repo-add hearthdeck.db.tar.gz *.pkg.tar.zst
               cp --remove-destination hearthdeck.db.tar.gz hearthdeck.db
               cp --remove-destination hearthdeck.files.tar.gz hearthdeck.files
-              if [ -f hearthdeck.db.tar.gz.sig ]; then
-                cp --remove-destination hearthdeck.db.tar.gz.sig hearthdeck.db.sig
-              fi
-              if [ -f hearthdeck.files.tar.gz.sig ]; then
-                cp --remove-destination hearthdeck.files.tar.gz.sig hearthdeck.files.sig
-              fi
             '
       - name: Publish to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

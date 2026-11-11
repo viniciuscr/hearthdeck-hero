@@ -40,37 +40,18 @@ Settings → Pages → Build and deployment:
 
 The workflow creates `gh-pages` on the first release.
 
-### Signing key
+### Unsigned Arch repository
 
-Create a dedicated signing key (no passphrase for CI, or keep it offline and
-sign locally), export it, and add repository secrets:
-
-```bash
-gpg --quick-generate-key "Hearthdeck Hero packages <packages@hearthdeck.invalid>" rsa4096 sign 5y
-gpg --list-secret-keys --keyid-format LONG
-gpg --armor --export-secret-keys <KEY_ID>   # GPG_PRIVATE_KEY
-```
-
-Add `GPG_PRIVATE_KEY` (ASCII-armored secret key) and `GPG_KEY_ID` (the long
-key id) to the repository's Actions secrets.
-
-`repo-add --sign` signs the database. The generated `.sig` files are published
-next to the database.
+No signing key is required. The workflow runs `repo-add` without `--sign`;
+packages and the database are unsigned. This is the simple path for the TV.
 
 ### TV machine
-
-Import the public key once:
-
-```bash
-gpg --armor --export <KEY_ID> | sudo pacman-key --add -
-sudo pacman-key --lsign-key <KEY_ID>
-```
 
 Add to `/etc/pacman.conf`:
 
 ```ini
 [hearthdeck]
-SigLevel = Required DatabaseOptional
+SigLevel = Optional TrustAll
 Server = https://viniciuscr.github.io/hearthdeck-hero/arch/$arch
 ```
 
@@ -81,8 +62,8 @@ sudo pacman -Syyu
 sudo pacman -S hearthdeck-hero
 ```
 
-For a private test before signing is configured, `SigLevel = Optional TrustAll`
-works, but it is not the released setup.
+`TrustAll` is acceptable for a private TV repository. Add signatures later
+without changing the package name or URL.
 
 ## Local test package
 

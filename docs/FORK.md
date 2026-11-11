@@ -116,10 +116,10 @@ date, upstream commit, files, and resolution.
 - Tag `fork/main` as `v<upstream>-hearthdeck.<n>` (for example
   `v1.5.0-hearthdeck.1`); never tag `main`.
 - Releases are tag-driven: the tag starts `.github/workflows/fork-release.yml`,
-  which gates the commit, builds `hearthdeck-hero` packages and publishes a
-  signed Arch repository to `gh-pages`.
+  which gates the commit, builds `hearthdeck-hero` packages and publishes an
+  unsigned Arch repository to `gh-pages`.
 - `scripts/fork/release.sh` creates and pushes the tag. See
-  `docs/RELEASING.md` for the one-time Pages and signing-key setup.
+  `docs/RELEASING.md` for the one-time Pages setup.
 - Arch `pkgver` replaces the tag's hyphen with a dot
   (`1.5.0.hearthdeck.1`); increment the last number for a rebuild.
 - Keep upstream `release.yml`, `flatpak.yml`, and `windows-packages.yml`

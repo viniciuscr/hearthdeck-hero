@@ -56,7 +56,7 @@ for format in "${formats[@]}"; do
       run fedora:41 rpm with-recommends 'dnf install -y -q /dist/hearthdeck-hero-*.x86_64.rpm >/dev/null'
       ;;
     arch)
-      run archlinux:latest arch no-recommends 'pacman -Syu --noconfirm --needed >/dev/null && pacman -U --noconfirm /dist/hearthdeck-hero-*-x86_64.pkg.tar.zst >/dev/null'
+      run archlinux:latest arch with-recommends 'pacman -Syu --noconfirm --needed >/dev/null && pacman -U --noconfirm /dist/hearthdeck-hero-*-x86_64.pkg.tar.zst >/dev/null'
       ;;
     appimage)
       for spec in 'ubuntu:22.04|apt-get update -qq && apt-get install -y -qq libxcb1 >/dev/null' \

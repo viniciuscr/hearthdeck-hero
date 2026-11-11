@@ -104,8 +104,8 @@ overrides:
       - vulkan-icd-loader
       - wayland
       - fontconfig
+      - webkit2gtk-4.1
     recommends:
-      - "webkit2gtk-4.1: Epic Games login window"
       - "vulkan-driver: GPU rendering"
       - "xdg-utils: open links and folders"
       - "polkit: install updates from the app"
