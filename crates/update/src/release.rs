@@ -148,7 +148,9 @@ impl Release {
     /// The file of `package`'s format for this architecture.
     pub fn package(&self, package: Package) -> Option<&Asset> {
         let suffix = package.file_suffix()?;
-        self.packages.iter().find(|a| a.name.starts_with("heronite") && a.name.ends_with(&suffix))
+        self.packages
+            .iter()
+            .find(|a| (a.name.starts_with("hearthdeck-hero") || a.name.starts_with("heronite")) && a.name.ends_with(&suffix))
     }
 
     /// The own signature of [`Release::package`].
@@ -208,12 +210,15 @@ impl From<&GhAsset> for Asset {
     }
 }
 
-/// The AppImage to install: the fixed name first (`Heronite-x86_64.AppImage`),
-/// else a versioned one (`Heronite-0.1.4-x86_64.AppImage`).
+/// The AppImage to install: the fixed name first (`Hearthdeck-Hero-x86_64.AppImage`),
+/// then the old fork name (`Heronite-x86_64.AppImage`), else a versioned one.
 fn pick_appimage(assets: &[GhAsset]) -> Option<&GhAsset> {
-    let fixed = format!("Heronite-{ARCH}.AppImage");
+    let fixed = [format!("Hearthdeck-Hero-{ARCH}.AppImage"), format!("Heronite-{ARCH}.AppImage")];
+    if let Some(asset) = assets.iter().find(|a| fixed.contains(&a.name)) {
+        return Some(asset);
+    }
     let suffix = format!("-{ARCH}.AppImage");
-    assets.iter().find(|a| a.name == fixed).or_else(|| assets.iter().find(|a| a.name.starts_with("Heronite-") && a.name.ends_with(&suffix)))
+    assets.iter().find(|a| (a.name.starts_with("Hearthdeck-Hero-") || a.name.starts_with("Heronite-")) && a.name.ends_with(&suffix))
 }
 
 /// Parses `GET /repos/{repo}/releases/latest`.

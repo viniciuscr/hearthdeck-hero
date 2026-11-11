@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- AppStream data: software centres (GNOME Software, Discover) show it for the packages. -->
 <component type="desktop-application">
-  <id>app.heronite.Heronite</id>
-  <name>Heronite</name>
-  <summary>Play all your games in one place</summary>
+  <id>app.hearthdeck.Hero</id>
+  <name>Hearthdeck Hero</name>
+  <summary>Play all your games, and watch films and series, in one place</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
-  <developer id="app.heronite">
-    <name>RafaGoulartB</name>
+  <developer id="app.hearthdeck">
+    <name>Hearthdeck Hero</name>
   </developer>
   <description>
     <p>
-      Heronite gathers your games from Steam, Epic Games, GOG, Amazon Games, Battle.net,
+      Hearthdeck Hero gathers your games from Steam, Epic Games, GOG, Amazon Games, Battle.net,
       EA app, Ubisoft Connect and Rockstar Games, plus emulated ROMs and native Linux and
       Windows games, in one Collection, and launches them natively, with Wine or Proton,
-      or through an emulator.
+      or through an emulator. Watch adds films and series from connected providers.
     </p>
     <ul>
       <li>Install, update and repair Epic, GOG and Amazon games from one download queue</li>
@@ -25,10 +25,10 @@
       <li>A controller-first console mode with shareable themes</li>
     </ul>
   </description>
-  <launchable type="desktop-id">app.heronite.Heronite.desktop</launchable>
-  <url type="homepage">https://heronite.app</url>
-  <url type="vcs-browser">https://github.com/RafaelGoulartB/Heronite</url>
-  <url type="bugtracker">https://github.com/RafaelGoulartB/Heronite/issues</url>
+  <launchable type="desktop-id">app.hearthdeck.Hero.desktop</launchable>
+  <url type="homepage">https://github.com/viniciuscr/hearthdeck-hero</url>
+  <url type="vcs-browser">https://github.com/viniciuscr/hearthdeck-hero</url>
+  <url type="bugtracker">https://github.com/viniciuscr/hearthdeck-hero/issues</url>
   <!-- Captures of v1.1.0 (packaging/linux/screenshots), linked by the commit that added them. -->
   <screenshots>
     <screenshot type="default">
@@ -107,6 +107,6 @@
     <id>com.heronite.rs</id>
   </replaces>
   <provides>
-    <binary>heronite-rs</binary>
+    <binary>hearthdeck-hero</binary>
   </provides>
 </component>

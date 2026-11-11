@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds the system packages of a release into dist/ with nfpm
-# (packaging/nfpm.yaml): heronite_<v>-1_amd64.deb, heronite-<v>-1.x86_64.rpm
-# and heronite-<v>-1-x86_64.pkg.tar.zst. They hold the same binaries as the
-# AppImage; users install the downloaded file (apt install ./file.deb,
+# (packaging/nfpm.yaml): hearthdeck-hero_<v>-1_amd64.deb,
+# hearthdeck-hero-<v>-1.x86_64.rpm and
+# hearthdeck-hero-<v>-1-x86_64.pkg.tar.zst. They hold the same binaries as
+# the AppImage; users install the downloaded file (apt install ./file.deb,
 # dnf install ./file.rpm, pacman -U file), and the app updates them later
 # through the same package manager.
 #   usage: scripts/packages.sh [version]
@@ -17,7 +18,7 @@ NFPM=${NFPM:-nfpm}
 BIN=${BIN:-target/release}
 [[ $BIN == /* ]] || BIN="$ROOT/$BIN"
 
-[[ -x $BIN/heronite-rs && -x $BIN/heronite-epic-login ]] || cargo build --release -p heronite -p heronite-epic-login
+[[ -x $BIN/hearthdeck-hero && -x $BIN/hearthdeck-hero-epic-login ]] || cargo build --release -p heronite -p heronite-epic-login
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -30,8 +31,8 @@ done
 sed -e "s|\${VERSION}|$VERSION|g" -e "s|\${BIN}|$BIN|g" -e "s|\${MARKERS}|$MARKERS|g" packaging/nfpm.yaml > "$WORK/nfpm.yaml"
 
 mkdir -p dist
-rm -f dist/heronite_*.deb dist/heronite-*.rpm dist/heronite-*.pkg.tar.zst
+rm -f dist/hearthdeck-hero_*.deb dist/hearthdeck-hero-*.rpm dist/hearthdeck-hero-*.pkg.tar.zst
 for packager in deb rpm archlinux; do
   "$NFPM" package --config "$WORK/nfpm.yaml" --packager "$packager" --target dist/
 done
-ls dist/heronite_*.deb dist/heronite-*.rpm dist/heronite-*.pkg.tar.zst
+ls dist/hearthdeck-hero_*.deb dist/hearthdeck-hero-*.rpm dist/hearthdeck-hero-*.pkg.tar.zst

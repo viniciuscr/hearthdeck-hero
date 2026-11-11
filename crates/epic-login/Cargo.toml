@@ -6,7 +6,7 @@ license.workspace = true
 description = "Small helper window (wry: WebKitGTK on Linux, WebView2 on Windows) that logs in to Epic Games, GOG or Amazon Games and prints the authorization code; kept out of the main binary so the GPUI app stays small"
 
 [[bin]]
-name = "heronite-epic-login"
+name = "hearthdeck-hero-epic-login"
 path = "src/main.rs"
 
 [dependencies]

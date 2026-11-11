@@ -188,7 +188,7 @@ fn main() {
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
-    glib::set_prgname(Some("heronite-epic-login"));
+    glib::set_prgname(Some("hearthdeck-hero-epic-login"));
     glib::set_application_name(store.title());
     if gtk::init().is_err() {
         eprintln!("could not initialise GTK (no display?)");

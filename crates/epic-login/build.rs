@@ -70,10 +70,10 @@ BEGIN
             VALUE "CompanyName", "Heronite"
             VALUE "FileDescription", "Heronite store login"
             VALUE "FileVersion", "{version}"
-            VALUE "InternalName", "heronite-epic-login"
+            VALUE "InternalName", "hearthdeck-hero-epic-login"
             VALUE "LegalCopyright", "GPL-3.0-only"
-            VALUE "OriginalFilename", "heronite-epic-login.exe"
-            VALUE "ProductName", "Heronite"
+            VALUE "OriginalFilename", "hearthdeck-hero-epic-login.exe"
+            VALUE "ProductName", "Hearthdeck Hero"
             VALUE "ProductVersion", "{version}"
         END
     END

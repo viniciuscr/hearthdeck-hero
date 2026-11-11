@@ -99,7 +99,7 @@ implementation rules live in `docs/WATCH.md`.
 |---|---|---|---|
 | F-001 | `crates/update/src/lib.rs` (`LATEST_API`, `REPO_PAGE`, `RELEASES_PAGE`) | updater reads the fork's release channel | active (asset names and signing key: F-003) |
 | F-002 | app identity: `app.heronite.Heronite`, data folder `heronite`, scheme `heronite` | fork identity from `fork-brand`, so both apps coexist | active (runtime; binary and packages: F-003) |
-| F-003 | `packaging/*`, `scripts/appimage.sh`, `scripts/sign-release.sh`, binary and package names | fork packages, release asset names and signing key | pending |
+| F-003 | `packaging/*`, `scripts/packages.sh`, `scripts/appimage.sh`, `scripts/install.sh`, `crates/update`, binary and package names | fork Linux/Arch packages, binaries, desktop identity and release channel | active (Linux/Arch; Flatpak/Windows pending) |
 | F-004 | `.github/workflows/fork-ci.yml` | fork verification gate (new file, no upstream conflict) | active |
 | F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" | pending |
 | F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection `Space::Watch`, console space item and Stremio Play action | active |
@@ -113,16 +113,21 @@ date, upstream commit, files, and resolution.
 
 ## Releases
 
-- Tag `fork/main` as `v<upstream>.<fork>` (for example `v1.5.0-fork.1`).
-- Version metadata tracks upstream's `Cargo.toml`; the fork suffix is applied at
-  packaging time.
+- Tag `fork/main` as `v<upstream>-hearthdeck.<n>` (for example
+  `v1.5.0-hearthdeck.1`); never tag `main`.
+- Releases are tag-driven: the tag starts `.github/workflows/fork-release.yml`,
+  which gates the commit, builds `hearthdeck-hero` packages and publishes a
+  signed Arch repository to `gh-pages`.
+- `scripts/fork/release.sh` creates and pushes the tag. See
+  `docs/RELEASING.md` for the one-time Pages and signing-key setup.
+- Arch `pkgver` replaces the tag's hyphen with a dot
+  (`1.5.0.hearthdeck.1`); increment the last number for a rebuild.
 - Keep upstream `release.yml`, `flatpak.yml`, and `windows-packages.yml`
   **disabled** in the fork's Actions settings: they use upstream secrets and
   publish to upstream's package channels.
-- Until F-003 lands, release assets keep upstream's names (`Heronite-*`) and
-  the updater keeps upstream's public key: a fork release signed with another
-  key is rejected, which fails closed.
-- Add `fork-release.yml` only with the fork's own signing key and channels.
+- Fork Linux packages are `hearthdeck-hero`; the AppImage is
+  `Hearthdeck-Hero-x86_64.AppImage`. The updater accepts both the new and old
+  asset names during the transition.
 - GPL-3.0-only: keep `LICENSE` and `THIRD-PARTY-NOTICES.md`, state the
   modifications in this file, and publish the source for every distributed
   binary.

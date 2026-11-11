@@ -1,0 +1,150 @@
+name: Fork Release
+
+# Tag-driven release from fork/main. The tag is the source of truth:
+#   scripts/fork/release.sh 1.5.0-hearthdeck.1
+# builds the system packages, publishes a signed Arch repository to the
+# gh-pages branch for pacman, and creates the GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  verify:
+    name: Gate the tagged commit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The tag is on fork/main
+        run: |
+          git fetch origin fork/main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/fork/main
+      - name: System packages
+        run: scripts/ci-deps.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  build:
+    name: Build the packages
+    needs: verify
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: scripts/ci-deps.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked -p heronite -p heronite-epic-login
+      - name: Install nfpm
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/nfpm.tar.gz" \
+            https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz
+          echo "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783  $RUNNER_TEMP/nfpm.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/nfpm.tar.gz" -C "$RUNNER_TEMP" nfpm
+          sudo install -m755 "$RUNNER_TEMP/nfpm" /usr/local/bin/nfpm
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Arch pkgver cannot contain a hyphen.
+          pkgver="${version//-/.}"
+          scripts/packages.sh "$pkgver"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/
+          if-no-files-found: error
+
+  arch-repo:
+    name: Publish the signed Arch repository
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist
+      - name: Build the repository database
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p public/arch/x86_64
+          cp dist/*.pkg.tar.zst public/arch/x86_64/
+          docker run --rm \
+            -v "$PWD/public/arch/x86_64:/repo" \
+            -w /repo \
+            -e GPG_PRIVATE_KEY \
+            -e GPG_KEY_ID \
+            archlinux:base bash -euo pipefail -c '
+              pacman -Sy --noconfirm gnupg
+              printf "%s" "$GPG_PRIVATE_KEY" | gpg --batch --import
+              rm -f hearthdeck.db* hearthdeck.files*
+              repo-add --sign --key "$GPG_KEY_ID" hearthdeck.db.tar.gz *.pkg.tar.zst
+              cp --remove-destination hearthdeck.db.tar.gz hearthdeck.db
+              cp --remove-destination hearthdeck.files.tar.gz hearthdeck.files
+              if [ -f hearthdeck.db.tar.gz.sig ]; then
+                cp --remove-destination hearthdeck.db.tar.gz.sig hearthdeck.db.sig
+              fi
+              if [ -f hearthdeck.files.tar.gz.sig ]; then
+                cp --remove-destination hearthdeck.files.tar.gz.sig hearthdeck.files.sig
+              fi
+            '
+      - name: Publish to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
+          publish_branch: gh-pages
+          force_orphan: true
+
+  release:
+    name: Create the GitHub release
+    needs: [build, arch-repo]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > notes.md <<'NOTES'
+          Arch repository:
+          `https://viniciuscr.github.io/hearthdeck-hero/arch/$arch`
+
+          ```
+          [hearthdeck]
+          SigLevel = Required DatabaseOptional
+          Server = https://viniciuscr.github.io/hearthdeck-hero/arch/$arch
+          ```
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Hearthdeck Hero $GITHUB_REF_NAME" \
+            --notes-file notes.md

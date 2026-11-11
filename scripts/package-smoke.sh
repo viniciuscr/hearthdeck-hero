@@ -17,22 +17,22 @@ formats=("$@")
 # installs recommended packages (apt, dnf).
 CHECK='
 set -e
-missing=$(ldd /usr/bin/heronite-rs | grep "not found" || true)
-[ -z "$missing" ] || { echo "heronite-rs: $missing"; exit 1; }
+missing=$(ldd /usr/bin/hearthdeck-hero | grep "not found" || true)
+[ -z "$missing" ] || { echo "hearthdeck-hero: $missing"; exit 1; }
 if [ "$2" = with-recommends ]; then
-  missing=$(ldd /usr/bin/heronite-epic-login | grep "not found" || true)
-  [ -z "$missing" ] || { echo "heronite-epic-login: $missing"; exit 1; }
+  missing=$(ldd /usr/bin/hearthdeck-hero-epic-login | grep "not found" || true)
+  [ -z "$missing" ] || { echo "hearthdeck-hero-epic-login: $missing"; exit 1; }
 fi
-heronite-rs --help | head -1
-[ "$(cat /usr/share/heronite/package-format)" = "$1" ]
+hearthdeck-hero --help | head -1
+[ "$(cat /usr/share/hearthdeck-hero/package-format)" = "$1" ]
 echo "ok: $1 on $(. /etc/os-release; echo "$PRETTY_NAME")"
 '
 
 # Inside the container: the AppImage finds every library and runs.
 APPIMAGE_CHECK='
 set -e
-cd /tmp && /dist/Heronite-x86_64.AppImage --appimage-extract >/dev/null
-missing=$(ldd squashfs-root/usr/bin/heronite-rs | grep "not found" || true)
+cd /tmp && /dist/Hearthdeck-Hero-x86_64.AppImage --appimage-extract >/dev/null
+missing=$(ldd squashfs-root/usr/bin/hearthdeck-hero | grep "not found" || true)
 [ -z "$missing" ] || { echo "AppImage: $missing"; exit 1; }
 squashfs-root/AppRun --help | head -1
 echo "ok: AppImage on $(. /etc/os-release; echo "$PRETTY_NAME")"
@@ -49,14 +49,14 @@ for format in "${formats[@]}"; do
     deb)
       for image in ubuntu:22.04 debian:12 ubuntu:24.04; do
         run "$image" deb with-recommends \
-          'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq /dist/heronite_*_amd64.deb >/dev/null'
+          'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq /dist/hearthdeck-hero_*_amd64.deb >/dev/null'
       done
       ;;
     rpm)
-      run fedora:41 rpm with-recommends 'dnf install -y -q /dist/heronite-*.x86_64.rpm >/dev/null'
+      run fedora:41 rpm with-recommends 'dnf install -y -q /dist/hearthdeck-hero-*.x86_64.rpm >/dev/null'
       ;;
     arch)
-      run archlinux:latest arch no-recommends 'pacman -Syu --noconfirm --needed >/dev/null && pacman -U --noconfirm /dist/heronite-*-x86_64.pkg.tar.zst >/dev/null'
+      run archlinux:latest arch no-recommends 'pacman -Syu --noconfirm --needed >/dev/null && pacman -U --noconfirm /dist/hearthdeck-hero-*-x86_64.pkg.tar.zst >/dev/null'
       ;;
     appimage)
       for spec in 'ubuntu:22.04|apt-get update -qq && apt-get install -y -qq libxcb1 >/dev/null' \

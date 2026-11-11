@@ -1,5 +1,5 @@
 //! System packages (.deb, .rpm, Arch) made by `scripts/packages.sh`. Each one
-//! installs `share/heronite/package-format` beside `bin/`, holding its
+//! installs `share/hearthdeck-hero/package-format` beside `bin/`, holding its
 //! format. Files owned by a package manager must not be replaced behind its
 //! back: the app downloads the release's file of the same format, checks its
 //! signature like the AppImage's, and hands it to the package manager
@@ -48,7 +48,7 @@ pub fn ostree_booted() -> bool {
 
 impl Package {
     /// The marker, relative to the prefix (`/usr`).
-    pub const MARKER: &'static str = "share/heronite/package-format";
+    pub const MARKER: &'static str = "share/hearthdeck-hero/package-format";
 
     pub fn parse(text: &str) -> Option<Self> {
         match text.trim() {

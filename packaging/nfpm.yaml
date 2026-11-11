@@ -4,65 +4,61 @@
 # scripts/packages.sh fills in ${VERSION}, ${BIN} (binaries folder) and
 # ${MARKERS} (folder holding package-format-{deb,rpm,arch}, see
 # Package::MARKER in crates/update).
-name: heronite
+name: hearthdeck-hero
 arch: amd64
 platform: linux
 version: ${VERSION}
 release: 1
 section: games
 priority: optional
-maintainer: RafaGoulartB <rafagoulartb@gmail.com>
+maintainer: Vinicius <viniciuscr@users.noreply.github.com>
 description: |-
-  Fast native game launcher for Steam, Epic, GOG, emulators and more.
-  Every game you own in one Collection: Steam, Epic Games, GOG, Amazon Games,
-  Battle.net, EA app, Ubisoft Connect, Rockstar Games, emulated ROMs, and
-  native Linux and Windows games, launched natively, with Wine or Proton, or
-  through an emulator. Records every session, with play time statistics and a
-  controller-first console mode.
-vendor: Heronite
-homepage: https://heronite.app
+  Fast native game launcher with a Stremio-backed Watch space.
+  Every game you own in one Collection, and films and series in Watch:
+  Continue watching, Top movies and Top series.
+vendor: Hearthdeck
+homepage: https://github.com/viniciuscr/hearthdeck-hero
 license: GPL-3.0-only
 
 contents:
-  - src: ${BIN}/heronite-rs
-    dst: /usr/bin/heronite-rs
+  - src: ${BIN}/hearthdeck-hero
+    dst: /usr/bin/hearthdeck-hero
     file_info: { mode: 0755 }
-  # Found next to heronite-rs by the Epic page.
-  - src: ${BIN}/heronite-epic-login
-    dst: /usr/bin/heronite-epic-login
+  # Found next to the main binary by the store login pages.
+  - src: ${BIN}/hearthdeck-hero-epic-login
+    dst: /usr/bin/hearthdeck-hero-epic-login
     file_info: { mode: 0755 }
-  - src: packaging/linux/app.heronite.Heronite.desktop
-    dst: /usr/share/applications/app.heronite.Heronite.desktop
-  - src: packaging/linux/app.heronite.Heronite.png
-    dst: /usr/share/icons/hicolor/256x256/apps/app.heronite.Heronite.png
-  - src: packaging/linux/app.heronite.Heronite.metainfo.xml
-    dst: /usr/share/metainfo/app.heronite.Heronite.metainfo.xml
+  - src: packaging/linux/app.hearthdeck.Hero.desktop
+    dst: /usr/share/applications/app.hearthdeck.Hero.desktop
+  - src: packaging/linux/app.hearthdeck.Hero.png
+    dst: /usr/share/icons/hicolor/256x256/apps/app.hearthdeck.Hero.png
+  - src: packaging/linux/app.hearthdeck.Hero.metainfo.xml
+    dst: /usr/share/metainfo/app.hearthdeck.Hero.metainfo.xml
   - src: LICENSE
-    dst: /usr/share/doc/heronite/LICENSE
+    dst: /usr/share/doc/hearthdeck-hero/LICENSE
   - src: THIRD-PARTY-NOTICES.md
-    dst: /usr/share/doc/heronite/THIRD-PARTY-NOTICES.md
+    dst: /usr/share/doc/hearthdeck-hero/THIRD-PARTY-NOTICES.md
   - src: licenses
-    dst: /usr/share/doc/heronite/licenses
+    dst: /usr/share/doc/hearthdeck-hero/licenses
     type: tree
   - src: LICENSE
-    dst: /usr/share/licenses/heronite/LICENSE
+    dst: /usr/share/licenses/hearthdeck-hero/LICENSE
     packager: archlinux
   # Tells the app how it was installed, so updates go through the package
   # manager.
   - src: ${MARKERS}/package-format-deb
-    dst: /usr/share/heronite/package-format
+    dst: /usr/share/hearthdeck-hero/package-format
     packager: deb
   - src: ${MARKERS}/package-format-rpm
-    dst: /usr/share/heronite/package-format
+    dst: /usr/share/hearthdeck-hero/package-format
     packager: rpm
   - src: ${MARKERS}/package-format-arch
-    dst: /usr/share/heronite/package-format
+    dst: /usr/share/hearthdeck-hero/package-format
     packager: archlinux
 
 # Linked: libudev, libxcb, libxkbcommon(-x11). Loaded at run time: Vulkan,
 # Wayland, fontconfig. The Epic login window links WebKitGTK 4.1; without it
-# the app offers the browser login, so it is only recommended. bubblewrap runs
-# games in the sandbox; without it the sandbox says so.
+# the app offers the browser login, so it is only recommended.
 overrides:
   deb:
     depends:
@@ -121,4 +117,4 @@ rpm:
 deb:
   compression: zstd
 archlinux:
-  packager: RafaGoulartB <rafagoulartb@gmail.com>
+  packager: Vinicius <viniciuscr@users.noreply.github.com>

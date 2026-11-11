@@ -71,7 +71,7 @@ fn agent() -> &'static ureq::Agent {
         ureq::Agent::config_builder()
             .timeout_connect(Some(Duration::from_secs(15)))
             .max_redirects(8)
-            .user_agent(concat!("heronite-rs/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("hearthdeck-hero/", env!("CARGO_PKG_VERSION")))
             .build()
             .into()
     })

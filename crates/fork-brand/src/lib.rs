@@ -8,6 +8,12 @@
 /// The name people see: window title, tray, notifications.
 pub const NAME: &str = "Hearthdeck Hero";
 
+/// The main executable (and package) name.
+pub const BIN: &str = "hearthdeck-hero";
+
+/// The store login helper that sits next to [`BIN`].
+pub const HELPER: &str = "hearthdeck-hero-epic-login";
+
 /// Reverse-DNS id of the app: window, tray item, notifications, `.desktop`.
 pub const APP_ID: &str = "app.hearthdeck.Hero";
 

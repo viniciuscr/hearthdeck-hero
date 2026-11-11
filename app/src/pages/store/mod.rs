@@ -82,14 +82,14 @@ impl<K: StoreKind> EventEmitter<PageEvent> for StorePage<K> {}
 /// executable's folder (the Windows setup and portable zip), next to it (a
 /// cargo build, the AppImage), else on `PATH`.
 pub(crate) fn login_helper() -> Option<std::path::PathBuf> {
-    let name = if cfg!(windows) { "heronite-epic-login.exe" } else { "heronite-epic-login" };
+    let name = if cfg!(windows) { format!("{}.exe", fork_brand::HELPER) } else { fork_brand::HELPER.to_string() };
     if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
-        let candidates = [dir.join(heronite_platform::dirs::HELPERS_DIR).join(name), dir.join(name)];
+        let candidates = [dir.join(heronite_platform::dirs::HELPERS_DIR).join(&name), dir.join(&name)];
         if let Some(found) = candidates.into_iter().find(|c| c.exists()) {
             return Some(found);
         }
     }
-    std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths).map(|d| d.join(name)).find(|p| p.exists()))
+    std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths).map(|d| d.join(&name)).find(|p| p.exists()))
 }
 
 /// Exit status of the login window on Windows when the Microsoft Edge

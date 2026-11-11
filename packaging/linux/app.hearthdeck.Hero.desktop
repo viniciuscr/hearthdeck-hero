@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Hearthdeck Hero
+GenericName=Game Launcher
+Comment=Every game you own, and films and series in Watch
+Exec=hearthdeck-hero %U
+Icon=app.hearthdeck.Hero
+Terminal=false
+Categories=Game;
+Keywords=games;launcher;steam;epic;wine;proton;emulator;watch;movies;series;
+MimeType=x-scheme-handler/hearthdeck;
+StartupWMClass=app.hearthdeck.Hero
