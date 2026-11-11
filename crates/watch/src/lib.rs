@@ -1,7 +1,7 @@
-//! Movies: Stremio account, addon protocol, local streaming server and playback.
+//! Watch: Stremio account, addon protocol, local streaming server and playback.
 //!
 //! Blocking, like every library crate here: the app calls these from a
-//! background thread. No GPUI. The contracts and rules are in `docs/MOVIES.md`.
+//! background thread. No GPUI. The contracts and rules are in `docs/WATCH.md`.
 
 pub mod account;
 pub mod addon;
@@ -21,7 +21,7 @@ pub use auth::AuthKey;
 pub use endpoints::Endpoints;
 pub use http::{Transport, UreqTransport};
 
-/// Whether this system ships the Movies section. Linux is the only target in v1.
+/// Whether this system ships the Watch space. Linux is the only target in v1.
 pub fn available() -> bool {
     cfg!(target_os = "linux")
 }

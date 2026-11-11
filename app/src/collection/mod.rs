@@ -125,7 +125,7 @@ enum ToastAction {
 pub enum Space {
     #[default]
     Games,
-    Movies,
+    Watch,
 }
 
 pub struct CollectionView {
@@ -259,7 +259,7 @@ impl CollectionView {
     pub fn space_title(&self) -> &'static str {
         match self.space {
             Space::Games => heronite_i18n::tr!("Collection"),
-            Space::Movies => heronite_i18n::tr!("Movies"),
+            Space::Watch => heronite_i18n::tr!("Watch"),
         }
     }
 
@@ -289,14 +289,14 @@ impl CollectionView {
         cx.notify();
     }
 
-    pub(super) fn movies_ui_state_path(&self) -> std::path::PathBuf {
-        self.app_paths.config.join("movies-ui-state.json")
+    pub(super) fn watch_ui_state_path(&self) -> std::path::PathBuf {
+        self.app_paths.config.join("watch-ui-state.json")
     }
 
     fn load_ui_for(&self, space: Space) -> UiState {
         match space {
             Space::Games => UiState::load(&self.app_paths),
-            Space::Movies => heronite_data::json_store::read_value(&self.movies_ui_state_path())
+            Space::Watch => heronite_data::json_store::read_value(&self.watch_ui_state_path())
                 .ok()
                 .filter(|value| value.is_object())
                 .map(|value| UiState::from_value(&value))
@@ -307,7 +307,7 @@ impl CollectionView {
     fn active_data_paths(&self) -> DataPaths {
         match self.space {
             Space::Games => self.data_paths.clone(),
-            Space::Movies => DataPaths::at(self.app_paths.cache.join(heronite_movies::collection::ROOT)),
+            Space::Watch => DataPaths::at(self.app_paths.cache.join(heronite_watch::collection::ROOT)),
         }
     }
 

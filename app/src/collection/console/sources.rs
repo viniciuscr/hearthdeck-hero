@@ -63,6 +63,16 @@ fn status_name(lib: &Library, value: &str) -> String {
         .map_or_else(|| value.to_string(), |s| heronite_data::status::status_label(&s.name).to_string())
 }
 
+/// Whether the provider put the item in its top catalog.
+fn is_top(game: &CollectionGame) -> bool {
+    game.game.extra.as_ref().and_then(|extra| extra.get("stremioTop")).and_then(serde_json::Value::as_bool).unwrap_or(false)
+}
+
+/// `movie` or `series` for the item; games without a watch kind are `movie`.
+fn watch_kind(game: &CollectionGame) -> &str {
+    game.game.extra.as_ref().and_then(|extra| extra.get("stremioType")).and_then(serde_json::Value::as_str).unwrap_or("movie")
+}
+
 /// A day number for "YYYY-MM-DD..." (enough to compare ages).
 fn day_number(date: &str) -> Option<i64> {
     let d = chrono::NaiveDate::parse_from_str(date.get(..10)?, "%Y-%m-%d").ok()?;
@@ -228,9 +238,9 @@ impl CollectionView {
         let (k, value) = kind.split_once(':').unwrap_or((kind, ""));
         let pick = |f: &dyn Fn(&CollectionGame) -> bool| games.iter().copied().filter(|g| f(g)).collect::<Vec<_>>();
         match k {
-            "provider" if value == "top" => pick(&|g: &CollectionGame| {
-                g.game.extra.as_ref().and_then(|extra| extra.get("stremioTop")).and_then(serde_json::Value::as_bool).unwrap_or(false)
-            }),
+            "provider" if value == "top" => pick(&|g: &CollectionGame| is_top(g)),
+            "provider" if value == "top-movies" => pick(&|g: &CollectionGame| is_top(g) && watch_kind(g) == "movie"),
+            "provider" if value == "top-series" => pick(&|g: &CollectionGame| is_top(g) && watch_kind(g) == "series"),
             "recent" => {
                 let mut v = by_last_played(pick(&|g| g.last_played.is_some()));
                 v.truncate(20);

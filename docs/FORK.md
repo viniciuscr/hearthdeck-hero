@@ -93,7 +93,7 @@ updater `viniciuscr/hearthdeck-hero`. Environment variables keep upstream's
 
 Every intentional difference from upstream is recorded here. `Fork-Seam`
 trailers and this table must agree. The Movies feature's contracts and
-implementation rules live in `docs/MOVIES.md`.
+implementation rules live in `docs/WATCH.md`.
 
 | ID | Upstream configuration item | Deviation | Status |
 |---|---|---|---|

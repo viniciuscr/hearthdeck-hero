@@ -1,9 +1,9 @@
 [package]
-name = "heronite-movies"
+name = "heronite-watch"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Movies: Stremio account, addon protocol, local streaming server and playback"
+description = "Watch: Stremio account, addon protocol, local streaming server and playback"
 
 [dependencies]
 heronite-data = { path = "../data" }

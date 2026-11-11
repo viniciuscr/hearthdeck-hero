@@ -1,6 +1,6 @@
 //! The installed Stremio service's local streaming server.
 //!
-//! **Probe-gated** (docs/MOVIES.md): `/settings` and `/{hash}/create` follow
+//! **Probe-gated** (docs/WATCH.md): `/settings` and `/{hash}/create` follow
 //! `stremio-core`, but the exact playback URL is confirmed on the target
 //! machine before Phase 5 ships. The service is a separate process; "localhost"
 //! is not first-party.

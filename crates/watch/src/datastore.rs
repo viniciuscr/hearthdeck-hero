@@ -2,7 +2,7 @@
 //!
 //! Reading is verified against a real account. Writing is probe-gated: the
 //! document is replaced whole, so every write reads first and merges into the
-//! full item (see `docs/MOVIES.md`).
+//! full item (see `docs/WATCH.md`).
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
@@ -181,7 +181,7 @@ pub enum Probe {
 }
 
 /// Proves the write envelope by sending the first existing record unchanged.
-/// Do this once before the first real progress write (docs/MOVIES.md).
+/// Do this once before the first real progress write (docs/WATCH.md).
 pub fn probe_put(client: &DatastoreClient<'_>) -> Result<Probe> {
     let items = client.get_all()?;
     let Some(first) = items.first() else {

@@ -21,7 +21,7 @@ use crate::UreqTransport;
 
 const CINEMETA: &str = "https://v3-cinemeta.strem.io/manifest.json";
 /// Where the proxy keeps its synthetic library.
-pub const ROOT: &str = "movies-library";
+pub const ROOT: &str = "watch-library";
 
 /// The movies Collection, refreshed from Stremio when possible. A provider
 /// failure keeps the last good library instead of emptying the screen.
@@ -47,19 +47,22 @@ pub fn fetch(app: &AppPaths) -> Result<Vec<MovieItem>> {
     if let Some(key) = store::read_auth(app)? {
         let client = DatastoreClient::new(&http, &endpoints, key);
         for item in continue_watching(&client.get_all()?) {
-            if item.kind == "movie" {
+            if item.kind == "movie" || item.kind == "series" {
                 movies.push(movie_from_library(item));
             }
         }
     }
     let mut addon = AddonClient::new(&http, CINEMETA)?;
     addon.manifest()?;
-    movies.extend(addon.catalog("movie", "top", &[])?.into_iter().map(|mut movie| {
-        movie.top = true;
-        movie
-    }));
+    for kind in ["movie", "series"] {
+        movies.extend(addon.catalog(kind, "top", &[])?.into_iter().map(|mut movie| {
+            movie.top = true;
+            movie.provider = "stremio".into();
+            movie
+        }));
+    }
     let mut seen = HashSet::new();
-    movies.retain(|movie| seen.insert(movie.id.clone()));
+    movies.retain(|movie| seen.insert(format!("{}:{}", movie.kind, movie.id)));
     Ok(movies)
 }
 
@@ -108,15 +111,17 @@ fn movie_from_library(item: &crate::datastore::LibraryItem) -> MovieItem {
         poster: item.poster.clone(),
         last_watched: item.state.last_watched.map(|date| date.to_rfc3339()),
         minutes_played: item.state.time_watched as f64 / 60_000.0,
+        provider: "stremio".into(),
         ..MovieItem::default()
     }
 }
 
 fn game_json(movie: &MovieItem) -> Value {
     let kind = if movie.kind.is_empty() { "movie" } else { movie.kind.as_str() };
+    let provider = if movie.provider.is_empty() { "stremio" } else { movie.provider.as_str() };
     let poster = movie.poster.clone();
     json!({
-        "runner": "stremio",
+        "runner": provider,
         "app_name": &movie.id,
         "title": &movie.name,
         "art_cover": poster.clone(),
@@ -126,15 +131,16 @@ fn game_json(movie: &MovieItem) -> Value {
         "description": &movie.description,
         "is_installed": true,
         "install": {"platform": "movie"},
-        "extra": {"stremioType": kind, "stremioTop": movie.top},
+        "extra": {"stremioType": kind, "stremioTop": movie.top, "provider": provider},
     })
 }
 
 fn local_meta(movie: &MovieItem) -> Value {
+    let provider = if movie.provider.is_empty() { "stremio" } else { movie.provider.as_str() };
     json!({
         "appName": &movie.id,
-        "runner": "stremio",
-        "source": "stremio",
+        "runner": provider,
+        "source": provider,
         "launchKind": "unavailable",
         "title": &movie.name,
     })

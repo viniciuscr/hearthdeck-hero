@@ -3,7 +3,7 @@
 //! The stream is JSON, zlib-compressed with no compression, base64-encoded and
 //! percent-encoded with Stremio's own set. The test pins the torrent form to
 //! the value `stremio-core` produces, so the encoding is verified even before
-//! the link is tried on hardware (docs/MOVIES.md, probe 4).
+//! the link is tried on hardware (docs/WATCH.md, probe 4).
 
 use std::io::Write;
 

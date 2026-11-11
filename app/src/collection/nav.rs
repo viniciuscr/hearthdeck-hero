@@ -400,14 +400,14 @@ impl CollectionView {
                         if page == Page::Collection {
                             p = p.child(
                                 nav_row(
-                                    "nav-movies".into(),
+                                    "nav-watch".into(),
                                     Icon::Videocam,
-                                    tr!("Movies"),
+                                    tr!("Watch"),
                                     Trailing::None,
-                                    this.page == Page::Collection && this.space == Space::Movies,
+                                    this.page == Page::Collection && this.space == Space::Watch,
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.set_space(Space::Movies, cx);
+                                    this.set_space(Space::Watch, cx);
                                     this.navigate(Page::Collection, window, cx);
                                 })),
                             );

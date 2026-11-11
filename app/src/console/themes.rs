@@ -2,10 +2,11 @@
 //! starting, its Settings section shown), changed in memory, and written off
 //! the UI thread (the latest version wins; writes never overlap).
 //!
-//! Games and Movies keep separate prefs: `console.json` for games,
-//! `console-movies.json` for movies. The first Films session starts from the
-//! Games theme and turns its shelves into movie rails (Continue watching,
-//! Top movies), so the two spaces can be customized independently.
+//! Games and Watch keep separate prefs: `console.json` for games,
+//! `console-watch.json` for the Watch space. The first Watch session starts
+//! from the Games theme and turns its shelves into watch rails (Continue
+//! watching, Top movies, Top series), so the two spaces can be customized
+//! independently.
 //!
 //! [`update`] is the one way to change the theme in use: it also installs it
 //! in [`super::look`] while console mode is on, so the screen follows at once.
@@ -22,7 +23,7 @@ use heronite_i18n::tr;
 use crate::collection::Space;
 
 const GAMES: u8 = 0;
-const MOVIES: u8 = 1;
+const WATCH: u8 = 1;
 
 static SPACE: AtomicU8 = AtomicU8::new(GAMES);
 static PREFS: Mutex<[Option<ConsolePrefs>; 2]> = Mutex::new([None, None]);
@@ -32,7 +33,7 @@ static WRITING: AtomicBool = AtomicBool::new(false);
 fn index(space: Space) -> usize {
     match space {
         Space::Games => GAMES as usize,
-        Space::Movies => MOVIES as usize,
+        Space::Watch => WATCH as usize,
     }
 }
 
@@ -43,36 +44,36 @@ pub fn set_space(space: Space) {
 }
 
 fn current_space() -> Space {
-    if SPACE.load(Ordering::Relaxed) == MOVIES {
-        Space::Movies
+    if SPACE.load(Ordering::Relaxed) == WATCH {
+        Space::Watch
     } else {
         Space::Games
     }
 }
 
-fn movies_path(app: &AppPaths) -> PathBuf {
-    app.config.join("console-movies.json")
+fn watch_path(app: &AppPaths) -> PathBuf {
+    app.config.join("console-watch.json")
 }
 
 fn load(app: &AppPaths, space: Space) -> ConsolePrefs {
     match space {
         Space::Games => ConsolePrefs::load(app),
-        Space::Movies => {
-            let path = movies_path(app);
+        Space::Watch => {
+            let path = watch_path(app);
             let saved = match json_store::read_value(&path) {
                 Ok(value) if value.is_object() => serde_json::from_value::<ConsolePrefs>(value).ok(),
                 _ => None,
             };
-            let mut prefs = saved.unwrap_or_else(|| movies_from(ConsolePrefs::load(app)));
+            let mut prefs = saved.unwrap_or_else(|| watch_from(ConsolePrefs::load(app)));
             prefs.theme = prefs.theme.normalized();
             prefs
         }
     }
 }
 
-/// The first Films session starts from the Games theme, with movie rails and
+/// The first Watch session starts from the Games theme, with watch rails and
 /// labels. It is only a starting point: the user's saved theme wins next time.
-fn movies_from(mut prefs: ConsolePrefs) -> ConsolePrefs {
+fn watch_from(mut prefs: ConsolePrefs) -> ConsolePrefs {
     let theme = &mut prefs.theme;
     theme.tabs.retain(|tab| {
         matches!(tab.source.as_str(), "all" | "installed" | "favourites")
@@ -81,7 +82,7 @@ fn movies_from(mut prefs: ConsolePrefs) -> ConsolePrefs {
     });
     for tab in &mut theme.tabs {
         if matches!(tab.source.as_str(), "all" | "installed") {
-            tab.name = tr!("Movies").to_string();
+            tab.name = tr!("Watch").to_string();
             tab.source = "all".into();
         }
     }
@@ -96,8 +97,11 @@ fn movies_from(mut prefs: ConsolePrefs) -> ConsolePrefs {
     if !theme.shelves.iter().any(|shelf| shelf.kind == "recent") {
         theme.shelves.insert(0, ShelfSpec { kind: "recent".into(), on: true, title: tr!("Continue watching").to_string() });
     }
-    if !theme.shelves.iter().any(|shelf| shelf.kind == "provider:top") {
-        theme.shelves.push(ShelfSpec { kind: "provider:top".into(), on: true, title: tr!("Top movies").to_string() });
+    if !theme.shelves.iter().any(|shelf| shelf.kind == "provider:top-movies") {
+        theme.shelves.push(ShelfSpec { kind: "provider:top-movies".into(), on: true, title: tr!("Top movies").to_string() });
+    }
+    if !theme.shelves.iter().any(|shelf| shelf.kind == "provider:top-series") {
+        theme.shelves.push(ShelfSpec { kind: "provider:top-series".into(), on: true, title: tr!("Top series").to_string() });
     }
     prefs
 }
@@ -187,6 +191,6 @@ fn save(app: &AppPaths, prefs: ConsolePrefs, space: Space) {
 fn write(app: &AppPaths, prefs: &ConsolePrefs, space: Space) -> anyhow::Result<()> {
     match space {
         Space::Games => prefs.save(app),
-        Space::Movies => json_store::write_indented(&movies_path(app), prefs, b"  "),
+        Space::Watch => json_store::write_indented(&watch_path(app), prefs, b"  "),
     }
 }

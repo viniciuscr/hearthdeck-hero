@@ -509,7 +509,7 @@ fn body(lay: &Layout, s: Sections) -> Div {
     let Sections { screenshots, overview, timeline, related, achievements, details, hltb, space } = s;
     // Films have no screenshots, HLTB, timeline or achievements in v1.
     let (screenshots, timeline, related, achievements, hltb) =
-        if space == Space::Movies { (None, None, None, None, None) } else { (screenshots, timeline, related, achievements, hltb) };
+        if space == Space::Watch { (None, None, None, None, None) } else { (screenshots, timeline, related, achievements, hltb) };
     let look = theme::appearance().sections;
     let mut main_parts = [
         (Section::Screenshots, screenshots),

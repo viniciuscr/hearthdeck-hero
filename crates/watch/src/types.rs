@@ -43,6 +43,8 @@ pub struct MovieItem {
     /// Stremio's watched minutes (`timeWatched`).
     #[serde(default)]
     pub minutes_played: f64,
+    #[serde(default)]
+    pub provider: String,
     /// The addon that supplied it, for provenance and error messages.
     #[serde(default)]
     pub addon: String,

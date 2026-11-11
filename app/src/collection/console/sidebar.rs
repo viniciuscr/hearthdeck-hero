@@ -50,7 +50,7 @@ impl Item {
         match self {
             Item::Go(p) => p.title(),
             Item::Space(Space::Games) => tr!("Games"),
-            Item::Space(Space::Movies) => tr!("Movies"),
+            Item::Space(Space::Watch) => tr!("Watch"),
             Item::Stores => crate::pages::stores::title(),
             Item::AddGame => tr!("Add game"),
             Item::Customize => tr!("Customize"),
@@ -64,7 +64,7 @@ impl Item {
         match self {
             Item::Go(p) => p.icon(),
             Item::Space(Space::Games) => Icon::GridView,
-            Item::Space(Space::Movies) => Icon::Videocam,
+            Item::Space(Space::Watch) => Icon::Videocam,
             Item::Stores => Icon::Storefront,
             Item::AddGame => Icon::Add,
             Item::Customize => Icon::Tune,
@@ -81,7 +81,7 @@ impl Item {
         Some(match name {
             "collection" => Item::Go(Page::Collection),
             "games" => Item::Space(Space::Games),
-            "movies" => Item::Space(Space::Movies),
+            "watch" | "movies" => Item::Space(Space::Watch),
             "downloads" => Item::Go(Page::Downloads),
             "wine-manager" => Item::Go(Page::WineManager),
             "stores" => Item::Stores,
@@ -128,11 +128,11 @@ pub(super) fn items() -> Vec<Item> {
     while out.last() == Some(&Item::Separator) {
         out.pop();
     }
-    if !out.contains(&Item::Space(Space::Movies)) {
+    if !out.contains(&Item::Space(Space::Watch)) {
         if out.last() == Some(&Item::Separator) {
             out.pop();
         }
-        out.push(Item::Space(Space::Movies));
+        out.push(Item::Space(Space::Watch));
     }
     out
 }
@@ -213,7 +213,7 @@ impl CollectionView {
         let items = items();
         let wanted = match self.space {
             Space::Games => None,
-            Space::Movies => Some(Item::Space(Space::Movies)),
+            Space::Watch => Some(Item::Space(Space::Watch)),
         };
         wanted
             .and_then(|wanted| items.iter().position(|item| *item == wanted))

@@ -1,28 +1,34 @@
-# Movies (Stremio) — implementation contract
+# Watch (Stremio first) — implementation contract
 
 Status: specification for Phases 0–5. Nothing here is implemented yet.
 `docs/FORK.md` owns the fork's change-control rules; this document owns the
-Movies feature's definitions and the rules that apply while building it.
+Watch feature's definitions and the rules that apply while building it.
 
-> **Revision 2026-11-11 — the Movies space is the Collection.**
-> The separate `Page::Movies`/`app/src/pages/movies` interface was removed.
-> `crates/movies::collection` writes Stremio films into a synthetic
-> Heroic-format root, and `CollectionView` loads it under `Space::Movies`.
-> The same grid, Focus panel, shelves, filters, game page and console layout
-> render it; only the `Library` behind them changes. Console mode is the
-> primary target; the desktop menu carries the same switch. A film's Play
-> action opens `stremio:///detail/<type>/<id>`.
+> **Revision 2026-11-11 — the Watch space is the Collection.**
+> The separate page was removed. `crates/watch::collection` writes Stremio
+> films and series into a synthetic Heroic-format root, and `CollectionView`
+> loads it under `Space::Watch`. The same grid, Focus panel, shelves, filters,
+> game page and console layout render it; only the `Library` behind them
+> changes. Console mode is the primary target; the desktop menu carries the
+> same switch. Play opens `stremio:///detail/<type>/<id>`.
+
+> **Revision 2026-11-11 — series and providers.**
+> Watch covers films and series. Stremio is the first provider: it fills the
+> same `Library` through `crates/watch`. Future providers (YouTube, HBO Max,
+> Prime Video, Netflix) are adapters that produce the same records; they must
+> not require changes to the Collection or console screens. The provider name
+> travels in `GameInfo.runner` / `source` and in `WatchItem.provider`.
 
 ## Scope
 
-**In:** Linux/CachyOS, films, a Stremio account linked by code, discovery
-through Cinemeta, streams from Torrentio, playback by handing off to the
-Stremio app or by a supervised `mpv`, and watch-progress read/write through
+**In:** Linux/CachyOS, films and series, a Stremio account linked by code,
+discovery through Cinemeta, streams from Torrentio, playback by handing off to
+the Stremio app or by a supervised `mpv`, and watch-progress read/write through
 Stremio's datastore.
 
-**Out (v1):** series and episode selection, Windows playback, an in-app video
-renderer, any plugin/addon host, and any change to the game catalog, its data
-files or its launch paths.
+**Out (v1):** episode selection inside a series, Windows playback, an in-app
+video renderer, any plugin/addon host, and any change to the game catalog, its
+data files or its launch paths.
 
 **Non-negotiable:** a gamepad must control every playback path we ship, either
 directly or through a documented handoff. No secret may reach a log, an error
@@ -32,9 +38,8 @@ string or a crash report. No write may delete or un-watch an account record.
 
 | Unit | Responsibility | May depend on | Must not |
 |---|---|---|---|
-| `crates/movies` | Stremio account, datastore, addon protocol, streaming-server client, mpv supervisor, local movie store | `heronite-data`, `heronite-images`, `heronite-platform`, `heronite-launch`, `ureq` | GPUI, `app`, or any upstream crate edited in place |
-| `app/src/collection/` (`Space::Movies`) | The same Collection/console screens, loading the proxy `Library` | `crates/movies`, `heronite-data` | A second grid, Focus panel or shelves implementation |
-| `app/src/pages/mod.rs` | One `Page::Movies` arm per match | — | Movies logic beyond the arm |
+| `crates/watch` | Stremio account, datastore, addon protocol, streaming-server client, mpv supervisor, local watch store | `heronite-data`, `heronite-images`, `heronite-platform`, `heronite-launch`, `ureq` | GPUI, `app`, or any upstream crate edited in place |
+| `app/src/collection/` (`Space::Watch`) | The same Collection/console screens, loading the proxy `Library` | `crates/watch`, `heronite-data` | A second grid, Focus panel or shelves implementation |
 | `app/src/collection/nav.rs`, `collection/console/*`, `collection/palette/*` | Navigation and shell route entries | — | Feature logic |
 
 **Composition rule.** New behavior lives in the new crate and is imported by
@@ -44,16 +49,16 @@ crate, add inherent methods to its types, or assume a wrapper intercepts calls
 made by code that still names the original type.
 
 **Editable upstream files.** Only the closed enums and exhaustive matches that
-cannot be extended from outside: `Page` (`app/src/pages/mod.rs`), the page
-hooks and `Trailing` match in `app/src/collection/nav.rs`, the console `Screen`
-route in `app/src/collection/console/mod.rs`, the sidebar `Item::parse` in
-`app/src/collection/console/sidebar.rs`, and the palette's page source/rank
-tables. Each edit is one arm, carries `Fork-Seam: F-006`, and is listed in
+cannot be extended from outside: the console `Screen` route in
+`app/src/collection/console/mod.rs`, the sidebar `Item::parse` in
+`app/src/collection/console/sidebar.rs`, and the Collection header/menu rows.
+Each edit is one arm, carries `Fork-Seam: F-006`, and is listed in
 `docs/FORK.md`.
 
-**Forbidden shortcut.** Do not add a `Feature::Movies` variant. Route the page's
-availability through `heronite_movies::available()`; the `Feature` enum is an
-upstream closed enum and would widen the deviation surface for no benefit.
+**Forbidden shortcut.** Do not add a `Feature::Watch` variant. Route the
+space's availability through `heronite_watch::available()`; the `Feature` enum
+is an upstream closed enum and would widen the deviation surface for no
+benefit.
 
 ## Definitions
 
@@ -252,12 +257,12 @@ Envelope, source `stremio-core`:
 
 ## Rules
 
-1. **Compose, don't patch.** New behavior in `crates/movies`; no edits to
+1. **Compose, don't patch.** New behavior in `crates/watch`; no edits to
    upstream crates; only the registered `app` seams.
 2. **One arm per seam.** Every upstream enum match gains exactly one arm;
    `Fork-Seam: F-006` on the commit; update the register in the same change.
 3. **No new `Feature` variants.** Availability comes from
-   `heronite_movies::available()`.
+   `heronite_watch::available()`.
 4. **Blocking off the UI.** Library crates are blocking; short calls use
    `cx.background_spawn`, long-lived work gets a dedicated thread. No I/O in
    `render`.
@@ -289,7 +294,7 @@ Envelope, source `stremio-core`:
 
 | ID | Files | Deviation | Status |
 |---|---|---|---|
-| F-006 | `app/src/pages/mod.rs`, `app/src/collection/nav.rs`, `app/src/collection/palette/*` | `Page::Movies`, nav and palette arms (one arm each); console route in Phase 4 | active |
+| F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection `Space::Watch`, console space item, Stremio Play action | active |
 
 ## Phase 0 probe checklist
 
@@ -309,11 +314,11 @@ Envelope, source `stremio-core`:
 ## Phase exit criteria
 
 - **P0:** every probe above recorded in this file; unknowns have a decision.
-- **P1:** `crates/movies` compiles on Linux and Windows; fixture tests pass; no UI.
+- **P1:** `crates/watch` compiles on Linux and Windows; fixture tests pass; no UI.
 - **P2:** link + datastore + merge/write with mock-server tests; real-account
   test ignored.
-- **P3:** `Space::Movies` in the Collection (desktop), proxy Library, locales; gate green.
-- **P4:** console Movies item, same shelves and game page, Stremio Play handoff.
+- **P3:** `Space::Watch` in the Collection (desktop), proxy Library, locales; gate green.
+- **P4:** console Watch item, same shelves and game page, Stremio Play handoff.
 - **P5:** native mpv, streaming server, gamepad modes; hardware checklist green.
 
 ## Probe log
@@ -325,7 +330,7 @@ Envelope, source `stremio-core`:
   checklist above after installing the Stremio desktop app (or Stremio
   Service) and `mpv`.
 - **2026-11-10, Phase 5.** Native playback is implemented in
-  `crates/movies/src/player.rs`: a guarded mpv process group, a private `0700`
+  `crates/watch/src/player.rs`: a guarded mpv process group, a private `0700`
   IPC directory, `--` before the URL, and `--input-gamepad=yes` only when
   `mpv --list-options` declares it. Streams with an `infoHash` go through the
   local Stremio service; direct URLs go straight to mpv. Progress is saved

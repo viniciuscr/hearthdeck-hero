@@ -295,7 +295,7 @@ impl CollectionView {
     pub(super) fn save_ui(&self) {
         let result = match self.space {
             Space::Games => self.ui.save(&self.app_paths),
-            Space::Movies => heronite_data::json_store::write(&self.movies_ui_state_path(), &self.ui.to_value()),
+            Space::Watch => heronite_data::json_store::write(&self.watch_ui_state_path(), &self.ui.to_value()),
         };
         if let Err(err) = result {
             log::warn!("saving ui state: {err:#}");

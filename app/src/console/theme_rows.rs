@@ -374,6 +374,8 @@ pub fn kind_label(kind: &str, status_name: impl Fn(&str) -> String) -> String {
         "statuses" => tr!("One per status").into(),
         "status" => status_name(value),
         "category" if value == UNCATEGORIZED => tr!("Uncategorized").into(),
+        "provider" if value == "top-movies" => tr!("Top movies").into(),
+        "provider" if value == "top-series" => tr!("Top series").into(),
         "provider" if value == "top" => tr!("Top movies").into(),
         _ => value.to_string(),
     }
@@ -429,7 +431,8 @@ pub fn addable_kinds(cx: &Ctx) -> Vec<(&'static str, String, String)> {
     for k in ["recent", "favourites", "installed", "statuses", "added", "backlog-short", "random", "forgotten"] {
         out.push((tr!("Shelves"), k.to_string(), kind_label(k, |k| f.status_name(k))));
     }
-    out.push((tr!("Movies"), "provider:top".into(), tr!("Top movies").into()));
+    out.push((tr!("Watch"), "provider:top-movies".into(), tr!("Top movies").into()));
+    out.push((tr!("Watch"), "provider:top-series".into(), tr!("Top series").into()));
     out.extend(f.statuses.iter().map(|(k, n)| (tr!("Status"), format!("status:{k}"), n.clone())));
     out.extend(f.platforms.iter().map(|n| (tr!("Platform"), format!("platform:{n}"), n.clone())));
     out.extend(f.stores.iter().map(|n| (tr!("Store"), format!("store:{n}"), n.clone())));

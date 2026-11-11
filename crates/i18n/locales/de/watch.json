@@ -2,6 +2,7 @@
   "Continue watching": "Weiterschauen",
   "Could not open Stremio: {error}": "Stremio konnte nicht geöffnet werden: {error}",
   "From the catalog": "Aus dem Katalog",
-  "Movies": "Filme",
-  "Top movies": "Top-Filme"
+  "Top movies": "Top-Filme",
+  "Top series": "Top-Serien",
+  "Watch": "Ansehen"
 }

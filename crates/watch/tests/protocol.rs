@@ -7,13 +7,13 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use url::Url;
 
-use heronite_movies::account::{addon_collection, create_link, read_link, LinkPoll};
-use heronite_movies::addon::AddonClient;
-use heronite_movies::datastore::{continue_watching, probe_put, write_progress, DatastoreClient, Probe};
-use heronite_movies::endpoints::Endpoints;
-use heronite_movies::streaming::StreamingServer;
-use heronite_movies::types::MovieProgress;
-use heronite_movies::{AuthKey, Transport};
+use heronite_watch::account::{addon_collection, create_link, read_link, LinkPoll};
+use heronite_watch::addon::AddonClient;
+use heronite_watch::datastore::{continue_watching, probe_put, write_progress, DatastoreClient, Probe};
+use heronite_watch::endpoints::Endpoints;
+use heronite_watch::streaming::StreamingServer;
+use heronite_watch::types::MovieProgress;
+use heronite_watch::{AuthKey, Transport};
 
 const HASH: &str = "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c";
 

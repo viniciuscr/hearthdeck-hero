@@ -30,7 +30,7 @@ fn load_all(data_paths: &DataPaths, app: &AppPaths, cache: &std::path::Path, inc
     let t = Instant::now();
     let lib = match space {
         Space::Games => Library::load_with(data_paths, include_hidden)?,
-        Space::Movies => heronite_movies::collection::library(app, include_hidden)?,
+        Space::Watch => heronite_watch::collection::library(app, include_hidden)?,
     };
     let paths = &lib.paths;
     let wiki = WikiCache::load(paths);
