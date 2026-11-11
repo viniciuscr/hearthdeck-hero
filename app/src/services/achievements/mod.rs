@@ -835,7 +835,7 @@ pub fn notify_test(n: usize) {
         .take(n)
         .map(|name| (Source::Steam, Achievement { name: name.to_string(), unlocked: true, ..Default::default() }))
         .collect();
-    notify_unlocks(tr!("Heronite (test)"), &unlocks);
+    notify_unlocks(tr!("Hearthdeck Hero (test)"), &unlocks);
 }
 
 fn notify_unlocks(title: &str, unlocks: &[(Source, Achievement)]) {

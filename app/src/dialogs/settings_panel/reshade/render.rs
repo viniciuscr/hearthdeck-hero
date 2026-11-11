@@ -113,10 +113,10 @@ impl SettingsPanel {
             State::NoExecutable => {
                 let picked = self.reshade_settings().target;
                 let text = match picked.is_empty() {
-                    true => tr!("Heronite did not find the program that draws the game in its folder. Choose it: ReShade goes next to it.")
+                    true => tr!("Hearthdeck Hero did not find the program that draws the game in its folder. Choose it: ReShade goes next to it.")
                         .to_string(),
                     false => tr!(
-                        "{file} is not a Windows program Heronite can read. Choose the game's .exe.",
+                        "{file} is not a Windows program Hearthdeck Hero can read. Choose the game's .exe.",
                         file = file_name(std::path::Path::new(&picked))
                     )
                     .to_string(),
@@ -136,7 +136,7 @@ impl SettingsPanel {
                 let text = match cfg!(windows) {
                     true => tr!("{exe} uses Vulkan. ReShade adds itself to Vulkan games as a layer, through its own installer.", exe),
                     false => tr!(
-                        "{exe} uses Vulkan. Heronite cannot add ReShade to Vulkan games; vkBasalt applies ReShade effects to them.",
+                        "{exe} uses Vulkan. Hearthdeck Hero cannot add ReShade to Vulkan games; vkBasalt applies ReShade effects to them.",
                         exe
                     ),
                 };
@@ -145,17 +145,17 @@ impl SettingsPanel {
             }
             State::Unsupported(_) => {
                 let text =
-                    tr!("{exe} uses Direct3D 8, which needs the d3d8to9 wrapper before ReShade. Heronite does not install it yet.", exe);
+                    tr!("{exe} uses Direct3D 8, which needs the d3d8to9 wrapper before ReShade. Hearthdeck Hero does not install it yet.", exe);
                 r = r.child(row("ReShade", Some(&text), div()));
             }
             State::Banned => {
-                let text = tr!("ReShade's own compatibility list says {exe} bans or blocks ReShade, so Heronite does not install it.", exe);
+                let text = tr!("ReShade's own compatibility list says {exe} bans or blocks ReShade, so Hearthdeck Hero does not install it.", exe);
                 r = r.child(row("ReShade", None, div())).child(div().py(px(12.)).child(warn_line(&text)));
             }
             State::Conflict { path, product } => {
                 let owner = product.clone().unwrap_or_else(|| tr!("another program").into());
                 let text = tr!(
-                    "{file} in the game's folder belongs to {owner}. Heronite never replaces another program's DLL.",
+                    "{file} in the game's folder belongs to {owner}. Hearthdeck Hero never replaces another program's DLL.",
                     file = file_name(path),
                     owner
                 );
@@ -181,7 +181,7 @@ impl SettingsPanel {
                     false => tr!("ReShade {version} installed by hand ({proxy})", version, proxy),
                     true => tr!("ReShade {version} installed by hand ({proxy}, switched off)", version, proxy),
                 };
-                let about = tr!("Adopt it to switch, update and remove it here: nothing is downloaded or changed. Replace installs Heronite's copy and keeps ReShade.ini and the preset.");
+                let about = tr!("Adopt it to switch, update and remove it here: nothing is downloaded or changed. Replace installs Hearthdeck Hero's copy and keeps ReShade.ini and the preset.");
                 r = r.child(super::render_setup::title_row(title, super::render_setup::about(about), div()));
                 let adopt = action_button(
                     "reshade-adopt",
@@ -216,7 +216,7 @@ impl SettingsPanel {
                 .child(tr!("This game uses {anticheats}", anticheats = names.join(", "))),
         );
         let risk = tr!(
-            "This game uses {anticheats}. Anti-cheat software can block ReShade, stop the game from starting, or ban your account, especially in online modes. Heronite cannot tell whether it is safe for this game.",
+            "This game uses {anticheats}. Anti-cheat software can block ReShade, stop the game from starting, or ban your account, especially in online modes. Hearthdeck Hero cannot tell whether it is safe for this game.",
             anticheats = names.join(", ")
         );
         let mut sources = div().flex().flex_col().gap(px(2.));

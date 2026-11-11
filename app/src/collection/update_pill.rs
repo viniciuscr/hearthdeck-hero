@@ -207,7 +207,7 @@ fn update_popover(v: UpdateView, cx: &mut Context<CollectionView>) -> AnyElement
                 Some(button_sm("upd-page", ButtonKind::Primary, tr!("Download")).on_click(move |_, _, _| update::open_page(&page)))
             };
             panel
-                .child(title(format!("Heronite {}", v.version)))
+                .child(title(format!("Hearthdeck Hero {}", v.version)))
                 .child(detail(you_have))
                 .children(v.manager_update.map(|how| detail(tr(how).into())))
                 .child(
@@ -217,13 +217,13 @@ fn update_popover(v: UpdateView, cx: &mut Context<CollectionView>) -> AnyElement
                 .child(footer.child(ignore).child(div().flex_1()).child(notes).children(main))
         }
         (Banner::Downloading, Phase::Downloading(p)) => panel
-            .child(title(tr!("Downloading Heronite {version}", version = v.version)))
+            .child(title(tr!("Downloading Hearthdeck Hero {version}", version = v.version)))
             .child(detail(update::progress_text(p)))
             .child(div().py(px(4.)).child(progress_bar(p.percent(), 4., theme::accent())))
             .child(footer.child(button_sm("upd-cancel", ButtonKind::Ghost, tr!("Cancel")).on_click(act(Updater::cancel)))),
         // The package manager cannot be stopped halfway.
         (Banner::Downloading, _) => panel
-            .child(title(tr!("Installing Heronite {version}", version = v.version)))
+            .child(title(tr!("Installing Hearthdeck Hero {version}", version = v.version)))
             .child(detail(tr!("Enter your password if you are asked.").into())),
         (Banner::Ready, _) => {
             let why = match (&v.blocker, v.on_quit) {
@@ -233,9 +233,9 @@ fn update_popover(v: UpdateView, cx: &mut Context<CollectionView>) -> AnyElement
                 (None, true) => tr!("Restart to install it now, or it installs when you quit.").into(),
             };
             let heading = if v.on_quit {
-                tr!("Heronite {version} is ready to install", version = v.version)
+                tr!("Hearthdeck Hero {version} is ready to install", version = v.version)
             } else {
-                tr!("Heronite {version} is installed", version = v.version)
+                tr!("Hearthdeck Hero {version} is installed", version = v.version)
             };
             panel.child(title(heading)).child(detail(why)).child(
                 footer.child(button_sm("upd-later", ButtonKind::Ghost, tr!("Later")).on_click(act(Updater::dismiss))).child(
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn the_popover_lists_the_first_notes() {
-        let md = "**Download:** x\n\n## Highlights\n\n- One\n- Two\n\n## Fixes\n\n- Three\n- Four\n- Five\n\n**Enjoying Heronite?** y";
+        let md = "**Download:** x\n\n## Highlights\n\n- One\n- Two\n\n## Fixes\n\n- Three\n- Four\n- Five\n\n**Enjoying Hearthdeck Hero?** y";
         let (list, more) = highlights(md);
         assert_eq!(list, ["One", "Two", "Three", "Four"]);
         assert_eq!(more, 1);

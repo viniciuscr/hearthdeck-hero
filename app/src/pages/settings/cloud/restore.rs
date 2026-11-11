@@ -105,11 +105,11 @@ fn listed_body(d: &mut SettingsPage, listed: &InCloud, busy: bool, cx: &mut Cont
     };
     let backup_row = match &newest {
         Some(b) => row(
-            tr!("Heronite backup"),
+            tr!("Hearthdeck Hero backup"),
             Some(&format!("{} \u{b7} {}", made(b), human_size(b.bytes))),
             bring("cloud-bring-backup", tr!("Restore"), true, Bring::Backup(b.clone()), cx),
         ),
-        None => row(tr!("Heronite backup"), Some(tr!("None from this PC")), div()),
+        None => row(tr!("Hearthdeck Hero backup"), Some(tr!("None from this PC")), div()),
     };
     let saves_row = row(
         tr!("Game saves"),
@@ -156,7 +156,7 @@ fn listed_body(d: &mut SettingsPage, listed: &InCloud, busy: bool, cx: &mut Cont
                 .gap(px(12.))
                 .pt(px(10.))
                 .child(everything)
-                .child(meta_text(tr!("The saves and screenshots first, then the backup: restoring it restarts Heronite."))),
+                .child(meta_text(tr!("The saves and screenshots first, then the backup: restoring it restarts Hearthdeck Hero."))),
         )
         .children(render_all_backups(listed, busy, cx))
 }

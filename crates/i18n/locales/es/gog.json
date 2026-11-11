@@ -4,7 +4,7 @@
   "Could not delete {dir}: {error}": "No se pudo eliminar {dir}: {error}",
   "Could not delete {path}: {error}": "No se pudo eliminar {path}: {error}",
   "Could not download the Windows components this game needs: {error}": "No se pudieron descargar los componentes de Windows que necesita este juego: {error}",
-  "Could not get gogdl, which Heronite uses for GOG: {error}": "No se pudo obtener gogdl, que Heronite usa para GOG: {error}",
+  "Could not get gogdl, which Hearthdeck Hero uses for GOG: {error}": "No se pudo obtener gogdl, que Hearthdeck Hero usa para GOG: {error}",
   "Failed to log in with gogdl: {error}": "Error al iniciar sesión con gogdl: {error}",
   "GOG did not accept that code": "GOG no aceptó ese código",
   "Logged in, but the account information could not be read": "Sesión iniciada, pero no se pudo leer la información de la cuenta",

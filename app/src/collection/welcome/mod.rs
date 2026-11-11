@@ -185,7 +185,7 @@ impl CollectionView {
             SteamState::NotInstalled => status(
                 tr!("Not found"),
                 theme::text_dim(),
-                tr!("Steam is not on this PC. Install it and sign in: Heronite notices by itself."),
+                tr!("Steam is not on this PC. Install it and sign in: Hearthdeck Hero notices by itself."),
             ),
             SteamState::Closed => status(
                 tr!("Closed"),
@@ -199,27 +199,27 @@ impl CollectionView {
             SteamState::NotAnswering => status(
                 tr!("Not answering"),
                 theme::warning(),
-                tr!("Steam is open but does not let Heronite read its library. Finish signing in, or restart Steam once."),
+                tr!("Steam is open but does not let Hearthdeck Hero read its library. Finish signing in, or restart Steam once."),
             ),
             SteamState::NeedsRestart => status(
                 tr!("Restart once"),
                 theme::warning(),
-                tr!("Steam was open before Heronite could prepare it. Restart it once to bring in your whole library."),
+                tr!("Steam was open before Hearthdeck Hero could prepare it. Restart it once to bring in your whole library."),
             ),
             SteamState::Blocked => status(
                 tr!("Blocked by another tool"),
                 theme::warning(),
-                tr!("Another tool on this PC (Millennium, for example) keeps Steam closed to Heronite. Its installed games still come in."),
+                tr!("Another tool on this PC (Millennium, for example) keeps Steam closed to Hearthdeck Hero. Its installed games still come in."),
             ),
             SteamState::Failed => status(
                 tr!("Could not connect"),
                 theme::danger_text(),
-                tr!("Steam restarted but did not let Heronite read its library. Its installed games still come in."),
+                tr!("Steam restarted but did not let Hearthdeck Hero read its library. Its installed games still come in."),
             ),
             SteamState::PortTaken => status(
                 tr!("Port in use"),
                 theme::warning(),
-                tr!("Another program on this PC uses the port Steam needs to let Heronite in. The Steam page says which."),
+                tr!("Another program on this PC uses the port Steam needs to let Hearthdeck Hero in. The Steam page says which."),
             ),
             SteamState::Reading => status(tr!("Reading your library"), busy, tr!("Reading your Steam library\u{2026} a few seconds.")),
             SteamState::Connected => {
@@ -313,7 +313,7 @@ impl CollectionView {
                     .text_size(px(16.))
                     .line_height(px(23.))
                     .text_color(theme::text_muted())
-                    .child(tr!("Heronite looks on this PC and brings in what it finds by itself.")),
+                    .child(tr!("Hearthdeck Hero looks on this PC and brings in what it finds by itself.")),
             )
             .child(label(Icon::TravelExplore, tr!("Found on this PC")))
             .child(

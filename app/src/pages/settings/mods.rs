@@ -107,7 +107,7 @@ fn status_line(text: impl Into<SharedString>, ok: bool) -> Div {
 fn handlers_text(state: HandlerState) -> (&'static str, bool) {
     match state {
         HandlerState::Unknown => (tr!("Looking…"), true),
-        HandlerState::Ours => (tr!("Heronite opens them"), true),
+        HandlerState::Ours => (tr!("Hearthdeck Hero opens them"), true),
         HandlerState::Other => (tr!("Another app opens them"), false),
         HandlerState::None => (tr!("No app opens them"), true),
     }
@@ -179,7 +179,7 @@ fn account_card(d: &SettingsPage, f: &Facts, cx: &mut Context<SettingsPage>) -> 
             );
     };
     let (pill, detail) = if premium {
-        (status_pill(tr!("Premium"), theme::success()), tr!("Mods install straight from Heronite."))
+        (status_pill(tr!("Premium"), theme::success()), tr!("Mods install straight from Hearthdeck Hero."))
     } else {
         (tag_pill(tr!("Free")), tr!("Free accounts download from the \"Mod manager download\" button on a mod's page on the site."))
     };
@@ -208,14 +208,14 @@ fn links_card(f: &Facts, cx: &mut Context<SettingsPage>) -> Div {
         control = control.child(action_button(
             "mods-register",
             ButtonKind::Primary,
-            tr!("Open them with Heronite"),
+            tr!("Open them with Hearthdeck Hero"),
             true,
             cx.listener(|_, _, _, cx| mods::service(cx).update(cx, |s, cx| s.register_handlers(cx))),
         ));
     }
     card([row(
         "nxm:// · ror2mm://",
-        Some(tr!("The \"Mod manager download\" button of Nexus Mods and \"Install with mod manager\" of Thunderstore start the download in Heronite.")),
+        Some(tr!("The \"Mod manager download\" button of Nexus Mods and \"Install with mod manager\" of Thunderstore start the download in Hearthdeck Hero.")),
         control,
     )
     .into_any_element()])
@@ -276,11 +276,11 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
         .px(px(6.))
         .child(meta_text(if cfg!(windows) {
             tr!(
-                "Mods apply only when the game is started from Heronite. Their files are put into the game's folder while it runs and taken out when it ends; what the game writes there goes to the mods' overwrite folder."
+                "Mods apply only when the game is started from Hearthdeck Hero. Their files are put into the game's folder while it runs and taken out when it ends; what the game writes there goes to the mods' overwrite folder."
             )
         } else {
             tr!(
-                "Mods apply only when the game is started from Heronite. The game's own folder is never changed: the mods are laid over it while the game runs and taken away when it ends."
+                "Mods apply only when the game is started from Hearthdeck Hero. The game's own folder is never changed: the mods are laid over it while the game runs and taken away when it ends."
             )
         }))
         .child(meta_text(tr!(
@@ -295,7 +295,7 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
         .pb(px(4.))
         .child(div().pt(px(1.)).child(crate::dialogs::mods::experimental_pill()))
         .child(div().flex_1().min_w_0().child(meta_text(tr!(
-            "Mods are new in Heronite. They work for games whose mods are files in the game's folder; games that keep mods elsewhere, or that need their own tools, are not covered. Each game's Mods says what to expect for it."
+            "Mods are new in Hearthdeck Hero. They work for games whose mods are files in the game's folder; games that keep mods elsewhere, or that need their own tools, are not covered. Each game's Mods says what to expect for it."
         ))));
     div()
         .flex()
@@ -342,7 +342,7 @@ pub(super) fn console_rows(d: &SettingsPage, cx: &App) -> Vec<crate::console::li
     rows.push(Row::header(tr!("Links from the sites")));
     rows.push(Row::info("links", "nxm:// · ror2mm://", links));
     if f.handlers != HandlerState::Ours && f.handlers != HandlerState::Unknown {
-        rows.push(Row::action("register", tr!("Open them with Heronite")));
+        rows.push(Row::action("register", tr!("Open them with Hearthdeck Hero")));
     }
     rows.push(Row::header(tr!("Applying mods")));
     if let Some(w) = f.support.as_ref().and_then(|s| s.windows) {

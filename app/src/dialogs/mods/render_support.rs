@@ -57,7 +57,7 @@ impl ModsDialog {
             experimental_pill(),
             tr!("Mods are experimental"),
             tr!(
-                "Heronite puts a mod's files over the game's folder while you play from here. That is enough for many games, not all: some keep mods elsewhere or need their own tools. The label under the title says what to expect for this game."
+                "Hearthdeck Hero puts a mod's files over the game's folder while you play from here. That is enough for many games, not all: some keep mods elsewhere or need their own tools. The label under the title says what to expect for this game."
             ),
         )
     }

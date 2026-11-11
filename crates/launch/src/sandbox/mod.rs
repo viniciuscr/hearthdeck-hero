@@ -1,4 +1,4 @@
-//! The sandbox (`heroniteSandbox`, a Heronite key of the game's settings):
+//! The sandbox (`heroniteSandbox`, a Hearthdeck Hero key of the game's settings):
 //! everything a game runs, and everything run in its Wine prefix, goes
 //! through bubblewrap (`bwrap`). Inside, the program sees the system
 //! read-only, its prefix, its game folder (read-only), the graphics card,
@@ -163,7 +163,7 @@ pub struct Request<'a> {
 /// settings to show the state).
 pub fn unavailable(probe: &dyn Probe) -> Option<String> {
     if heronite_platform::flatpak::active() {
-        return Some(tr!("The sandbox does not run inside the Flatpak of Heronite, which keeps its games in its own sandbox. Turn it off for this game, or use the AppImage.").into());
+        return Some(tr!("The sandbox does not run inside the Flatpak of Hearthdeck Hero, which keeps its games in its own sandbox. Turn it off for this game, or use the AppImage.").into());
     }
     match probe.bwrap() {
         None => Some(tr!("The sandbox needs bubblewrap (bwrap), which is not installed. Install the bubblewrap package, or turn the sandbox off for this game.").into()),

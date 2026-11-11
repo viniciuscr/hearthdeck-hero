@@ -216,10 +216,10 @@ pub(super) fn about(d: &SourceDescriptor) -> Option<&str> {
         ids::STEAMGRIDDB => tr!("Adds SteamGridDB covers and backgrounds to the image search."),
         ids::WEB_IMAGES => tr!("Asked only when you look for a picture by hand."),
         ids::HOW_LONG_TO_BEAT => {
-            tr!("How long a game takes to beat, from howlongtobeat.com. Heronite is not affiliated with HowLongToBeat.")
+            tr!("How long a game takes to beat, from howlongtobeat.com. Hearthdeck Hero is not affiliated with HowLongToBeat.")
         }
         ids::STEAM_TAGS => tr!(
-            "The tags Steam players voted for, for games on Steam (other stores' games too, once their metadata found them on Steam). Filter by them in the View menu; rename or remove one in Library fields. From the Steam Web API; Heronite is not affiliated with Valve."
+            "The tags Steam players voted for, for games on Steam (other stores' games too, once their metadata found them on Steam). Filter by them in the View menu; rename or remove one in Library fields. From the Steam Web API; Hearthdeck Hero is not affiliated with Valve."
         ),
         ids::PROTONDB => tr!("How well a game runs on Linux, from protondb.com."),
         _ => return None,

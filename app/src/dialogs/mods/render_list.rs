@@ -96,7 +96,7 @@ impl ModsDialog {
             .child(div().mt(px(6.)).text_size(px(18.)).font_family(theme::font_heading()).font_weight(theme::W_BOLD).child(tr!("No mods yet")))
             .child(
                 div().max_w(px(460.)).text_center().text_size(px(13.5)).line_height(px(19.)).text_color(theme::text_muted()).child(tr!(
-                    "Mods are added here and applied only when you play from Heronite: the game's own files are never changed. Find some online, or drop an archive on this window."
+                    "Mods are added here and applied only when you play from Hearthdeck Hero: the game's own files are never changed. Find some online, or drop an archive on this window."
                 )),
             )
             .child(actions)

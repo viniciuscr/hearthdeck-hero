@@ -67,7 +67,7 @@ label_fn!(background_name, BackgroundSource {
 });
 label_fn!(bg_motion_name, BackgroundMotion { Still => n_!("Still"), Drift => n_!("Slow drift") });
 label_fn!(font_name, ConsoleFont {
-    Heronite => n_!("Heronite"),
+    Heronite => n_!("Hearthdeck Hero"),
     Cabin => n_!("Cabin"),
     Rubik => n_!("Rubik"),
     System => n_!("System"),

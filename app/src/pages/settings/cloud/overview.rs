@@ -82,7 +82,7 @@ fn intro() -> Div {
                 .child(div().text_size(px(17.)).font_weight(theme::W_BOLD).text_color(theme::text_bright()).child(tr!("Your library, in the cloud"))),
         )
         .child(div().text_size(px(13.)).line_height(px(19.)).text_color(theme::text_muted()).child(tr!(
-            "Keep the same library on every PC you play on, and a copy of your Heronite backups, game saves and screenshots. Each PC writes only its own files, so nothing is overwritten."
+            "Keep the same library on every PC you play on, and a copy of your Hearthdeck Hero backups, game saves and screenshots. Each PC writes only its own files, so nothing is overwritten."
         )))
         .child(
             div()
@@ -91,7 +91,7 @@ fn intro() -> Div {
                 .gap(px(10.))
                 .child(step("1", tr!("Choose where and connect"), true))
                 .child(step("2", tr!("Choose what goes, and when"), false))
-                .child(step("3", tr!("Heronite does the rest"), false)),
+                .child(step("3", tr!("Hearthdeck Hero does the rest"), false)),
         )
 }
 

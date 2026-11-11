@@ -484,7 +484,7 @@ fn sweep_effect(s: Sweep) -> &'static str {
         Sweep::Leftovers => tr!("No game points to these folders any more. They go to the trash, where they can be restored."),
         Sweep::Caches => tr!("Deleted. They are rebuilt by themselves when needed."),
         Sweep::Shaders => tr!("Deleted. Games compile them again as they run, and stutter for a while until they do."),
-        Sweep::Downloads => tr!("Deleted. Heronite downloads them again when needed."),
+        Sweep::Downloads => tr!("Deleted. Hearthdeck Hero downloads them again when needed."),
     }
 }
 

@@ -157,7 +157,7 @@ impl Render for ScanFolderDialog {
             .flex_col()
             .gap(px(12.))
             .child(paragraph(tr!(
-                "Choose the folder your games are in. Heronite looks for the programs that start them, and you choose the games to add."
+                "Choose the folder your games are in. Hearthdeck Hero looks for the programs that start them, and you choose the games to add."
             )))
             .child(self.render_folder(&dir_value, cx))
             .child(

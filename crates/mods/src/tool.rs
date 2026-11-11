@@ -116,9 +116,9 @@ impl Support {
         if self.windows.is_some() {
             None
         } else if self.fusermount.is_none() {
-            Some(tr!("Heronite needs FUSE (fusermount3) to apply mods. Install the fuse3 package.").to_string())
+            Some(tr!("Hearthdeck Hero needs FUSE (fusermount3) to apply mods. Install the fuse3 package.").to_string())
         } else if !self.dev_fuse {
-            Some(tr!("Heronite needs FUSE to apply mods, but /dev/fuse is missing. Load the fuse kernel module.").to_string())
+            Some(tr!("Hearthdeck Hero needs FUSE to apply mods, but /dev/fuse is missing. Load the fuse kernel module.").to_string())
         } else if self.overlay.is_none() && !downloadable() {
             Some(tr!("fuse-overlayfs is needed to apply mods and could not be found. Install the fuse-overlayfs package.").to_string())
         } else {

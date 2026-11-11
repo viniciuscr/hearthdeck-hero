@@ -92,11 +92,11 @@ impl SyncError {
             SyncError::NoRclone(error) => tr!("Could not get rclone: {error}", error),
             SyncError::Cloud(error) => tr!("The account did not answer: {error}", error),
             SyncError::SignInOpen => tr!(
-                "Another sign-in is still waiting in the browser (another Heronite window, or rclone). Finish or close it, then connect again."
+                "Another sign-in is still waiting in the browser (another Hearthdeck Hero window, or rclone). Finish or close it, then connect again."
             )
             .into(),
             SyncError::RateLimited => {
-                tr!("The account takes no more requests for now (too many a minute). Heronite tries again by itself in a few minutes.")
+                tr!("The account takes no more requests for now (too many a minute). Hearthdeck Hero tries again by itself in a few minutes.")
                     .into()
             }
             SyncError::Data(error) => tr!("Could not update the Collection: {error}", error),

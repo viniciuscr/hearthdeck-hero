@@ -1,6 +1,6 @@
 //! The dashed row under the sources: "Get more sources" opens the gallery,
 //! and says how many more the lists offer once a copy of them was read
-//! ("Get more sources · 2 more from the Heronite list"); "Install from a
+//! ("Get more sources · 2 more from the Hearthdeck Hero list"); "Install from a
 //! file…" beside it goes straight to the file chooser.
 
 use gpui_kit::prelude::*;
@@ -18,7 +18,7 @@ use crate::theme;
 use crate::ui::controls::{icon_action_button, ButtonKind};
 use crate::ui::icon;
 
-/// "2 more from the Heronite list", "5 more from your lists", "2 more from
+/// "2 more from the Hearthdeck Hero list", "5 more from your lists", "2 more from
 /// this copy of the repository" (a debug build's own list), or nothing
 /// without a copy of a list.
 fn count_line(cx: &App) -> Option<String> {
@@ -33,7 +33,7 @@ fn count_line(cx: &App) -> Option<String> {
         }
         Some(copy) if is_local(&copy.url) => trn!(n, "{n} more from a list on this computer", "{n} more from a list on this computer"),
         Some(copy) if copy.builtin && copy.url == HERONITE_LIST => {
-            trn!(n, "{n} more from the Heronite list", "{n} more from the Heronite list")
+            trn!(n, "{n} more from the Hearthdeck Hero list", "{n} more from the Hearthdeck Hero list")
         }
         Some(copy) => trn!(n, "{n} more from {host}", "{n} more from {host}", host = host_of(&copy.url)),
         None if n == 0 => tr!("Nothing new on your lists").into(),

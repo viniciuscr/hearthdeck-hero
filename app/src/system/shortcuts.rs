@@ -360,7 +360,7 @@ fn url_handler() -> UrlHandler {
 }
 
 fn steam_running() -> &'static str {
-    tr!("Steam is running. Close Steam and try again, or restart Steam once to let Heronite manage shortcuts while Steam is running.")
+    tr!("Steam is running. Close Steam and try again, or restart Steam once to let Hearthdeck Hero manage shortcuts while Steam is running.")
 }
 
 /// "Add to Steam". With Steam closed, `shortcuts.vdf` is edited (Steam picks

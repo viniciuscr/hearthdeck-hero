@@ -147,7 +147,7 @@ fn add_to_steam(paths: &DataPaths, app_id: &str, list: &ModList, title: &str) ->
     let paste = tr!("In Steam, open the game's Properties and put this in the launch options: {line}", line = new_line);
     if !options::parse(&line).editable {
         return Err(tr!(
-            "The launch options of {game} use shell syntax, which Heronite does not change. {paste}",
+            "The launch options of {game} use shell syntax, which Hearthdeck Hero does not change. {paste}",
             game = title,
             paste = paste
         ));

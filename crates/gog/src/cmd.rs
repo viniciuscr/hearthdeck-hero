@@ -43,7 +43,7 @@ impl Gogdl {
     pub fn locate_or_install(paths: &DataPaths) -> Result<Self> {
         let bin = GOGDL
             .ensure(paths, &SystemProbe, &SystemNet, &|| false)
-            .map_err(|e| anyhow!(tr!("Could not get gogdl, which Heronite uses for GOG: {error}", error = e)))?;
+            .map_err(|e| anyhow!(tr!("Could not get gogdl, which Hearthdeck Hero uses for GOG: {error}", error = e)))?;
         Ok(Self::with_bin(bin, paths))
     }
 

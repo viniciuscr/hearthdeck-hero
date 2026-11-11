@@ -177,7 +177,7 @@ pub fn entries(data_paths: &DataPaths, lib: &Library, prefs: &Prefs) -> Vec<Entr
     if prefs.console_entry {
         out.push(Entry {
             id: CONSOLE_ID.into(),
-            name: tr!("Heronite console mode").into(),
+            name: tr!("Hearthdeck Hero console mode").into(),
             cmd: format!("{} --console --fullscreen", quoted(&exe.to_string_lossy())),
             image_path: image(console_cover(&dir)),
             undo: None,

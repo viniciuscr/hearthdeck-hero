@@ -72,7 +72,7 @@ impl Line {
     fn label(self) -> &'static str {
         match self {
             Line::Library => tr!("Library between PCs"),
-            Line::Up(Upload::Backups) => tr!("Heronite backups"),
+            Line::Up(Upload::Backups) => tr!("Hearthdeck Hero backups"),
             Line::Up(Upload::Saves) => tr!("Game saves (Ludusavi)"),
             Line::Up(Upload::Captures) => tr!("Screenshots"),
         }
@@ -82,7 +82,7 @@ impl Line {
     fn about(self, mode: Mode) -> &'static str {
         match (self, mode) {
             (Line::Library, Mode::Off) => tr!("Statuses, favourites, notes, play time and sessions, the same on every PC."),
-            (Line::Library, Mode::Auto) => tr!("Syncs when Heronite starts, after each game and every 10 minutes."),
+            (Line::Library, Mode::Auto) => tr!("Syncs when Hearthdeck Hero starts, after each game and every 10 minutes."),
             (Line::Library, Mode::Manual) => tr!("Syncs only when you press Sync now."),
             (Line::Up(Upload::Backups), Mode::Off) => {
                 tr!("Each backup as one zip, your artwork next to it once. Store sign-ins stay on this PC.")

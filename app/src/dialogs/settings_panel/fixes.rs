@@ -69,13 +69,13 @@ impl SettingsPanel {
             let title = self.umu.as_ref().and_then(|d| d.db.iter().find(|e| e.umu_id == user)).map(|e| e.title.as_str());
             let shown = named(&user, title);
             return match auto {
-                Some(a) => tr!("Using {id}, set by you. Clear the field to use {auto}, found by Heronite.", id = shown, auto = a.id),
+                Some(a) => tr!("Using {id}, set by you. Clear the field to use {auto}, found by Hearthdeck Hero.", id = shown, auto = a.id),
                 None => tr!("Using {id}, set by you.", id = shown),
             };
         }
         match auto {
             None if self.umu.as_ref().is_some_and(|d| d.db.is_empty()) => {
-                tr!("The umu database has not been downloaded yet. It is downloaded when Heronite starts online.").into()
+                tr!("The umu database has not been downloaded yet. It is downloaded when Hearthdeck Hero starts online.").into()
             }
             None => tr!("No ID found: the game runs without fixes. Set one if the game has fixes.").into(),
             Some(r) => {

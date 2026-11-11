@@ -89,7 +89,7 @@ impl Render for WhatsNewDialog {
                             .text_size(px(14.))
                             .font_weight(theme::W_BOLD)
                             .text_color(theme::text_primary())
-                            .child(tr!("Enjoying Heronite?")),
+                            .child(tr!("Enjoying Hearthdeck Hero?")),
                     )
                     .child(
                         div()
@@ -130,7 +130,7 @@ impl Render for WhatsNewDialog {
         dialog_scrolled(
             DialogProps {
                 id: "whats-new".into(),
-                title: tr!("What's new in Heronite {version}", version = self.release.version).into(),
+                title: tr!("What's new in Hearthdeck Hero {version}", version = self.release.version).into(),
                 width: 600f32.min(f32::from(crate::ui::content_size(window).width) * 0.92),
                 height: Some(height),
             },

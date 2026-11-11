@@ -742,8 +742,8 @@ impl SettingsPanel {
             v.extend([
                 Self::c_header(tr!("System tray")),
                 self.c_toggle("exitToTray", false, tr!("Keep in the tray when closed"), None, no_tray),
-                self.c_toggle("darkTrayIcon", false, tr!("Dark tray icon"), Some(tr!("Takes effect after Heronite restarts.")), no_tray),
-                self.c_toggle("noTrayIcon", false, tr!("Hide the tray icon"), Some(tr!("Takes effect after Heronite restarts.")), false),
+                self.c_toggle("darkTrayIcon", false, tr!("Dark tray icon"), Some(tr!("Takes effect after Hearthdeck Hero restarts.")), no_tray),
+                self.c_toggle("noTrayIcon", false, tr!("Hide the tray icon"), Some(tr!("Takes effect after Hearthdeck Hero restarts.")), false),
             ]);
         }
         if self.restart_needed() {
@@ -756,7 +756,7 @@ impl SettingsPanel {
         ]);
         // Bringing the window back belongs to minimizing it.
         if self.flag("minimizeOnLaunch", false) {
-            v.push(self.c_toggle(KEY_RESTORE_AFTER_GAME, false, tr!("Show Heronite again when the game ends"), None, false));
+            v.push(self.c_toggle(KEY_RESTORE_AFTER_GAME, false, tr!("Show Hearthdeck Hero again when the game ends"), None, false));
         }
         v.extend([
             self.c_toggle("hideWindowOnProtocolLaunch", false, tr!("Hide the window for heronite:// launches"), None, false),
@@ -764,7 +764,7 @@ impl SettingsPanel {
                 KEY_CLOSE_AFTER_GAME,
                 false,
                 tr!("Close Steam when the game ends"),
-                Some(tr!("Only when Steam was not running before Heronite started the game")),
+                Some(tr!("Only when Steam was not running before Hearthdeck Hero started the game")),
                 false,
             ),
         ]);

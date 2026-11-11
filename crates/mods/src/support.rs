@@ -109,25 +109,25 @@ impl Support {
     pub fn explain(&self) -> &'static str {
         match self.reason {
             Reason::Folder => {
-                tr!("Mods for this game are files in its folder, which is what Heronite handles. Not every mod has been tried.")
+                tr!("Mods for this game are files in its folder, which is what Hearthdeck Hero handles. Not every mod has been tried.")
             }
             Reason::Loader => {
-                tr!("Mods for this game load through BepInEx, which Heronite installs and turns on with them. Not every mod has been tried.")
+                tr!("Mods for this game load through BepInEx, which Hearthdeck Hero installs and turns on with them. Not every mod has been tried.")
             }
             Reason::Step(Step::ScriptExtender) => tr!(
-                "Simple mods work as they are. Mods that need the script extender only load when the game starts through its loader, and Heronite does not sort plugins: order them yourself in Plugins."
+                "Simple mods work as they are. Mods that need the script extender only load when the game starts through its loader, and Hearthdeck Hero does not sort plugins: order them yourself in Plugins."
             ),
             Reason::Step(Step::PluginList) => tr!(
-                "Files are put in place, but a mod with a plugin (.esp, .esm) also has to be turned on in the game's own plugin list. Heronite does not do that for this game."
+                "Files are put in place, but a mod with a plugin (.esp, .esm) also has to be turned on in the game's own plugin list. Hearthdeck Hero does not do that for this game."
             ),
             Reason::Step(Step::ModEngine) => {
                 tr!("Mods load through ModEngine 2: add it as a mod, start the game through its launcher with its arguments, and play offline.")
             }
             Reason::Step(Step::RedMod) => tr!(
-                "Archive mods and the frameworks (Cyber Engine Tweaks, RED4ext) work as they are. REDmod mods also need the game started with REDmod on, which Heronite does not set."
+                "Archive mods and the frameworks (Cyber Engine Tweaks, RED4ext) work as they are. REDmod mods also need the game started with REDmod on, which Hearthdeck Hero does not set."
             ),
             Reason::Step(Step::ScriptMerger) => tr!(
-                "Mods work from the Mods folder. When two mods change the same script, the game needs them merged with Script Merger, which Heronite does not run."
+                "Mods work from the Mods folder. When two mods change the same script, the game needs them merged with Script Merger, which Hearthdeck Hero does not run."
             ),
             Reason::Step(Step::ReFramework) => {
                 tr!("Most mods need REFramework: add it as a mod first. Mods packed for Fluffy Mod Manager may not load.")
@@ -136,19 +136,19 @@ impl Support {
                 tr!("Mods need SMAPI, which has its own installer: run it on the game first. Mods added here then go into Mods.")
             }
             Reason::Block(Block::OutsideFolder) => tr!(
-                "Most mods for this game live outside its folder (Documents or AppData), where Heronite cannot put them. Only mods that go into the game's folder work."
+                "Most mods for this game live outside its folder (Documents or AppData), where Hearthdeck Hero cannot put them. Only mods that go into the game's folder work."
             ),
             Reason::Block(Block::OwnTool) => {
-                tr!("Mods for this game are installed by a tool of its own that rewrites the game's files, which Heronite does not do.")
+                tr!("Mods for this game are installed by a tool of its own that rewrites the game's files, which Hearthdeck Hero does not do.")
             }
             Reason::NativeLoader => {
-                tr!("This is the game's Linux build. Heronite sets the mod loader up for the Windows build only, so these mods will not load.")
+                tr!("This is the game's Linux build. Hearthdeck Hero sets the mod loader up for the Windows build only, so these mods will not load.")
             }
             Reason::Unknown => tr!(
-                "Heronite has no rules for this game, so a mod's files go into the game's folder as they come. If the mod's page names another folder, set it in Game \u{2192} Mods go into."
+                "Hearthdeck Hero has no rules for this game, so a mod's files go into the game's folder as they come. If the mod's page names another folder, set it in Game \u{2192} Mods go into."
             ),
             Reason::UnknownThunderstore => tr!(
-                "Heronite has no rules for this game. Its Thunderstore mods are installed the way BepInEx expects, which suits most games of that site."
+                "Hearthdeck Hero has no rules for this game. Its Thunderstore mods are installed the way BepInEx expects, which suits most games of that site."
             ),
         }
     }

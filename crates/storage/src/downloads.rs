@@ -38,7 +38,7 @@ fn updates(ctx: &Ctx) -> Option<Item> {
         return None;
     }
     let paths: Vec<PathBuf> = update_dirs(ctx).into_iter().filter(|p| fs::read_dir(p).is_ok_and(|mut d| d.next().is_some())).collect();
-    let mut item = download(tr!("Heronite updates").into(), paths.first()?.clone());
+    let mut item = download(tr!("Hearthdeck Hero updates").into(), paths.first()?.clone());
     item.folder = ctx.app.cache.clone();
     item.paths = paths;
     Some(item)
@@ -112,7 +112,7 @@ mod tests {
         // Being downloaded now: left alone.
         fs::write(bin.join("nile.part.exe"), b"x").unwrap();
         old_file(&c.data_paths.legendary_redist_dir().join("EAappInstaller.exe"));
-        old_file(&c.app.cache.join("updates").join("0.19.0").join("Heronite-Setup-x64.exe"));
+        old_file(&c.app.cache.join("updates").join("0.19.0").join("Hearthdeck Hero-Setup-x64.exe"));
         fs::create_dir_all(c.app.cache.join("update")).unwrap();
 
         let titles = |c: &Ctx| items(c).into_iter().map(|i| (i.title, i.paths)).collect::<Vec<_>>();
@@ -122,7 +122,7 @@ mod tests {
                 ("Unfinished download of legendary".to_string(), vec![bin.join("legendary.part.exe")]),
                 ("EAappInstaller.exe".to_string(), vec![c.data_paths.legendary_redist_dir().join("EAappInstaller.exe")]),
                 // The empty staging folder is left out.
-                ("Heronite updates".to_string(), vec![c.app.cache.join("updates")]),
+                ("Hearthdeck Hero updates".to_string(), vec![c.app.cache.join("updates")]),
             ]
         );
         c.updating = true;

@@ -89,12 +89,12 @@ impl<K: ClientKind> ClientPage<K> {
             );
         } else if !st.installed() && heronite_clients::native() {
             rows.push(paragraph(tr!(
-                "Heronite downloads the official installer of {client} and runs it. Windows may ask you to allow it.",
+                "Hearthdeck Hero downloads the official installer of {client} and runs it. Windows may ask you to allow it.",
                 client = client.name()
             )));
         } else if !st.installed() {
             rows.push(paragraph(tr!(
-                "Heronite downloads the official installer and installs {client} in a Wine prefix of its own, with your default Proton. It takes about 5 minutes.",
+                "Hearthdeck Hero downloads the official installer and installs {client} in a Wine prefix of its own, with your default Proton. It takes about 5 minutes.",
                 client = client.name()
             )));
         }
@@ -172,7 +172,7 @@ impl<K: ClientKind> ClientPage<K> {
         column
     }
 
-    /// "Remove from Heronite", and its question once asked.
+    /// "Remove from Hearthdeck Hero", and its question once asked.
     fn render_forget(&mut self, st: &ClientState, cx: &mut Context<Self>) -> AnyElement {
         let client = K::CLIENT;
         if !self.confirm_forget {
@@ -182,14 +182,14 @@ impl<K: ClientKind> ClientPage<K> {
                 .py(px(10.))
                 .ml(px(-12.))
                 .child(
-                    button_sm(self.id("forget"), ButtonKind::Ghost, tr!("Remove from Heronite"))
+                    button_sm(self.id("forget"), ButtonKind::Ghost, tr!("Remove from Hearthdeck Hero"))
                         .when(!st.busy() && !st.shortcut_busy, |b| b.on_click(act!(cx, "forget"))),
                 )
                 .into_any_element();
         }
         let path = st.prefix().map(|p| logic::tilde(p, &home())).unwrap_or_default();
         let mut text = div().flex().flex_col().gap(px(4.)).flex_1().min_w(px(240.)).text_size(px(13.)).child(tr!(
-            "Remove {client} from Heronite? Its Wine prefix and the games installed in it stay on disk at {path}.",
+            "Remove {client} from Hearthdeck Hero? Its Wine prefix and the games installed in it stay on disk at {path}.",
             client = client.name(),
             path = path
         ));
@@ -308,13 +308,13 @@ impl<K: ClientKind> ClientPage<K> {
         // The notes are about Wine and Linux.
         if heronite_clients::native() {
             return div().child(caption(tr!("About"))).child(card([paragraph(tr!(
-                "You sign in, install and update games in {client}; Heronite starts them through it and counts the play time for the game, not for {client}.",
+                "You sign in, install and update games in {client}; Hearthdeck Hero starts them through it and counts the play time for the game, not for {client}.",
                 client = client.name()
             ))]));
         }
         div().child(caption(tr!("About"))).child(card([
             paragraph(tr!(
-                "{client} runs under Wine in a prefix of its own. You sign in, install and update games in it; Heronite starts them through it and counts the play time for the game, not for {client}.",
+                "{client} runs under Wine in a prefix of its own. You sign in, install and update games in it; Hearthdeck Hero starts them through it and counts the play time for the game, not for {client}.",
                 client = client.name()
             )),
             paragraph(logic::client_note(client)),

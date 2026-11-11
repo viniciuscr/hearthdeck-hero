@@ -19,7 +19,7 @@ impl ModsDialog {
         if v.g.info.prefix.is_none() && !v.g.info.native {
             col = col.child(
                 div().mx(px(6.)).mb(px(6.)).text_size(px(13.)).line_height(px(18.)).text_color(theme::warning()).child(tr!(
-                    "The game's Wine prefix was not found yet, so Plugins.txt cannot be written. Play the game once from Heronite to create it."
+                    "The game's Wine prefix was not found yet, so Plugins.txt cannot be written. Play the game once from Hearthdeck Hero to create it."
                 )),
             );
         }

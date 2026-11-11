@@ -119,8 +119,8 @@ impl ModsDialog {
             LoaderStart::Steam { line } => {
                 let title = tr!("{name} is installed: the game must start through {file}", name = l.name, file = l.file.clone());
                 let body: SharedString = match line {
-                    Some(_) => tr!("Steam starts the game itself, so Heronite cannot change what it runs. Paste this line in the game's launch options in Steam:").into(),
-                    None => tr!("Steam starts the game itself, so Heronite cannot change what it runs. Start the game through {file} instead.", file = l.file.clone()).into(),
+                    Some(_) => tr!("Steam starts the game itself, so Hearthdeck Hero cannot change what it runs. Paste this line in the game's launch options in Steam:").into(),
+                    None => tr!("Steam starts the game itself, so Hearthdeck Hero cannot change what it runs. Start the game through {file} instead.", file = l.file.clone()).into(),
                 };
                 let mut text = words(Some(title.into()), body).children(arguments);
                 let mut card = tinted(Tone::Warn, Icon::Build);

@@ -80,7 +80,7 @@ pub fn system_info_text() -> String {
 
 pub fn format_system_info(s: &sysinfo::SystemInfo) -> String {
     let mut out = vec![
-        format!("Heronite {}", env!("CARGO_PKG_VERSION")),
+        format!("Hearthdeck Hero {}", env!("CARGO_PKG_VERSION")),
         format!("CPU: {}x {}", s.cores, s.cpu),
         format!("Memory: {}", sysinfo::human_memory(s.memory_kb)),
         "GPUs:".to_string(),

@@ -83,9 +83,9 @@ impl Render for ModLinkGameDialog {
         let entity = cx.entity().downgrade();
         let intro = match &self.req.site_game {
             Some(site) => {
-                tr!("The link is for {game} on the mod site. Pick the game it belongs to here; Heronite remembers it.", game = site.clone())
+                tr!("The link is for {game} on the mod site. Pick the game it belongs to here; Hearthdeck Hero remembers it.", game = site.clone())
             }
-            None => tr!("Pick the game this link belongs to; Heronite remembers it.").to_string(),
+            None => tr!("Pick the game this link belongs to; Hearthdeck Hero remembers it.").to_string(),
         };
         let mut list = div().id("mod-link-list").flex().flex_col().gap(px(2.)).h(px(280.)).overflow_y_scroll();
         let mut shown = 0;

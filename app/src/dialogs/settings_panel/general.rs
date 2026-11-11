@@ -164,7 +164,7 @@ impl SettingsPanel {
                 ))
                 .field_help(
                     self.path_row("defaultSteamPath", Some(tr!("Steam folder")), true, tr!("Choose Steam's folder"), false, cx),
-                    vec![help(tr!("Where Heronite reads which Proton Steam uses, to add games to Steam."))],
+                    vec![help(tr!("Where Hearthdeck Hero reads which Proton Steam uses, to add games to Steam."))],
                 );
         }
         let wine_rows = rows()
@@ -183,7 +183,7 @@ impl SettingsPanel {
                 false,
                 tr!("Download GE-Proton into Steam"),
                 Some(tr!(
-                    "Puts GE-Proton in Steam's compatibility tools folder (in the Steam folder above) instead of Heronite's tools folder."
+                    "Puts GE-Proton in Steam's compatibility tools folder (in the Steam folder above) instead of Hearthdeck Hero's tools folder."
                 )),
                 false,
                 cx,
@@ -214,7 +214,7 @@ impl SettingsPanel {
             "startWithSystem",
             false,
             tr!("Start with the system"),
-            Some(tr!("Opens Heronite when you log in.")),
+            Some(tr!("Opens Hearthdeck Hero when you log in.")),
             false,
             cx,
         );
@@ -225,7 +225,7 @@ impl SettingsPanel {
                 "startInTray",
                 false,
                 tr!("Start minimized"),
-                Some(tr!("When Heronite opens with the system, it stays in the tray without the window.")),
+                Some(tr!("When Hearthdeck Hero opens with the system, it stays in the tray without the window.")),
                 no_tray,
                 cx,
             )
@@ -242,7 +242,7 @@ impl SettingsPanel {
                 "darkTrayIcon",
                 false,
                 tr!("Dark tray icon"),
-                Some(tr!("Takes effect after Heronite restarts.")),
+                Some(tr!("Takes effect after Hearthdeck Hero restarts.")),
                 no_tray,
                 cx,
             ))
@@ -251,7 +251,7 @@ impl SettingsPanel {
                 "noTrayIcon",
                 false,
                 tr!("Hide the tray icon"),
-                Some(tr!("Takes effect after Heronite restarts.")),
+                Some(tr!("Takes effect after Hearthdeck Hero restarts.")),
                 false,
                 cx,
             ));
@@ -270,7 +270,7 @@ impl SettingsPanel {
                 "restore-after-game",
                 KEY_RESTORE_AFTER_GAME,
                 false,
-                tr!("Show Heronite again when the game ends"),
+                tr!("Show Hearthdeck Hero again when the game ends"),
                 None,
                 false,
                 cx,
@@ -292,7 +292,7 @@ impl SettingsPanel {
                 KEY_CLOSE_AFTER_GAME,
                 false,
                 tr!("Close Steam when the game ends"),
-                Some(tr!("Only when Steam was not running before Heronite started the game.")),
+                Some(tr!("Only when Steam was not running before Hearthdeck Hero started the game.")),
                 false,
                 cx,
             ))
@@ -447,7 +447,7 @@ impl SettingsPanel {
             None => button.on_click(|_, _, cx| crate::system::restart_now(cx)),
             Some(_) => button.opacity(0.5).cursor_not_allowed(),
         };
-        let about = blocker.unwrap_or_else(|| tr!("The tray changes apply once Heronite starts again.").to_string());
-        row(tr!("Restart Heronite"), Some(&about), button).into_any_element()
+        let about = blocker.unwrap_or_else(|| tr!("The tray changes apply once Hearthdeck Hero starts again.").to_string());
+        row(tr!("Restart Hearthdeck Hero"), Some(&about), button).into_any_element()
     }
 }

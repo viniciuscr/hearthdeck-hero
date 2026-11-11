@@ -48,12 +48,12 @@ pub fn message(games: &[String], post_game: bool) -> String {
     let subject = name_list(games);
     let mut text = if games.len() == 1 {
         tr!(
-            "{subject} is still running. Heronite records the playtime and runs the post-game tasks (backups, cloud saves) when it ends. If you quit now, the playtime so far is saved and the game keeps running, but those tasks will not run.",
+            "{subject} is still running. Hearthdeck Hero records the playtime and runs the post-game tasks (backups, cloud saves) when it ends. If you quit now, the playtime so far is saved and the game keeps running, but those tasks will not run.",
             subject
         )
     } else {
         tr!(
-            "{subject} are still running. Heronite records the playtime and runs the post-game tasks (backups, cloud saves) when they end. If you quit now, the playtime so far is saved and the game keeps running, but those tasks will not run.",
+            "{subject} are still running. Hearthdeck Hero records the playtime and runs the post-game tasks (backups, cloud saves) when they end. If you quit now, the playtime so far is saved and the game keeps running, but those tasks will not run.",
             subject
         )
     };

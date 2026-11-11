@@ -44,11 +44,11 @@ fn action_label(state: &OfferState, version: &str) -> (String, bool) {
         OfferState::New => (tr!("Install").into(), true),
         OfferState::Update(_) => (tr!("Update to {version}", version), true),
         OfferState::Installed => (tr!("Installed").into(), false),
-        OfferState::Unsupported => (tr!("Needs a newer Heronite").into(), false),
+        OfferState::Unsupported => (tr!("Needs a newer Hearthdeck Hero").into(), false),
     }
 }
 
-/// "From the Heronite list · read today" (and "could not be read now"
+/// "From the Hearthdeck Hero list · read today" (and "could not be read now"
 /// when the copy shown is an older one). `checkout`: the key of the app's
 /// own list when it is this repository's ("From this copy of the
 /// repository").
@@ -126,7 +126,7 @@ impl ExtensionsDialog {
     fn render_entry(&self, o: &Offer, picked: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let e = &o.entry;
         let mut meta = format!("{} \u{b7} {}", e.author, e.version);
-        // The list's host, unless it is the Heronite list or one on this computer.
+        // The list's host, unless it is the Hearthdeck Hero list or one on this computer.
         if matches!(words::list_origin(&o.list, o.builtin), heronite_metadata_ext::lists::Origin::List(_)) {
             meta = format!("{meta} \u{b7} {}", heronite_metadata_ext::lists::host_of(&o.list));
         }
@@ -460,7 +460,7 @@ mod tests {
         let now = SystemTime::now();
         let index = Some(index::parse(br#"{"index": 1, "extensions": []}"#).unwrap());
         let own = ListCopy { url: HERONITE_LIST.into(), builtin: true, index: index.clone(), read_at: Some(now), error: None };
-        assert_eq!(source_line(std::slice::from_ref(&own), now, None).as_deref(), Some("From the Heronite list \u{b7} read today"));
+        assert_eq!(source_line(std::slice::from_ref(&own), now, None).as_deref(), Some("From the Hearthdeck Hero list \u{b7} read today"));
         let old = ListCopy {
             read_at: Some(now - Duration::from_secs(3 * 86_400)),
             error: Some(ListError::Unreachable("x".into())),
@@ -468,7 +468,7 @@ mod tests {
         };
         assert_eq!(
             source_line(std::slice::from_ref(&old), now, None).as_deref(),
-            Some("From the Heronite list \u{b7} read 3 days ago \u{b7} could not be read now")
+            Some("From the Hearthdeck Hero list \u{b7} read 3 days ago \u{b7} could not be read now")
         );
         let other = ListCopy { url: "https://lists.example.net/x.json".into(), builtin: false, index, read_at: Some(now), error: None };
         assert_eq!(source_line(&[own.clone(), other], now, None).as_deref(), Some("From 2 lists \u{b7} read today"));

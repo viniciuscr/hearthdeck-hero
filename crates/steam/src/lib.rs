@@ -13,7 +13,7 @@
 //!
 //! [`library`] reads the account's library from the client and joins it to
 //! the Collection. [`account`] only ends a Steam sign-in an earlier version
-//! saved: Heronite no longer signs in to Steam.
+//! saved: Hearthdeck Hero no longer signs in to Steam.
 
 pub mod account;
 pub mod client;
@@ -211,12 +211,12 @@ impl LibraryCheck {
 pub fn port_taken_message(owner: &PortOwner) -> String {
     match &owner.name {
         Some(name) => tr!(
-            "Another program on this PC, {program}, uses port {port}, which Steam needs to let Heronite read your library. Close {program} or change its port, then restart Steam.",
+            "Another program on this PC, {program}, uses port {port}, which Steam needs to let Hearthdeck Hero read your library. Close {program} or change its port, then restart Steam.",
             program = name,
             port = owner.port
         ),
         None => tr!(
-            "Another program on this PC uses port {port}, which Steam needs to let Heronite read your library. Close the program that uses it (a torrent client or a development server, for example) or change its port, then restart Steam.",
+            "Another program on this PC uses port {port}, which Steam needs to let Hearthdeck Hero read your library. Close the program that uses it (a torrent client or a development server, for example) or change its port, then restart Steam.",
             port = owner.port
         ),
     }
@@ -230,14 +230,14 @@ pub fn can_restart() -> bool {
 
 /// Shown when Steam runs without its debugging interface.
 pub fn read_only_message() -> &'static str {
-    tr!("Steam is running without the access Heronite needs to change its settings. It is turned on for Steam's next start: restart Steam once, or close it, to change these settings.")
+    tr!("Steam is running without the access Hearthdeck Hero needs to change its settings. It is turned on for Steam's next start: restart Steam once, or close it, to change these settings.")
 }
 
 /// Shown when Steam runs without its debugging interface and another tool
 /// holds the place of the flag file ([`ClientApiFlag::Blocked`]): a restart
 /// does not open it.
 pub fn blocked_message() -> &'static str {
-    tr!("Another tool on this PC (Millennium, for example) keeps closed the access Heronite needs, so restarting Steam does not help. Let that tool open Steam's debugging interface or, if you no longer use it, remove .cef-enable-remote-debugging from the Steam folder; then restart Steam.")
+    tr!("Another tool on this PC (Millennium, for example) keeps closed the access Hearthdeck Hero needs, so restarting Steam does not help. Let that tool open Steam's debugging interface or, if you no longer use it, remove .cef-enable-remote-debugging from the Steam folder; then restart Steam.")
 }
 
 impl Steam {
@@ -370,7 +370,7 @@ impl Steam {
         })
     }
 
-    /// Whether Steam runs, and whether its client answers (Heronite can
+    /// Whether Steam runs, and whether its client answers (Hearthdeck Hero can
     /// read and change settings through it). Blocking, a few milliseconds.
     pub fn status(&self) -> (bool, bool) {
         let running = self.running();
@@ -389,11 +389,11 @@ impl Steam {
         };
         c.args(args);
         if heronite_platform::flatpak::active() {
-            // Steam is the host's when Heronite runs as a Flatpak: the host
+            // Steam is the host's when Hearthdeck Hero runs as a Flatpak: the host
             // starts it with the session's own environment.
             c = heronite_platform::flatpak::host(c);
         } else {
-            // Not this app's environment: when Steam started Heronite it holds
+            // Not this app's environment: when Steam started Hearthdeck Hero it holds
             // Steam's overlay preload, its runtime and the AppImage's paths.
             c.env_clear().envs(desktop_protocol_env(std::env::vars()));
         }
@@ -401,20 +401,20 @@ impl Steam {
         c
     }
 
-    /// Starts Steam with the access Heronite needs already turned on.
+    /// Starts Steam with the access Hearthdeck Hero needs already turned on.
     /// `steam_bin` is the `steam` command. Returns at once.
     pub fn open(&self, steam_bin: &str) -> Result<(), String> {
         self.prepare_access();
         let mut start = self.command(steam_bin, &[]);
         heronite_platform::process::new_group(&mut start);
         let mut child = start.spawn().map_err(|e| tr!("Could not run Steam: {error}", error = e.to_string()))?;
-        // Reaped when it exits; Steam keeps running after Heronite closes.
+        // Reaped when it exits; Steam keeps running after Hearthdeck Hero closes.
         std::thread::spawn(move || child.wait());
         Ok(())
     }
 
     /// Closes Steam and starts it again (so it lists new tools and opens
-    /// the access Heronite needs). `steam_bin` is the `steam` command.
+    /// the access Hearthdeck Hero needs). `steam_bin` is the `steam` command.
     /// Blocking: waits up to a minute for Steam to close.
     pub fn restart(&self, steam_bin: &str) -> Result<(), String> {
         if !can_restart() {
@@ -495,12 +495,12 @@ impl Steam {
             }
             // The why is technical, but it is what tells a stuck client apart.
             LibraryAccess::Starting => Err(tr!(
-                "Steam is running but does not answer Heronite yet ({why}). If it is updating or asking you to sign in, finish that; otherwise restart Steam once.",
+                "Steam is running but does not answer Hearthdeck Hero yet ({why}). If it is updating or asking you to sign in, finish that; otherwise restart Steam once.",
                 why = why.unwrap_or_default()
             )),
             LibraryAccess::PortTaken => Err(taken.as_ref().map(port_taken_message).unwrap_or_default()),
             LibraryAccess::NeedsRestart if self.access_flag() == ClientApiFlag::Blocked => Err(blocked_message().to_string()),
-            LibraryAccess::NeedsRestart => Err(tr!("Steam is running without the access Heronite needs to read your library. It is turned on for Steam's next start: restart Steam once.").to_string()),
+            LibraryAccess::NeedsRestart => Err(tr!("Steam is running without the access Hearthdeck Hero needs to read your library. It is turned on for Steam's next start: restart Steam once.").to_string()),
             LibraryAccess::NotInstalled => Err(tr!("Steam was not found on this PC. Install Steam and sign in, then open it to read your library.").to_string()),
         }
     }

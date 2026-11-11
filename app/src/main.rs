@@ -87,25 +87,25 @@ fn main() {
         SingleInstance::Unresponsive(reason) => {
             // Starting a second, unlocked instance on the same data would
             // double-run the Epic queue, the tray and every game record.
-            let text = heronite_i18n::tr!("Heronite is already running but is not responding ({reason})", reason);
+            let text = heronite_i18n::tr!("Hearthdeck Hero is already running but is not responding ({reason})", reason);
             eprintln!("heronite-rs: {text}");
-            system::notify::send_and_wait("Heronite", text, std::time::Duration::from_secs(3));
+            system::notify::send_and_wait("Hearthdeck Hero", text, std::time::Duration::from_secs(3));
             std::process::exit(1);
         }
         // `heronite://stop` with no instance running: no game to close.
         SingleInstance::Primary { .. } if cli.stop.is_some() && cli.launch.is_none() => {
-            log::info!("stop request: Heronite is not running, nothing to close");
+            log::info!("stop request: Hearthdeck Hero is not running, nothing to close");
             return;
         }
         // `heronite://screenshot` with no instance running: no game to capture.
         SingleInstance::Primary { .. } if cli.screenshot && cli.launch.is_none() => {
-            log::info!("screenshot request: Heronite is not running, nothing to capture");
+            log::info!("screenshot request: Hearthdeck Hero is not running, nothing to capture");
             return;
         }
         // `--handoff` (Sunshine's entries) with no instance running: the
         // instance starts on its own and this process exits at once, so
         // Sunshine sees a detached launch and its stream does not own
-        // Heronite. Inside a Flatpak a detached child dies with the sandbox
+        // Hearthdeck Hero. Inside a Flatpak a detached child dies with the sandbox
         // of this process: there it runs here as before.
         SingleInstance::Primary { server, .. } if cli.handoff && !heronite_platform::flatpak::active() => {
             // The socket goes first, so the new process becomes the instance.
@@ -159,7 +159,7 @@ fn migrate_from_heroic() -> heronite_data::migrate::Outcome {
                 err = format!("{err:#}")
             );
             eprintln!("heronite-rs: {text}");
-            system::notify::send_and_wait("Heronite", text, std::time::Duration::from_secs(5));
+            system::notify::send_and_wait("Hearthdeck Hero", text, std::time::Duration::from_secs(5));
             std::process::exit(1);
         }
     }
@@ -316,7 +316,7 @@ fn env_logger_init() {
         .is_some_and(|v| v.as_bool().unwrap_or(false));
     let file = heronite_launch::log_writer::LauncherLogger::open(heronite_launch::log_writer::LogPaths::for_data(&data_paths), disabled);
     if !disabled {
-        file.note(&format!("============= Heronite {} started (pid {}) =============", env!("CARGO_PKG_VERSION"), std::process::id()));
+        file.note(&format!("============= Hearthdeck Hero {} started (pid {}) =============", env!("CARGO_PKG_VERSION"), std::process::id()));
     }
     let _ = log::set_boxed_logger(Box::new(L { level, file: Some(file) })).map(|_| log::set_max_level(level));
     if !disabled {

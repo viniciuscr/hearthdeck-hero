@@ -1,9 +1,9 @@
 {
   "An optional Windows feature. Not used yet.": "Una característica opcional de Windows. Aún no se usa.",
   "Could not put {file} into the game folder: {error}": "No se pudo poner {file} en la carpeta del juego: {error}",
-  "Could not set Heronite for the {scheme} links: {error}": "No se pudo configurar Heronite para los enlaces {scheme}: {error}",
+  "Could not set Hearthdeck Hero for the {scheme} links: {error}": "No se pudo configurar Hearthdeck Hero para los enlaces {scheme}: {error}",
   "Hard links and copies": "Enlaces duros y copias",
-  "Mods apply only when the game is started from Heronite. Their files are put into the game's folder while it runs and taken out when it ends; what the game writes there goes to the mods' overwrite folder.": "Los mods solo se aplican cuando el juego se inicia desde Heronite. Sus archivos se ponen en la carpeta del juego mientras se ejecuta y se quitan cuando termina; lo que el juego escribe ahí va a la carpeta de sobrescritura de los mods.",
+  "Mods apply only when the game is started from Hearthdeck Hero. Their files are put into the game's folder while it runs and taken out when it ends; what the game writes there goes to the mods' overwrite folder.": "Los mods solo se aplican cuando el juego se inicia desde Hearthdeck Hero. Sus archivos se ponen en la carpeta del juego mientras se ejecuta y se quitan cuando termina; lo que el juego escribe ahí va a la carpeta de sobrescritura de los mods.",
   "Need Developer Mode or an administrator. Not used.": "Necesitan el modo de desarrollador o un administrador. No se usan.",
   "Projected File System": "Projected File System",
   "Symbolic links": "Enlaces simbólicos",

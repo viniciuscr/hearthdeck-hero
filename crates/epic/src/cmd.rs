@@ -59,7 +59,7 @@ impl Legendary {
     /// none is found (a new setup). Blocking, network.
     pub fn locate_or_install(data_paths: &DataPaths) -> Result<Self> {
         let bin = heronite_launch::legendary_install::ensure(data_paths, &SystemProbe, &heronite_launch::net::SystemNet, &|| false)
-            .map_err(|e| anyhow!(tr!("Could not get legendary, which Heronite uses for Epic Games: {error}", error = e)))?;
+            .map_err(|e| anyhow!(tr!("Could not get legendary, which Hearthdeck Hero uses for Epic Games: {error}", error = e)))?;
         Ok(Self { bin, config_dir: data_paths.legendary_config_dir() })
     }
 

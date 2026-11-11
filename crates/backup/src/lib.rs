@@ -49,7 +49,7 @@ impl std::fmt::Display for Error {
             Error::NotAFolder => write!(f, "Backup path is not a folder"),
             Error::FolderMissing => write!(f, "Backup folder was not found"),
             Error::Damaged(file) => write!(f, "This backup is damaged ({file})"),
-            Error::TooNew => write!(f, "This backup was made by a newer version of Heronite"),
+            Error::TooNew => write!(f, "This backup was made by a newer version of Hearthdeck Hero"),
         }
     }
 }
@@ -64,7 +64,7 @@ impl Error {
             Error::NotAFolder => tr!("Backup path is not a folder").into(),
             Error::FolderMissing => tr!("Backup folder was not found. Is its drive connected?").into(),
             Error::Damaged(file) => tr!("This backup is damaged ({file})", file),
-            Error::TooNew => tr!("This backup was made by a newer version of Heronite").into(),
+            Error::TooNew => tr!("This backup was made by a newer version of Hearthdeck Hero").into(),
         }
     }
 }

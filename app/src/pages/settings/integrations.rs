@@ -70,7 +70,7 @@ fn status_parts(status: &Status, enabled: bool) -> (SharedString, Rgba, Option<(
             tr!("Connected").into(),
             theme::status_color("playing"),
             Some((
-                trn!(*entries, "Up to date: {n} entry of Heronite's in Sunshine.", "Up to date: {n} entries of Heronite's in Sunshine."),
+                trn!(*entries, "Up to date: {n} entry of Hearthdeck Hero's in Sunshine.", "Up to date: {n} entries of Hearthdeck Hero's in Sunshine."),
                 false,
             )),
         ),
@@ -188,8 +188,8 @@ fn options_card(cx: &mut Context<SettingsPage>) -> Div {
         .into_any_element(),
         toggle_row(
             "sunshine-console",
-            tr!("Add Heronite console mode"),
-            Some(tr!("One more application in Sunshine that opens Heronite in console mode, for the couch.")),
+            tr!("Add Hearthdeck Hero console mode"),
+            Some(tr!("One more application in Sunshine that opens Hearthdeck Hero in console mode, for the couch.")),
             prefs.console_entry,
         )
         .on_click(cx.listener(|_, _, _, cx| set(cx, |p| p.console_entry = !p.console_entry)))
@@ -207,7 +207,7 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
         .child(account_card(d, cx))
         .child(options_card(cx))
         .child(help_text(tr!(
-            "Heronite only changes the applications it added to Sunshine; your own stay as they are. Turning this off removes Heronite's applications."
+            "Hearthdeck Hero only changes the applications it added to Sunshine; your own stay as they are. Turning this off removes Hearthdeck Hero's applications."
         )))
         .into_any_element()
 }

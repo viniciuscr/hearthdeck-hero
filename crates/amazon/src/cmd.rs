@@ -40,7 +40,7 @@ impl Nile {
     pub fn locate_or_install(paths: &DataPaths) -> Result<Self> {
         let bin = NILE
             .ensure(paths, &SystemProbe, &heronite_launch::net::SystemNet, &|| false)
-            .map_err(|e| anyhow!(tr!("Could not get nile, which Heronite uses for Amazon Games: {error}", error = e)))?;
+            .map_err(|e| anyhow!(tr!("Could not get nile, which Hearthdeck Hero uses for Amazon Games: {error}", error = e)))?;
         Ok(Self::with_bin(bin, paths))
     }
 

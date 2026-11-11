@@ -204,7 +204,7 @@ mod tests {
     fn the_newest_ge_build_is_suggested() {
         let labels = ["Proton Experimental", "GE-Proton9-20", "GE-Proton10-3", "Proton-GE11-1-LinUwUx", "dwproton"];
         assert_eq!(best_ge(labels), Some(3));
-        let labels = ["GE-Proton11-6", "GE-Proton-latest (Heronite)"];
+        let labels = ["GE-Proton11-6", "GE-Proton-latest (Hearthdeck Hero)"];
         assert_eq!(best_ge(labels), Some(1));
         assert_eq!(best_ge(["Proton 9.0", "Wine-GE"]), None);
     }

@@ -117,7 +117,7 @@ fn load_other(path: PathBuf, cx: &mut Context<SettingsPage>) {
         this.update(cx, |d, cx| {
             let r = &mut d.backup.restore;
             if found.is_empty() {
-                r.notice = Some((tr!("No Heronite backup in {path}.", path = path.display()), true));
+                r.notice = Some((tr!("No Hearthdeck Hero backup in {path}.", path = path.display()), true));
             } else {
                 r.notice = None;
                 let first = found[0].clone();
@@ -176,7 +176,7 @@ pub(super) fn restore(d: &mut SettingsPage, path: PathBuf, parts: Vec<Part>, cx:
     let r = &mut d.backup.restore;
     r.confirm = None;
     if let Some(why) = crate::system::restart_blocker(cx) {
-        r.notice = Some((tr!("Heronite has to restart to restore, and cannot now: {why}.", why), true));
+        r.notice = Some((tr!("Hearthdeck Hero has to restart to restore, and cannot now: {why}.", why), true));
         cx.notify();
         return;
     }
@@ -197,7 +197,7 @@ pub(super) fn restore(d: &mut SettingsPage, path: PathBuf, parts: Vec<Part>, cx:
                 Ok(_) => {
                     if let Some(why) = crate::system::restart_blocker(cx) {
                         heronite_backup::restore::cancel(&d.ctx.app);
-                        d.backup.restore.notice = Some((tr!("Heronite has to restart to restore, and cannot now: {why}.", why), true));
+                        d.backup.restore.notice = Some((tr!("Hearthdeck Hero has to restart to restore, and cannot now: {why}.", why), true));
                     } else {
                         d.backup.restore.notice = Some((tr!("Restarting…").into(), false));
                         crate::system::restart_into(exe, cx);
@@ -284,7 +284,7 @@ fn render_details(d: &SettingsPage, info: &Info, cx: &mut Context<SettingsPage>)
             .flex_col()
             .gap(px(8.))
             .child(meta_text(tr!(
-                "Heronite backs up what you have now, then restarts and puts back {parts} as they were on {when}. Anything of those added since then goes.",
+                "Hearthdeck Hero backs up what you have now, then restarts and puts back {parts} as they were on {when}. Anything of those added since then goes.",
                 parts = names.join(", "),
                 when = format_time(&info.created_at)
             )))

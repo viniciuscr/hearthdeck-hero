@@ -96,7 +96,7 @@ impl State {
                 persist(d, move |p| p.remote_folder = value, cx);
             }
         });
-        let custom_remote = new_input(window, cx, "", "mydrive:Heronite");
+        let custom_remote = new_input(window, cx, "", "mydrive:HearthdeckHero");
         on_commit(&custom_remote, window, cx, |d: &mut SettingsPage, value, _, cx| {
             if d.cloud.prefs.as_ref().is_some_and(|p| p.custom_remote != value) {
                 persist(d, move |p| p.custom_remote = value, cx);
@@ -403,7 +403,7 @@ fn render_devices(d: &SettingsPage, p: &SyncPrefs) -> Div {
     let mut col = div().flex().flex_col().gap(px(4.)).child(text_field(tr!("This PC's name"), &d.cloud.device_name));
     if p.devices.is_empty() {
         col = col.child(div().pt(px(8.)).child(meta_text(tr!(
-            "No other PC yet. Set up Heronite on your other PCs with the same account or folder, and they show here."
+            "No other PC yet. Set up Hearthdeck Hero on your other PCs with the same account or folder, and they show here."
         ))));
     }
     for dev in &p.devices {

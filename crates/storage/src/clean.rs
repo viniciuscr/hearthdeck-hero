@@ -55,7 +55,7 @@ pub fn remove(ctx: &Ctx, item: &Item) -> Result<Removed> {
         Kind::Download => {
             let updates = downloads::update_dirs(ctx);
             if let Some(path) = item.paths.iter().find(|p| ctx.updating && updates.iter().any(|u| p.starts_with(u))) {
-                bail!(tr!("An update of Heronite is using {path}", path = path.display()));
+                bail!(tr!("An update of Hearthdeck Hero is using {path}", path = path.display()));
             }
             for path in &item.paths {
                 check_folder(ctx, path, None)?;
@@ -177,8 +177,8 @@ mod tests {
 
         let updates = c.app.cache.join("updates");
         fs::create_dir_all(updates.join("0.19.0")).unwrap();
-        fs::write(updates.join("0.19.0").join("Heronite-Setup-x64.exe"), "x").unwrap();
-        let item = Item::new(Group::Downloads, Kind::Download, State::Unused, "Heronite updates", updates.clone());
+        fs::write(updates.join("0.19.0").join("Hearthdeck Hero-Setup-x64.exe"), "x").unwrap();
+        let item = Item::new(Group::Downloads, Kind::Download, State::Unused, "Hearthdeck Hero updates", updates.clone());
         c.updating = true;
         assert!(remove(&c, &item).is_err());
         assert!(updates.exists());

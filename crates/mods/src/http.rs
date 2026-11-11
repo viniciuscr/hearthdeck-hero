@@ -23,7 +23,7 @@ pub fn agent() -> ureq::Agent {
                 .timeout_connect(Some(Duration::from_secs(15)))
                 .timeout_recv_response(Some(Duration::from_secs(30)))
                 .max_redirects(10)
-                .user_agent(concat!("Heronite/", env!("CARGO_PKG_VERSION")))
+                .user_agent(concat!("Hearthdeck Hero/", env!("CARGO_PKG_VERSION")))
                 .build()
                 .into()
         })
@@ -75,7 +75,7 @@ impl HttpError {
     }
 
     fn unexpected(url: &str, error: impl fmt::Display) -> Self {
-        Self { status: None, message: tr!("{host} sent an answer Heronite does not understand: {error}", host = host_of(url), error) }
+        Self { status: None, message: tr!("{host} sent an answer Hearthdeck Hero does not understand: {error}", host = host_of(url), error) }
     }
 }
 

@@ -38,7 +38,7 @@ impl OverlayPanel {
             Some(None) => {}
         }
         let Some(game) = &self.game else {
-            rows.push(Row::action("launcher", tr!("Open Heronite")).icon(Icon::Home));
+            rows.push(Row::action("launcher", tr!("Open Hearthdeck Hero")).icon(Icon::Home));
             return rows;
         };
         rows.push(Row::action("capture", tr!("Take screenshot")).icon(Icon::PhotoCamera));
@@ -64,7 +64,7 @@ impl OverlayPanel {
             rows.push(Row::choice("status", tr!("Status"), options, index).icon(Icon::Flag));
         }
         rows.extend(self.achievements_home_row());
-        rows.push(Row::action("launcher", tr!("Back to Heronite")).icon(Icon::Home).desc(tr!("The game keeps running")));
+        rows.push(Row::action("launcher", tr!("Back to Hearthdeck Hero")).icon(Icon::Home).desc(tr!("The game keeps running")));
         rows.push(Row::action("quit", tr!("Quit game")).icon(Icon::PowerSettingsNew).danger());
         rows
     }

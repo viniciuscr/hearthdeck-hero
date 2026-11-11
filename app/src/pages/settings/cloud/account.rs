@@ -76,7 +76,7 @@ pub(super) fn render_where(d: &mut SettingsPage, p: &SyncPrefs, cx: &mut Context
     let body = match p.provider {
         Provider::Folder => render_folder(d, cx),
         Provider::Custom => div().flex().flex_col().gap(px(6.)).child(text_field(tr!("rclone remote"), &d.cloud.custom_remote)).child(
-            meta_text(tr!("A remote of your own rclone settings and a folder in it, like mydrive:Heronite. Set it up with rclone config.")),
+            meta_text(tr!("A remote of your own rclone settings and a folder in it, like mydrive:Hearthdeck Hero. Set it up with rclone config.")),
         ),
         provider => render_account(d, p, provider, cx),
     };
@@ -157,7 +157,7 @@ fn render_account(d: &mut SettingsPage, p: &SyncPrefs, provider: Provider, cx: &
         render_server_form(d, provider, cx)
     };
     let error = connect_error.or(d.cloud.error.as_ref().map(|e| e.to_string()));
-    let drive_note = (provider == Provider::Drive).then(|| meta_text(tr!("Heronite only sees the files it makes in your Drive.")));
+    let drive_note = (provider == Provider::Drive).then(|| meta_text(tr!("Hearthdeck Hero only sees the files it makes in your Drive.")));
     div()
         .flex()
         .flex_col()
@@ -192,7 +192,7 @@ fn render_google_app(d: &SettingsPage, p: &SyncPrefs) -> Div {
     let about = if !p.google_client_id.trim().is_empty() {
         tr!("Google Drive signs in with your own Google app.")
     } else if p.google_app().is_some() {
-        tr!("Google Drive signs in with Heronite's Google app, shared by everyone using Heronite. Google limits how many requests an app makes a minute: if uploads often have to wait, a Google app of your own has the limit to itself.")
+        tr!("Google Drive signs in with Hearthdeck Hero's Google app, shared by everyone using Hearthdeck Hero. Google limits how many requests an app makes a minute: if uploads often have to wait, a Google app of your own has the limit to itself.")
     } else {
         tr!("Google Drive signs in with rclone's Google app, shared by everyone using rclone, so uploads may have to wait. A Google app of your own has the limit to itself.")
     };
@@ -258,7 +258,7 @@ fn render_server_form(d: &mut SettingsPage, provider: Provider, cx: &mut Context
                 .child(div().flex_1().child(labeled(tr!("Username"), input_box(&s.user, false))))
                 .child(div().flex_1().child(labeled(tr!("Password"), input_box(&s.password, false)))),
         )
-        .child(meta_text(tr!("The password is kept obscured in Heronite's own rclone settings, readable only by your user.")))
+        .child(meta_text(tr!("The password is kept obscured in Hearthdeck Hero's own rclone settings, readable only by your user.")))
         .child(
             div().flex().child(
                 button_sm("sync-connect", ButtonKind::Primary, tr!("Connect"))

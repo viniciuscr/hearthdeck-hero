@@ -3,7 +3,7 @@
 //! login. The card says whether it can be read and opens or restarts Steam
 //! when that is what is missing.
 //!
-//! Heronite no longer signs in to Steam: its sign-in with a QR code, as the
+//! Hearthdeck Hero no longer signs in to Steam: its sign-in with a QR code, as the
 //! Steam mobile app, got accounts locked by Steam's security.
 
 use gpui_kit::prelude::*;
@@ -93,26 +93,26 @@ impl SteamPage {
             // Said only when the flag file is there: another tool may hold its place.
             SteamState::Closed => Some(match s.flag {
                 Some(ClientApiFlag::On) => {
-                    tr!("Open Steam and Heronite reads your library by itself. The access it needs is turned on already: no restart.")
+                    tr!("Open Steam and Hearthdeck Hero reads your library by itself. The access it needs is turned on already: no restart.")
                 }
                 Some(ClientApiFlag::Blocked) => tr!(
-                    "Open Steam and Heronite reads your library by itself, if Steam lets it: another tool on this PC (Millennium, for example) decides whether Steam opens the access Heronite needs."
+                    "Open Steam and Hearthdeck Hero reads your library by itself, if Steam lets it: another tool on this PC (Millennium, for example) decides whether Steam opens the access Hearthdeck Hero needs."
                 ),
-                _ => tr!("Open Steam and Heronite reads your library by itself."),
+                _ => tr!("Open Steam and Hearthdeck Hero reads your library by itself."),
             }),
             SteamState::Blocked => Some(heronite_steam::blocked_message()),
             SteamState::Opening => Some(tr!("Steam is starting. If it asks, sign in: your library is read as soon as Steam is ready.")),
             SteamState::NotAnswering => Some(tr!(
-                "Steam is open but does not let Heronite read its library yet. If it is updating or asking you to sign in, finish that: the library is read by itself. Otherwise restart Steam once. Read library now shows what went wrong."
+                "Steam is open but does not let Hearthdeck Hero read its library yet. If it is updating or asking you to sign in, finish that: the library is read by itself. Otherwise restart Steam once. Read library now shows what went wrong."
             )),
             SteamState::NeedsRestart => Some(tr!(
-                "Steam was open before Heronite could turn on the access it needs. Restart it once (games running from Steam close), or wait: your library comes in the next time Steam opens."
+                "Steam was open before Hearthdeck Hero could turn on the access it needs. Restart it once (games running from Steam close), or wait: your library comes in the next time Steam opens."
             )),
             SteamState::Failed => Some(tr!(
-                "Steam restarted but did not turn on the access Heronite needs, so it is not asked again. Your installed Steam games still show in the Collection."
+                "Steam restarted but did not turn on the access Hearthdeck Hero needs, so it is not asked again. Your installed Steam games still show in the Collection."
             )),
             SteamState::NotInstalled => {
-                Some(tr!("Steam was not found on this PC. Install Steam and sign in, then open it: Heronite reads your library by itself."))
+                Some(tr!("Steam was not found on this PC. Install Steam and sign in, then open it: Hearthdeck Hero reads your library by itself."))
             }
             _ => None,
         };
@@ -316,7 +316,7 @@ impl Render for SteamPage {
             "Only games come in: no tools, soundtracks or demos. A game you already have from another store or added yourself is not added twice: it gets Steam's install instead. Steam keeps installing, updating and launching its games."
         ));
         let body = methods::page(strip, cards, [note.into_any_element()]);
-        let lead = tr!("Heronite reads your Steam library from the Steam app on this PC. It never asks you to sign in to Steam.");
+        let lead = tr!("Hearthdeck Hero reads your Steam library from the Steam app on this PC. It never asks you to sign in to Steam.");
         div().size_full().relative().child(stores::sheet("steam-page", Page::Steam, lead, cx, body)).into_any_element()
     }
 }

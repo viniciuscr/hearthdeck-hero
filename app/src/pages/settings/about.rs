@@ -73,7 +73,7 @@ impl State {
     fn report(&self, ctx: &PageCtx) -> String {
         let s = &self.system;
         let mut out = vec![
-            format!("Heronite {}", env!("CARGO_PKG_VERSION")),
+            format!("Hearthdeck Hero {}", env!("CARGO_PKG_VERSION")),
             format!("OS: {} (kernel {})", s.os, s.kernel),
             format!("CPU: {} ({} threads)", s.cpu, s.cores),
             format!("Memory: {}", sysinfo::human_memory(s.memory_kb)),
@@ -126,7 +126,7 @@ impl Link {
             Link::Problem => tr!("Report a problem"),
             Link::Idea => tr!("Suggest an idea"),
             Link::Question => tr!("Ask a question"),
-            Link::Star => tr!("Like Heronite?"),
+            Link::Star => tr!("Like Hearthdeck Hero?"),
         }
     }
 
@@ -175,7 +175,7 @@ impl SettingsPage {
         let a = &self.about;
         let s = &a.system;
         let app = card([
-            info_row(tr!("Version"), format!("Heronite {}", env!("CARGO_PKG_VERSION"))),
+            info_row(tr!("Version"), format!("Hearthdeck Hero {}", env!("CARGO_PKG_VERSION"))),
             info_row(
                 "Legendary",
                 a.legendary
@@ -218,7 +218,7 @@ impl SettingsPage {
             .children(updates)
             .child(caption(tr!("Help and feedback")))
             .child(feedback)
-            .child(caption("Heronite"))
+            .child(caption("Hearthdeck Hero"))
             .child(app)
             .child(caption(tr!("System")));
         if s.os.is_empty() {
@@ -285,8 +285,8 @@ pub(super) fn console_rows(p: &SettingsPage, cx: &App) -> Vec<crate::console::li
     rows.push(Row::header(tr!("Help and feedback")));
     rows.extend(Link::ALL.map(|link| Row::action(link.id(), link.label()).desc(link.description())));
     rows.extend([
-        Row::header("Heronite"),
-        Row::info("i:version", tr!("Version"), format!("Heronite {}", env!("CARGO_PKG_VERSION"))),
+        Row::header("Hearthdeck Hero"),
+        Row::info("i:version", tr!("Version"), format!("Hearthdeck Hero {}", env!("CARGO_PKG_VERSION"))),
         Row::info("i:legendary", "Legendary", a.legendary.clone().unwrap_or_else(|| "\u{2026}".into())),
         Row::info(
             "i:wine",

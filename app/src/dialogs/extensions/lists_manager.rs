@@ -118,7 +118,7 @@ impl ExtensionsDialog {
                     .gap(px(8.))
                     .child(div().pt(px(1.)).child(icon(Icon::Warning, px(14.), theme::readable(theme::warning()))))
                     .child(div().flex_1().min_w_0().child(meta_text(tr!(
-                        "Anyone can publish a list. Heronite checks that a source's files are the ones its list names, not what the source does: add only lists from people you trust. Removing a list keeps the sources installed from it."
+                        "Anyone can publish a list. Hearthdeck Hero checks that a source's files are the ones its list names, not what the source does: add only lists from people you trust. Removing a list keeps the sources installed from it."
                     )))),
             )
     }

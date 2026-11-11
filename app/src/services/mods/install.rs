@@ -33,7 +33,7 @@ fn cancelled() -> String {
 
 /// Without the game's folder the mod's files cannot be matched to its folders.
 pub(super) fn no_game_folder(game: &str) -> String {
-    tr!("Heronite can't find {game}'s folder, so it can't tell where the mod's files go. Install or locate the game first.", game = game)
+    tr!("Hearthdeck Hero can't find {game}'s folder, so it can't tell where the mod's files go. Install or locate the game first.", game = game)
 }
 
 /// What a finished install tells the job.
@@ -77,7 +77,7 @@ fn install_archive(env: &JobEnv, path: &Path, build: Build) -> Result<Built, Str
             if fomod::find_scripted(&staged.root).is_some() {
                 env.notice(
                     tr!(
-                        "{name} has a scripted installer, which Heronite cannot run: its files were put in as they are",
+                        "{name} has a scripted installer, which Hearthdeck Hero cannot run: its files were put in as they are",
                         name = entry.name.clone()
                     ),
                     false,

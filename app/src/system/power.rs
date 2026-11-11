@@ -53,7 +53,7 @@ fn command(action: PowerAction, has: impl Fn(&str) -> bool) -> Option<(&'static 
 pub fn run(action: PowerAction) -> Result<(), String> {
     let probe = heronite_launch::SystemProbe;
     let Some((tool, verb)) = command(action, |t| probe.which(t).is_some()) else {
-        return Err(tr!("Neither systemctl nor loginctl was found, so Heronite cannot ask the system to do this.").into());
+        return Err(tr!("Neither systemctl nor loginctl was found, so Hearthdeck Hero cannot ask the system to do this.").into());
     };
     if crate::env::flag("HERONITE_DEBUG_POWER_DRY") {
         log::info!("power (dry run): {tool} {verb}");

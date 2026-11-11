@@ -67,7 +67,7 @@ impl ModsDialog {
                 tinted(Tone::Warn, Icon::Warning)
                     .child(words(
                         Some(tr!("Game folder not found")),
-                        tr!("Heronite cannot find where this game is installed, so it cannot tell where a mod's files go. Install or locate the game first."),
+                        tr!("Hearthdeck Hero cannot find where this game is installed, so it cannot tell where a mod's files go. Install or locate the game first."),
                     ))
                     .into_any_element(),
             );
@@ -99,7 +99,7 @@ impl ModsDialog {
                     .child(words(
                         Some(tr!("One setting for Steam")),
                         tr!(
-                            "This game starts through Steam, so Heronite cannot set {value} itself. Add it to the game's launch options in Steam.",
+                            "This game starts through Steam, so Hearthdeck Hero cannot set {value} itself. Add it to the game's launch options in Steam.",
                             value
                         ),
                     ))
@@ -122,20 +122,20 @@ impl ModsDialog {
         out
     }
 
-    /// `nxm://` links that do not open Heronite. Nothing without an account:
+    /// `nxm://` links that do not open Hearthdeck Hero. Nothing without an account:
     /// the links need its key, and the account is set up in Settings → Mods.
     fn nexus_notice(&mut self, v: &View, cx: &mut Context<Self>) -> Option<AnyElement> {
         v.account.as_ref()?;
         if matches!(v.handlers, HandlerState::None | HandlerState::Other) {
             let text = if v.handlers == HandlerState::Other {
-                tr!("Another program opens the \"Mod manager download\" links of Nexus Mods. Use Heronite to install them here.")
+                tr!("Another program opens the \"Mod manager download\" links of Nexus Mods. Use Hearthdeck Hero to install them here.")
             } else {
-                tr!("Let \"Mod manager download\" on Nexus Mods open Heronite, and the mod lands in this list.")
+                tr!("Let \"Mod manager download\" on Nexus Mods open Hearthdeck Hero, and the mod lands in this list.")
             };
             return Some(
                 tinted(Tone::Info, Icon::Link)
                     .child(words(Some(tr!("Install from the Nexus Mods site")), text))
-                    .child(button_sm("mods-nxm", ButtonKind::Glass, tr!("Use Heronite")).self_center().on_click(cx.listener(
+                    .child(button_sm("mods-nxm", ButtonKind::Glass, tr!("Use Hearthdeck Hero")).self_center().on_click(cx.listener(
                         |this, _, _, cx| {
                             this.service.update(cx, |s, cx| s.register_handlers(cx));
                         },

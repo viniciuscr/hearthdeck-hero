@@ -81,7 +81,7 @@ pub fn load(content_root: &Path) -> Result<Installer, String> {
         child_named(content_root, "fomod").filter(|f| f.is_dir()).ok_or_else(|| tr!("This mod has no FOMOD installer").to_string())?;
     let Some(config) = child_named(&fomod, "ModuleConfig.xml") else {
         return Err(if child_named(&fomod, "script.cs").is_some() {
-            tr!("This mod uses a scripted installer (script.cs), which Heronite cannot run").to_string()
+            tr!("This mod uses a scripted installer (script.cs), which Hearthdeck Hero cannot run").to_string()
         } else {
             tr!("This mod has no FOMOD installer").to_string()
         });

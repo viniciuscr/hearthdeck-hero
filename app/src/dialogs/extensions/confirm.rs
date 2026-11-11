@@ -237,7 +237,7 @@ impl ExtensionsDialog {
                 }
                 col = col.child(trust(&origin_of(c)));
                 if !info.warnings.is_empty() {
-                    col = col.child(meta_text(tr!("Its source.toml has keys this Heronite does not know; they are left out.")));
+                    col = col.child(meta_text(tr!("Its source.toml has keys this Hearthdeck Hero does not know; they are left out.")));
                 }
                 col = col
                     .child(div().text_size(px(11.)).text_color(theme::text_dim()).child(tr!("SHA-256 {sha}", sha = info.sha256.clone())));

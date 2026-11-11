@@ -56,7 +56,7 @@ impl<K: ClientKind> ClientPage<K> {
                     Row::action("folder", tr!("Open the Wine prefix folder")).desc(logic::tilde(prefix, &home())).icon(Icon::FolderOpen),
                 );
             }
-            rows.push(Row::action("forget", tr!("Remove from Heronite")).icon(Icon::Logout).danger());
+            rows.push(Row::action("forget", tr!("Remove from Hearthdeck Hero")).icon(Icon::Logout).danger());
         } else if !st.installed() && !st.busy() && st.status.is_some() {
             rows.push(Row::action("adopt", tr!("Use an existing install")).icon(Icon::FolderOpen));
         }
@@ -118,7 +118,7 @@ impl<K: ClientKind> ClientPage<K> {
         let rows = vec![Row::action("no", tr!("Cancel")), Row::action("yes", tr!("Remove")).danger()];
         open_sheet(
             &mut self.layer,
-            tr!("Remove {client} from Heronite?", client = client.name()),
+            tr!("Remove {client} from Hearthdeck Hero?", client = client.name()),
             Some(message),
             rows,
             window,

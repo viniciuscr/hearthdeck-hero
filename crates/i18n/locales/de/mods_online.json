@@ -17,5 +17,5 @@
   "{host} answered with HTTP {status}": "{host} hat mit HTTP {status} geantwortet",
   "{host} asks to wait: too many requests": "{host} bittet zu warten: zu viele Anfragen",
   "{host} refused the request (HTTP {status})": "{host} hat die Anfrage abgelehnt (HTTP {status})",
-  "{host} sent an answer Heronite does not understand: {error}": "{host} hat eine Antwort geschickt, die Heronite nicht versteht: {error}"
+  "{host} sent an answer Hearthdeck Hero does not understand: {error}": "{host} hat eine Antwort geschickt, die Hearthdeck Hero nicht versteht: {error}"
 }

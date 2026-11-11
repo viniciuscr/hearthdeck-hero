@@ -35,7 +35,7 @@ fn title() -> &'static str {
 }
 
 fn why() -> &'static str {
-    tr!("Heronite backs up and restores game saves with Ludusavi, a free program that knows where thousands of games keep their saves. Install it once and saves are backed up every time you close a game.")
+    tr!("Hearthdeck Hero backs up and restores game saves with Ludusavi, a free program that knows where thousands of games keep their saves. Install it once and saves are backed up every time you close a game.")
 }
 
 fn steps() -> [&'static str; 3] {
@@ -58,7 +58,7 @@ fn flatpak_note() -> &'static str {
     if cfg!(windows) {
         return tr!("Installed somewhere else? Set the program in Backup location & format.");
     }
-    tr!("The Flatpak version is not found: Heronite runs the ludusavi program itself. Installed somewhere else? Set the program in Backup location & format.")
+    tr!("The Flatpak version is not found: Hearthdeck Hero runs the ludusavi program itself. Installed somewhere else? Set the program in Backup location & format.")
 }
 
 /// The desktop card. `id` keeps the buttons apart when shown twice.

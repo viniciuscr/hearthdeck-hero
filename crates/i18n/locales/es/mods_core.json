@@ -1,8 +1,8 @@
 {
   "Cannot use {path}: it is not a folder": "No se puede usar {path}: no es una carpeta",
   "Could not download fuse-overlayfs: {error}": "No se pudo descargar fuse-overlayfs: {error}",
-  "Heronite needs FUSE (fusermount3) to apply mods. Install the fuse3 package.": "Heronite necesita FUSE (fusermount3) para aplicar mods. Instala el paquete fuse3.",
-  "Heronite needs FUSE to apply mods, but /dev/fuse is missing. Load the fuse kernel module.": "Heronite necesita FUSE para aplicar mods, pero falta /dev/fuse. Carga el módulo fuse del kernel.",
+  "Hearthdeck Hero needs FUSE (fusermount3) to apply mods. Install the fuse3 package.": "Hearthdeck Hero necesita FUSE (fusermount3) para aplicar mods. Instala el paquete fuse3.",
+  "Hearthdeck Hero needs FUSE to apply mods, but /dev/fuse is missing. Load the fuse kernel module.": "Hearthdeck Hero necesita FUSE para aplicar mods, pero falta /dev/fuse. Carga el módulo fuse del kernel.",
   "Mods cannot be applied over {path}": "No se pueden aplicar mods sobre {path}",
   "Mods could not be applied: {error}": "No se pudieron aplicar los mods: {error}",
   "Not a valid game key: {key}": "Clave de juego no válida: {key}",

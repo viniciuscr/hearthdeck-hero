@@ -409,7 +409,7 @@ impl OverlayPanel {
                 };
                 (game.title(), line)
             }
-            None => ("Heronite".to_string(), tr!("No game running").to_string()),
+            None => ("Hearthdeck Hero".to_string(), tr!("No game running").to_string()),
         };
         let battery = self.data.controllers.iter().find_map(|(_, b)| *b).map(|b| format!("{}%", b.percent));
         let info = |ic: Icon, text: String| {

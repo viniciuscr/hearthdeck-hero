@@ -366,7 +366,7 @@ pub fn render(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<Settin
         .into_iter()
         .chain(st.capture_command.clone().map(|command| {
             let description = tr!(
-                "Where the desktop takes no shortcut from Heronite, bind a key to this command in its keyboard settings: {command}",
+                "Where the desktop takes no shortcut from Hearthdeck Hero, bind a key to this command in its keyboard settings: {command}",
                 command = &command
             );
             row(
@@ -488,7 +488,7 @@ pub fn render(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<Settin
         col = col
             .child(caption(tr!("With the controller")))
             .child(div().px(px(6.)).pb(px(8.)).child(meta_text(if overlay_on {
-                tr!("Works during a game opened by Heronite, through the in-game overlay.")
+                tr!("Works during a game opened by Hearthdeck Hero, through the in-game overlay.")
             } else {
                 tr!("Needs the in-game overlay, which is off: turn it on in Settings → Overlay.")
             })))
@@ -524,7 +524,7 @@ fn registered_text(desktop_trigger: Option<&str>) -> SharedString {
 /// What the shortcut does to the game on this system, if it needs saying.
 fn shortcut_note() -> Option<&'static str> {
     cfg!(windows).then(|| {
-        tr!("While a game runs, Windows hands this shortcut to Heronite alone: the game does not receive it, so pick keys the game does not use.")
+        tr!("While a game runs, Windows hands this shortcut to Hearthdeck Hero alone: the game does not receive it, so pick keys the game does not use.")
     })
 }
 

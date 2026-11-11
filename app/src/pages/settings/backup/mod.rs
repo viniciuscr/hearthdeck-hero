@@ -364,7 +364,7 @@ pub fn render(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<Settin
         .flex_col()
         .child(caption(tr!("Data folder backup")))
         .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!(
-            "Each backup is a dated folder you can open and browse. Files that did not change are shared with the previous backup, so a new one only takes the space of what changed. Scheduled backups run while Heronite is open, never during a game."
+            "Each backup is a dated folder you can open and browse. Files that did not change are shared with the previous backup, so a new one only takes the space of what changed. Scheduled backups run while Hearthdeck Hero is open, never during a game."
         ))))
         .child(setup)
         .child(action)

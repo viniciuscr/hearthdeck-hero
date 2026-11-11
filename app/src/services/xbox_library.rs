@@ -7,7 +7,7 @@
 //! in the background (`heronite_xbox::size`), one at a time.
 //! The Collection reloads on [`XboxLibraryEvent::Synced`].
 //!
-//! With an Xbox account signed in (optional, Windows; Heronite signs in as
+//! With an Xbox account signed in (optional, Windows; Hearthdeck Hero signs in as
 //! its own app registration, `heronite_xbox::live::client_id`), the
 //! account is read after a package read, at most once an hour (or when
 //! asked): play time, last play, achievements, art, and the PC games played
@@ -61,7 +61,7 @@ pub struct XboxLibrary {
 /// The Xbox account, as the page shows it.
 #[derive(Default)]
 pub struct AccountState {
-    /// Heronite's app registration; `None`: no account is offered.
+    /// Hearthdeck Hero's app registration; `None`: no account is offered.
     pub client_id: Option<String>,
     /// The signed-in account's gamertag (`Some("")` when it has none).
     pub gamertag: Option<String>,
@@ -101,7 +101,7 @@ impl XboxLibrary {
         // that state on any system, without Microsoft (for screenshots).
         if let Some(debug) = crate::env::value("HERONITE_DEBUG_XBOX_ACCOUNT") {
             account.client_id = Some("debug".into());
-            account.gamertag = (debug == "signed").then(|| "Heronite Player".into());
+            account.gamertag = (debug == "signed").then(|| "Hearthdeck Hero Player".into());
             account.debug = true;
         }
         let this =
@@ -321,9 +321,9 @@ impl XboxLibrary {
         match account::sign_out(&self.paths) {
             Ok(()) => {
                 self.account.gamertag = None;
-                // Microsoft still lets Heronite in until the user says no there.
+                // Microsoft still lets Hearthdeck Hero in until the user says no there.
                 self.account.last = Some(Ok(tr!(
-                    "Signed out. To also take away Heronite's access to your account, go to account.live.com/consent/Manage."
+                    "Signed out. To also take away Hearthdeck Hero's access to your account, go to account.live.com/consent/Manage."
                 )
                 .to_string()));
             }

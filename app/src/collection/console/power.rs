@@ -1,5 +1,5 @@
 //! Power in the console menu: suspend, restart or shut down the computer
-//! from the couch, or quit Heronite. Restart and shut down ask first, naming
+//! from the couch, or quit Hearthdeck Hero. Restart and shut down ask first, naming
 //! the games that would close (see `system::power`).
 
 use gpui_kit::*;
@@ -17,7 +17,7 @@ impl CollectionView {
             Row::action("suspend", tr!("Suspend")).icon(Icon::Moon),
             Row::action("reboot", tr!("Restart")).icon(Icon::Replay),
             Row::action("poweroff", tr!("Shut down")).icon(Icon::PowerSettingsNew),
-            Row::action("quit", tr!("Quit Heronite")).icon(Icon::Close),
+            Row::action("quit", tr!("Quit Hearthdeck Hero")).icon(Icon::Close),
         ];
         let sheet = cx.new(|_| Sheet::new(tr!("Power"), None, rows));
         let sub = cx.subscribe(&sheet, |this, _, ev: &SheetEvent, cx| {
@@ -74,11 +74,11 @@ impl CollectionView {
         match titles.len() {
             0 => None,
             1 => Some(tr!(
-                "{names} is running and will close: progress the game has not saved is lost. Heronite saves the playtime so far.",
+                "{names} is running and will close: progress the game has not saved is lost. Hearthdeck Hero saves the playtime so far.",
                 names
             )),
             _ => Some(tr!(
-                "{names} are running and will close: progress the games have not saved is lost. Heronite saves the playtime so far.",
+                "{names} are running and will close: progress the games have not saved is lost. Hearthdeck Hero saves the playtime so far.",
                 names
             )),
         }

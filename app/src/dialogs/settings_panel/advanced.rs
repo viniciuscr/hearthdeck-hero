@@ -156,7 +156,7 @@ impl SettingsPanel {
         let mut col = column();
         if heronite_launch::steam_extras::supported() {
             col = col.child(self.scripts_section(false, cx)).child(self.companions_section(cx)).child(
-                help(tr!("Steam starts the game itself, as from its library. Heronite runs these when you play from Heronite.")).px(px(6.)),
+                help(tr!("Steam starts the game itself, as from its library. Hearthdeck Hero runs these when you play from Hearthdeck Hero.")).px(px(6.)),
             );
         }
         if self.steam_line_only() {
@@ -172,7 +172,7 @@ impl SettingsPanel {
             .field(self.path_row("beforeScript", Some(tr!("Before the game starts")), false, tr!("Select script ..."), true, cx))
             .field(self.path_row("afterScript", Some(tr!("After the game exits")), false, tr!("Select script ..."), true, cx));
         if steam {
-            r = r.child(help(tr!("Steam runs them through a small Heronite script, however the game starts.")).pb(px(12.)));
+            r = r.child(help(tr!("Steam runs them through a small Hearthdeck Hero script, however the game starts.")).pb(px(12.)));
         } else if cfg!(windows) {
             r = r.child(help(tr!("A program, or a .bat, .cmd or .ps1 script")).pb(px(12.)));
         }

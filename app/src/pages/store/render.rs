@@ -255,7 +255,7 @@ impl<K: StoreKind> StorePage<K> {
             self.id("comet"),
             tr!("Unlock GOG achievements while you play"),
             Some(tr!(
-                "Heronite runs Comet, an open-source stand-in for GOG Galaxy's service, beside each GOG game, signed in with your GOG account: what the game unlocks counts on GOG and shows here while you play. Off, games that need GOG Galaxy for their achievements unlock nothing."
+                "Hearthdeck Hero runs Comet, an open-source stand-in for GOG Galaxy's service, beside each GOG game, signed in with your GOG account: what the game unlocks counts on GOG and shows here while you play. Off, games that need GOG Galaxy for their achievements unlock nothing."
             )),
             on,
         )

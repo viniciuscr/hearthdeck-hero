@@ -31,7 +31,7 @@ use heronite_i18n::tr;
 /// Text of the Steam uninstall confirmation (`collection.steam.uninstallHelp`).
 fn steam_uninstall_message(title: &str) -> String {
     tr!(
-        "This opens Steam to uninstall \"{title}\". The game stays in Collection; Heronite marks it uninstalled after Steam finishes and you refresh.",
+        "This opens Steam to uninstall \"{title}\". The game stays in Collection; Hearthdeck Hero marks it uninstalled after Steam finishes and you refresh.",
         title
     )
 }
@@ -61,7 +61,7 @@ impl CollectionView {
     /// search in step with the open flyout.
     pub(super) fn sync_extras(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if std::mem::take(&mut self.extras.steam_missing) {
-            // Heronite's `collection.steam.clientMissing*` message.
+            // Hearthdeck Hero's `collection.steam.clientMissing*` message.
             let spec = Confirm::new(
                 "steam-missing",
                 tr!("Steam not found"),
@@ -194,7 +194,7 @@ impl CollectionView {
         crate::services::achievements::get(cx).update(cx, |s, cx| s.want(&game, cx));
     }
 
-    /// A launch/install failed: a missing Steam client gets Heronite's
+    /// A launch/install failed: a missing Steam client gets Hearthdeck Hero's
     /// "Steam not found" message, everything else a toast.
     pub(super) fn report_launch_error(&mut self, error: String, cx: &mut Context<Self>) {
         if is_steam_missing(&error) {
@@ -315,7 +315,7 @@ impl CollectionView {
     }
 
     /// Whether "Remove from Collection" can take `game` out: a game added to
-    /// Heronite (by hand, a scan or a launcher import), not while it runs.
+    /// Hearthdeck Hero (by hand, a scan or a launcher import), not while it runs.
     /// Store games come back with the store's library.
     pub(super) fn can_remove_from_collection(&self, game: &CollectionGame) -> bool {
         game.runner == "sideload" && !self.playing.contains_key(&game.app_name)

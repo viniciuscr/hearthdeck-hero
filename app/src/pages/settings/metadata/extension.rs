@@ -59,7 +59,7 @@ pub(super) fn problem_block(r: &SourceRow, cx: &mut Context<SettingsPage>) -> Op
         _ => (
             if stuck {
                 tr!(
-                    "It ran past its time limit and could not be stopped, so it is not asked for now. Restarting Heronite ends what it left running; it is asked again once you try again or install an update."
+                    "It ran past its time limit and could not be stopped, so it is not asked for now. Restarting Hearthdeck Hero ends what it left running; it is asked again once you try again or install an update."
                 )
             } else {
                 tr!(

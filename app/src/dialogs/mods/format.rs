@@ -53,7 +53,7 @@ pub(super) fn status_line(g: &GameMods) -> String {
     if !g.list.active {
         tr!("{count} · off · the game starts without them", count)
     } else {
-        tr!("{count} · {on} on · applied when you play from Heronite", count, on)
+        tr!("{count} · {on} on · applied when you play from Hearthdeck Hero", count, on)
     }
 }
 

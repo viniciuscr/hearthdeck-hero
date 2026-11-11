@@ -1,10 +1,10 @@
 {
-  "An update of Heronite is using {path}": "Ein Update von Heronite verwendet {path}",
+  "An update of Hearthdeck Hero is using {path}": "Ein Update von Hearthdeck Hero verwendet {path}",
   "Could not move {path} to the Recycle Bin: {error}": "{path} konnte nicht in den Papierkorb verschoben werden: {error}",
-  "Deleted. Heronite downloads them again when needed.": "Gelöscht. Heronite lädt sie bei Bedarf erneut herunter.",
+  "Deleted. Hearthdeck Hero downloads them again when needed.": "Gelöscht. Hearthdeck Hero lädt sie bei Bedarf erneut herunter.",
   "Disk space of games, store tools, caches": "Speicherplatz von Spielen, Store-Tools, Caches",
   "GOG redistributables": "GOG-Redistributables",
-  "Heronite updates": "Heronite-Updates",
+  "Hearthdeck Hero updates": "Hearthdeck Hero-Updates",
   "Leftover folders go to the Recycle Bin, where they can be restored; the rest is deleted.": "Verwaiste Ordner kommen in den Papierkorb und können dort wiederhergestellt werden; der Rest wird gelöscht.",
   "Move to the Recycle Bin": "In den Papierkorb verschieben",
   "No game points to these folders any more. They go to the Recycle Bin, where they can be restored.": "Kein Spiel verweist mehr auf diese Ordner. Sie kommen in den Papierkorb und können von dort wiederhergestellt werden.",

@@ -40,7 +40,7 @@ fn renodx_refusal(o: &Overview, m: &Manifest, found: &Found) -> Option<String> {
     let arch = if m.arch == "x86" { Arch::X86 } else { Arch::X64 };
     match renodx::url_for(found, arch) {
         None => Some(tr!("This mod has no {bits}-bit version.", bits = arch.bits()).to_string()),
-        Some(u) if !renodx::allowed_url(u) => Some(tr!("This mod is not on GitHub, so Heronite does not download it.").to_string()),
+        Some(u) if !renodx::allowed_url(u) => Some(tr!("This mod is not on GitHub, so Hearthdeck Hero does not download it.").to_string()),
         Some(_) => None,
     }
 }
@@ -127,7 +127,7 @@ impl SettingsPanel {
         let Some(found) = found else {
             return section.child(
                 inner
-                    .child(help(tr!("Heronite's catalog has no RenoDX mod for this game. RenoDX's list may have one to install by hand.")))
+                    .child(help(tr!("Hearthdeck Hero's catalog has no RenoDX mod for this game. RenoDX's list may have one to install by hand.")))
                     .child(renodx_list(cx)),
             );
         };

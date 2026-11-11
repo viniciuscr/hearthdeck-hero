@@ -102,7 +102,7 @@
   "Vulkan on NVIDIA when the card offers it (about half the video memory), else NVENC or VA-API.": "Vulkan na NVIDIA quando a placa oferece (cerca de metade da memória de vídeo); senão, NVENC ou VA-API.",
   "Waiting for a game": "Esperando um jogo",
   "What is on the monitor is in the replay, notifications and the overlay's notices included.": "O que está no monitor vai para o replay, inclusive notificações e os avisos do overlay.",
-  "While a game opened by Heronite runs, its last seconds stay in memory. Guide + X or the overlay's \"Save replay\" saves them in the game's screenshots folder, under replays, and marks them as a moment in its journal.": "Enquanto um jogo aberto pelo Heronite roda, os últimos segundos dele ficam na memória. Guide + X ou o \"Salvar replay\" do overlay os salva na pasta de capturas do jogo, em replays, e os marca como um momento no diário dele.",
+  "While a game opened by Hearthdeck Hero runs, its last seconds stay in memory. Guide + X or the overlay's \"Save replay\" saves them in the game's screenshots folder, under replays, and marks them as a moment in its journal.": "Enquanto um jogo aberto pelo Hearthdeck Hero roda, os últimos segundos dele ficam na memória. Guide + X ou o \"Salvar replay\" do overlay os salva na pasta de capturas do jogo, em replays, e os marca como um momento no diário dele.",
   "gpu-screen-recorder could not start: {err}": "O gpu-screen-recorder não pôde iniciar: {err}",
   "gpu-screen-recorder exited with code {code}": "O gpu-screen-recorder saiu com o código {code}",
   "gpu-screen-recorder is not installed": "O gpu-screen-recorder não está instalado",

@@ -28,7 +28,7 @@ mod xdg {
 
     pub(super) fn entry_text(exe: &Path) -> String {
         format!(
-            "[Desktop Entry]\nType=Application\nName=Heronite (mods)\nComment=Opens the mod links of Nexus Mods and Thunderstore\nExec={} %u\nIcon=com.heronite.rs\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/nxm;x-scheme-handler/ror2mm;\n",
+            "[Desktop Entry]\nType=Application\nName=Hearthdeck Hero (mods)\nComment=Opens the mod links of Nexus Mods and Thunderstore\nExec={} %u\nIcon=com.heronite.rs\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/nxm;x-scheme-handler/ror2mm;\n",
             quote_exec_arg(&exe.to_string_lossy())
         )
     }
@@ -81,8 +81,8 @@ mod xdg {
             .status();
         match set {
             Ok(s) if s.success() => {}
-            Ok(s) => return Err(tr!("xdg-mime could not set Heronite for the mod links (it exited with {status})", status = s)),
-            Err(e) => return Err(tr!("xdg-mime is needed to set Heronite for the mod links: {error}", error = e)),
+            Ok(s) => return Err(tr!("xdg-mime could not set Hearthdeck Hero for the mod links (it exited with {status})", status = s)),
+            Err(e) => return Err(tr!("xdg-mime is needed to set Hearthdeck Hero for the mod links: {error}", error = e)),
         }
         // Updates the desktop's cache of types; not every system has the tool.
         let _ = Command::new("update-desktop-database")
@@ -103,7 +103,7 @@ mod xdg {
         #[test]
         fn the_entry_opens_links_with_the_executable() {
             let text = entry_text(Path::new("/opt/My Apps/heronite-rs"));
-            assert!(text.starts_with("[Desktop Entry]\nType=Application\nName=Heronite (mods)\n"), "{text}");
+            assert!(text.starts_with("[Desktop Entry]\nType=Application\nName=Hearthdeck Hero (mods)\n"), "{text}");
             assert!(text.contains("Exec=\"/opt/My Apps/heronite-rs\" %u\n"), "{text}");
             assert!(text.contains("NoDisplay=true\n"));
             assert!(text.contains("MimeType=x-scheme-handler/nxm;x-scheme-handler/ror2mm;\n"));
@@ -198,7 +198,7 @@ mod classes {
         for (scheme, label) in SCHEMES {
             for (key, name, value) in values(scheme, label, exe) {
                 set_string(Hive::CurrentUser, &key, name, &value).map_err(|e| {
-                    heronite_i18n::tr!("Could not set Heronite for the {scheme} links: {error}", scheme = scheme, error = e)
+                    heronite_i18n::tr!("Could not set Hearthdeck Hero for the {scheme} links: {error}", scheme = scheme, error = e)
                 })?;
             }
         }

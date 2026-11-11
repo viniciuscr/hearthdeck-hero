@@ -15,7 +15,7 @@ pub(super) fn open<V: Render>(
     let screen = screen?;
     let notice = namespace == "overlay-notice";
     let handle = cx.open_window(super::options(namespace, size, side, px(margin), true, false), |window, cx| {
-        window.set_window_title(if notice { "Heronite overlay notice" } else { "Heronite overlay" });
+        window.set_window_title(if notice { "Hearthdeck Hero overlay notice" } else { "Hearthdeck Hero overlay" });
         build(window, cx)
     })?;
     let raw = handle.update(cx, |_, window, _| {

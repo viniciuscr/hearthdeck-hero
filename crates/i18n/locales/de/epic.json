@@ -38,7 +38,7 @@
   "Could not download the {store} installer: {error}": "Der {store}-Installer konnte nicht heruntergeladen werden: {error}",
   "Could not fetch {kind} releases: {error}": "{kind}-Versionen konnten nicht abgerufen werden: {error}",
   "Could not fetch the checksum: {error}": "Die Prüfsumme konnte nicht abgerufen werden: {error}",
-  "Could not get legendary, which Heronite uses for Epic Games: {error}": "legendary, das Heronite für Epic Games nutzt, konnte nicht geladen werden: {error}",
+  "Could not get legendary, which Hearthdeck Hero uses for Epic Games: {error}": "legendary, das Hearthdeck Hero für Epic Games nutzt, konnte nicht geladen werden: {error}",
   "Could not make the update executable: {error}": "Das Update konnte nicht ausführbar gemacht werden: {error}",
   "Could not move the build into {path}: {error}": "Die Version konnte nicht nach {path} verschoben werden: {error}",
   "Could not open the browser: {err}": "Der Browser konnte nicht geöffnet werden: {err}",

@@ -343,7 +343,7 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
         .flex_col()
         .child(caption(tr!("Save backups (Ludusavi)")))
         .child(div().px(px(6.)).pb(px(8.)).child(meta_text(
-            tr!("When enabled, Heronite backs up the game save with Ludusavi after you close a game. Right-click a Collection card to back up that game now."),
+            tr!("When enabled, Hearthdeck Hero backs up the game save with Ludusavi after you close a game. Right-click a Collection card to back up that game now."),
         )))
         .child(enable)
         .child(div().mt(px(10.)).child(interval))

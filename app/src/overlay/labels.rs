@@ -80,27 +80,27 @@ pub fn moment_taken_by_screenshot() -> &'static str {
 /// Under "Turn on the overlay" (Settings → Overlay).
 pub fn turn_on_desc() -> &'static str {
     if cfg!(windows) {
-        tr!("During a game opened by Heronite, press Back + Start together to open it; press them again or B to close it. The game also receives controller input.")
+        tr!("During a game opened by Hearthdeck Hero, press Back + Start together to open it; press them again or B to close it. The game also receives controller input.")
     } else {
-        tr!("During a game opened by Heronite, press the controller's Guide button (the centre one) to open it; press it again or B to close it.")
+        tr!("During a game opened by Hearthdeck Hero, press the controller's Guide button (the centre one) to open it; press it again or B to close it.")
     }
 }
 
 /// [`turn_on_desc`] in one line (console mode).
 pub fn turn_on_short() -> &'static str {
     if cfg!(windows) {
-        tr!("Back + Start opens it during a game opened by Heronite")
+        tr!("Back + Start opens it during a game opened by Hearthdeck Hero")
     } else {
-        tr!("The Guide button opens it during a game opened by Heronite")
+        tr!("The Guide button opens it during a game opened by Hearthdeck Hero")
     }
 }
 
 /// Under "Open it without a game too" (Settings → Overlay).
 pub fn without_game_desc() -> &'static str {
     if cfg!(windows) {
-        tr!("Back + Start and the keyboard shortcut open it at any time Heronite is running. Heronite keeps reading XInput controllers; other apps still receive their input. The keyboard shortcut is reserved for the overlay: it stops working in every other app while Heronite runs.")
+        tr!("Back + Start and the keyboard shortcut open it at any time Hearthdeck Hero is running. Hearthdeck Hero keeps reading XInput controllers; other apps still receive their input. The keyboard shortcut is reserved for the overlay: it stops working in every other app while Hearthdeck Hero runs.")
     } else {
-        tr!("Guide and the keyboard shortcut open it at any time Heronite is running, with the volume, the controllers and a way back to Heronite. Heronite then reads the controllers all the time, and Guide is the overlay's even outside games.")
+        tr!("Guide and the keyboard shortcut open it at any time Hearthdeck Hero is running, with the volume, the controllers and a way back to Hearthdeck Hero. Hearthdeck Hero then reads the controllers all the time, and Guide is the overlay's even outside games.")
     }
 }
 
@@ -116,9 +116,9 @@ pub fn without_game_short() -> &'static str {
 /// The lead of Settings → Overlay.
 pub fn section_blurb() -> &'static str {
     if cfg!(windows) {
-        tr!("A panel Back + Start or a keyboard shortcut opens over a game launched by Heronite: screenshots, volume, quitting the game.")
+        tr!("A panel Back + Start or a keyboard shortcut opens over a game launched by Hearthdeck Hero: screenshots, volume, quitting the game.")
     } else {
-        tr!("A panel the controller's Guide button or a keyboard shortcut opens over a game launched by Heronite: screenshots, volume, quitting the game.")
+        tr!("A panel the controller's Guide button or a keyboard shortcut opens over a game launched by Hearthdeck Hero: screenshots, volume, quitting the game.")
     }
 }
 

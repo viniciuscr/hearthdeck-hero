@@ -160,7 +160,7 @@ impl Step {
         match self {
             Step::Steam => tr!("Open Steam and your games come in by themselves, installed or not, with Steam's play time."),
             Step::Stores => tr!("Log in and your whole library shows in the Collection. You install games from there."),
-            Step::Emulators => tr!("Heronite finds the emulators on this PC and scans your ROM folders."),
+            Step::Emulators => tr!("Hearthdeck Hero finds the emulators on this PC and scans your ROM folders."),
             Step::Palette => tr!("Games, pages and actions in one place."),
             Step::Statuses => tr!("Playing, Beaten, Plan to Play. Group the Collection by them."),
             Step::Journal => tr!("Notes on the days you played, on screenshots, and where you left off."),

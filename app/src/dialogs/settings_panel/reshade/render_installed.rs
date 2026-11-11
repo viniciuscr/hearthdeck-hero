@@ -103,7 +103,7 @@ impl SettingsPanel {
                 .push(warn_line(&tr!("Anti-cheat: {names}. Online modes may block ReShade or ban the account.", names = names.join(", "))));
         }
         if m.adopted {
-            notes.push(help(tr!("Installed by hand; Heronite manages it now.")));
+            notes.push(help(tr!("Installed by hand; Hearthdeck Hero manages it now.")));
         }
         if !o.sharing.is_empty() {
             notes.push(warn_line(&heronite_i18n::trn!(
@@ -183,7 +183,7 @@ impl SettingsPanel {
         }
         if !o.user_overrides.is_empty() {
             let text = tr!(
-                "Your WINEDLLOVERRIDES already sets {dlls}. Heronite adds them by itself while ReShade is on, and nothing once it is off or removed.",
+                "Your WINEDLLOVERRIDES already sets {dlls}. Hearthdeck Hero adds them by itself while ReShade is on, and nothing once it is off or removed.",
                 dlls = o.user_overrides.join(", ")
             );
             let clean = self.outline_button("reshade-clean-overrides", tr!("Remove from my variables"), !busy, cx, |this, _, cx| {
@@ -216,7 +216,7 @@ impl SettingsPanel {
         if self.reshade.confirm == Some(Confirm::Remove) {
             card = card.child(self.reshade_confirm_card(
                 tr!("Remove ReShade from this game?"),
-                tr!("The DLL and the shaders Heronite installed are deleted. ReShade.ini, the preset and the log go to the trash. Files you changed stay."),
+                tr!("The DLL and the shaders Hearthdeck Hero installed are deleted. ReShade.ini, the preset and the log go to the trash. Files you changed stay."),
                 tr!("Remove"),
                 cx,
                 |this, cx| this.remove_reshade(cx),

@@ -140,7 +140,7 @@ impl LaunchProblemDialog {
             .border_color(if blocked(f) { tint(theme::danger(), 0.45).into() } else { theme::card_border() })
             .child(head);
         if !f.evidence.is_empty() {
-            let label = if from_log(f) { tr!("What the log says") } else { tr!("What Heronite found") };
+            let label = if from_log(f) { tr!("What the log says") } else { tr!("What Hearthdeck Hero found") };
             c = c.child(
                 div()
                     .flex()

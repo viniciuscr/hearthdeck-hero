@@ -14,7 +14,7 @@
 //!
 //! Settings can let it open with no game running too ("without a game"):
 //! then the input thread and the shortcut run while the app does, and the
-//! panel shows what has no game (volume, controllers, Heronite).
+//! panel shows what has no game (volume, controllers, Hearthdeck Hero).
 //!
 //! Guide + Y marks a moment in the game's journal (`moment`); the panel's
 //! Notes tab writes it. Guide + X saves the replay (the last seconds of the
@@ -328,7 +328,7 @@ impl OverlayService {
         let (ready_tx, mut ready) = unbounded();
         let spec = HotkeySpec {
             id: "overlay",
-            description: "Heronite overlay",
+            description: "Hearthdeck Hero overlay",
             #[cfg(target_os = "linux")]
             signal: signal_hook::consts::SIGUSR1,
             accelerator: accelerator.clone(),

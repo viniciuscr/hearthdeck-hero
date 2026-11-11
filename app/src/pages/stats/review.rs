@@ -431,7 +431,7 @@ impl StatsPage {
                             .font_family(theme::font_heading())
                             .font_weight(theme::W_BOLD)
                             .text_color(theme::text_primary())
-                            .child("Heronite"),
+                            .child("Hearthdeck Hero"),
                     )
                     .child(tr!("{year} in review", year)),
             )

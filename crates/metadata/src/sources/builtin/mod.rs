@@ -142,7 +142,7 @@ static BUILTIN: LazyLock<Vec<SourceDescriptor>> = LazyLock::new(|| {
             searchable: true,
             ..source(LUTRIS, "Lutris", Details, &["description", "releaseDate", "genres", "platforms", "cover", "hero"])
         },
-        // Kept in saved priorities (Heronite's data) but not offered: nothing
+        // Kept in saved priorities (Hearthdeck Hero's data) but not offered: nothing
         // feeds this source here yet (no Playnite dump is set).
         SourceDescriptor {
             finds_by: vec![SourceId],
@@ -184,7 +184,7 @@ static BUILTIN: LazyLock<Vec<SourceDescriptor>> = LazyLock::new(|| {
             also_for: Some(AlsoFor { option: PC_GAMES.into(), applies_to: AppliesTo::Pc }),
             leads_for: Some(AppliesTo::Emulated),
             about: Some(n_!(
-                "The LaunchBox Games Database (gamesdb.launchbox-app.com), made for emulated games: it knows each platform's games by their dump names, with box art by region. Downloaded once to this PC and refreshed every week while it is on. Heronite is not affiliated with LaunchBox."
+                "The LaunchBox Games Database (gamesdb.launchbox-app.com), made for emulated games: it knows each platform's games by their dump names, with box art by region. Downloaded once to this PC and refreshed every week while it is on. Hearthdeck Hero is not affiliated with LaunchBox."
             )
             .into()),
             options: vec![
@@ -240,7 +240,7 @@ static BUILTIN: LazyLock<Vec<SourceDescriptor>> = LazyLock::new(|| {
             finds_by: vec![ExactTitle, FuzzyTitle],
             leads_for: Some(AppliesTo::Emulated),
             about: Some(n_!(
-                "The box art RetroArch uses (thumbnails.libretro.com), found by each game's dump file name on its platform. No key or account. Box art keeps its own shape: landscape boxes fill the wide cover and CD cases the square one. Heronite is not affiliated with libretro."
+                "The box art RetroArch uses (thumbnails.libretro.com), found by each game's dump file name on its platform. No key or account. Box art keeps its own shape: landscape boxes fill the wide cover and CD cases the square one. Hearthdeck Hero is not affiliated with libretro."
             )
             .into()),
             ..source(LIBRETRO, "Libretro", Pictures, &["cover", "coverSquare", "coverWide"])

@@ -120,7 +120,7 @@ pub(super) fn account_lines(client: Client, account: &Account) -> (String, Optio
         Account::SignedIn(None) => (tr!("Signed in").to_string(), None),
         Account::SignedOut => (
             tr!("Not signed in").to_string(),
-            Some(tr!("Open {client} and sign in there: Heronite never sees your password.", client = client.name())),
+            Some(tr!("Open {client} and sign in there: Hearthdeck Hero never sees your password.", client = client.name())),
         ),
         Account::Unknown => (tr!("Sign-in not seen yet").to_string(), Some(tr!("Open {client} to sign in.", client = client.name()))),
     }

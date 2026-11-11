@@ -72,7 +72,7 @@ fn fail(cx: &mut App, message: String) {
         }
         // Nobody sees a toast; a one-shot launch exits right after, so wait
         // for the notification to be handed over.
-        None => crate::system::notify::send_and_wait("Heronite", message, std::time::Duration::from_secs(2)),
+        None => crate::system::notify::send_and_wait("Hearthdeck Hero", message, std::time::Duration::from_secs(2)),
     }
     maybe_exit_idle(cx);
 }

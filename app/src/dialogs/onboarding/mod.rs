@@ -247,9 +247,9 @@ impl OnboardingDialog {
                 let (title, lead) = if left.is_empty() {
                     (tr!("You are all set"), tr!("Everything is set up or marked as not used."))
                 } else if self.facts.games() > 0 {
-                    (tr!("Get Heronite ready for you"), tr!("Your games are in. A few more things and you are set."))
+                    (tr!("Get Hearthdeck Hero ready for you"), tr!("Your games are in. A few more things and you are set."))
                 } else {
-                    (tr!("Get Heronite ready for you"), tr!("Three things, in any order. Start with your games."))
+                    (tr!("Get Hearthdeck Hero ready for you"), tr!("Three things, in any order. Start with your games."))
                 };
                 div()
                     .flex()

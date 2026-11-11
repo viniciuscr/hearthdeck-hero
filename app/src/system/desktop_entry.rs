@@ -35,7 +35,7 @@ fn file_name() -> String {
 
 fn entry_text(exe: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Heronite\nComment=Every game you own, on Linux, in one native launcher\nExec={} %U\nIcon={APP_ID}\nTerminal=false\nNoDisplay=true\nStartupWMClass={APP_ID}\n{GENERATED}\n",
+        "[Desktop Entry]\nType=Application\nName=Hearthdeck Hero\nComment=Every game you own, on Linux, in one native launcher\nExec={} %U\nIcon={APP_ID}\nTerminal=false\nNoDisplay=true\nStartupWMClass={APP_ID}\n{GENERATED}\n",
         quote_exec_arg(&exe.to_string_lossy())
     )
 }

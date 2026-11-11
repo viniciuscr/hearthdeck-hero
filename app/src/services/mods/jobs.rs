@@ -420,7 +420,7 @@ impl ModsService {
                 _ if thread_env.cancelled() => Outcome::Cancelled,
                 Ok(Ok(outcome)) => outcome,
                 Ok(Err(error)) => Outcome::Failed(error),
-                Err(_) => Outcome::Failed(tr!("Something went wrong inside Heronite; the log has the details").to_string()),
+                Err(_) => Outcome::Failed(tr!("Something went wrong inside Hearthdeck Hero; the log has the details").to_string()),
             };
             thread_env.send(Msg::Finished { job: id, outcome });
         });

@@ -68,7 +68,7 @@ impl ModsDialog {
                     .text_color(theme::text_muted())
                     .child(icon(Icon::InfoOutlined, px(16.), theme::text_muted()))
                     .child(
-                        div().flex_1().child(tr!("Free accounts: click \"Mod manager download\" on the site and Heronite installs it.")),
+                        div().flex_1().child(tr!("Free accounts: click \"Mod manager download\" on the site and Hearthdeck Hero installs it.")),
                     ),
             );
         }

@@ -213,7 +213,7 @@ impl LogViewer {
                 .unwrap_or_default()
         };
         match &e.source {
-            LogSource::Launcher => (tr!("Heronite (this app)").into(), day()),
+            LogSource::Launcher => (tr!("Hearthdeck Hero (this app)").into(), day()),
             LogSource::Runner(r) => (tr!("{runner} runner", runner = r), format!("runners/{r}.log")),
             LogSource::Game { app_name, runner, ty } => (title(app_name), format!("{} - {runner}", ty.label())),
             LogSource::Legacy { app_name } => (title(app_name), tr!("Older log").into()),

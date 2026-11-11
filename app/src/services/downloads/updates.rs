@@ -303,7 +303,7 @@ impl Downloads {
             self.queue_update(info, cx);
         }
         if !titles.is_empty() && !crate::system::has_window(cx) {
-            crate::system::notify::send("Heronite", tr!("Updating {titles} in the background", titles = titles.join(", ")));
+            crate::system::notify::send("Hearthdeck Hero", tr!("Updating {titles} in the background", titles = titles.join(", ")));
         }
     }
 }

@@ -373,7 +373,7 @@ pub(super) fn static_entries() -> Vec<Entry> {
         Act::Onboarding,
         "onboarding",
         tr!("Getting started"),
-        tr!("What Heronite does, step by step"),
+        tr!("What Hearthdeck Hero does, step by step"),
         Icon::Lightbulb,
         "onboarding tour tips help checklist welcome first steps primeiros passos ajuda dicas boas-vindas",
     ));
@@ -433,7 +433,7 @@ pub(super) fn static_entries() -> Vec<Entry> {
         Icon::Tv,
         "controller gamepad tv big picture couch controle sala modo console",
     ));
-    v.push(action(Act::Quit, "quit", tr!("Quit"), tr!("Close Heronite"), Icon::Logout, "exit close sair fechar encerrar"));
+    v.push(action(Act::Quit, "quit", tr!("Quit"), tr!("Close Hearthdeck Hero"), Icon::Logout, "exit close sair fechar encerrar"));
     v
 }
 

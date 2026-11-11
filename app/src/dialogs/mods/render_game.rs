@@ -110,7 +110,7 @@ impl ModsDialog {
                     .justify_between()
                     .gap(px(12.))
                     .child(div().min_w_0().text_size(px(13.)).line_height(px(18.)).text_color(theme::text_muted()).child(tr!(
-                        "Removes every mod of this game and everything Heronite keeps for it: downloads and the overwrite folder."
+                        "Removes every mod of this game and everything Hearthdeck Hero keeps for it: downloads and the overwrite folder."
                     )))
                     .child(
                         div().flex_none().child(

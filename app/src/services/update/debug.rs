@@ -28,7 +28,7 @@ const NOTES: &str = "**Download:** `Heronite-x86_64.AppImage` runs on any distri
 
 - Proton's Xalia is no longer mistaken for the game ([5d6e7f8](https://x))
 
-**Enjoying Heronite?** [Star it on GitHub](https://x) and share your feedback and ideas in [Discussions](https://x).";
+**Enjoying Hearthdeck Hero?** [Star it on GitHub](https://x) and share your feedback and ideas in [Discussions](https://x).";
 
 /// Steps of the faked download (about 4 s).
 const STEPS: u64 = 40;

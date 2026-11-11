@@ -73,7 +73,7 @@ pub fn headline(f: &Finding) -> String {
 pub fn explanation(f: &Finding, r: &Report) -> String {
     match &f.problem {
         Problem::MissingDlls { verbs, .. } if !verbs.is_empty() => tr!(
-            "Windows games expect these runtimes to be installed, and this game's prefix does not have them yet. Heronite installs them with winetricks, in this prefix only."
+            "Windows games expect these runtimes to be installed, and this game's prefix does not have them yet. Hearthdeck Hero installs them with winetricks, in this prefix only."
         )
         .into(),
         Problem::MissingDlls { dlls, .. } => tr!(
@@ -264,5 +264,5 @@ pub fn how_it_ended(r: &Report) -> String {
 
 /// The note on a fix that was applied already this run.
 pub fn tried_note() -> &'static str {
-    tr!("Heronite already tried this, and the game still closes.")
+    tr!("Hearthdeck Hero already tried this, and the game still closes.")
 }

@@ -104,7 +104,7 @@ fn shortcut_error(error: &ashpd::Error) -> String {
     match error {
         ashpd::Error::PortalNotFound(_) => tr!("This desktop has no global shortcuts service").into(),
         ashpd::Error::Portal(PortalError::NotAllowed(reason)) if is_missing_app_id(reason) => {
-            tr!("The desktop refused the shortcut: it could not tell that Heronite asked for it").into()
+            tr!("The desktop refused the shortcut: it could not tell that Hearthdeck Hero asked for it").into()
         }
         ashpd::Error::Response(ResponseError::Cancelled) => tr!("The shortcut was not approved in the desktop's dialog").into(),
         other => other.to_string(),
@@ -292,9 +292,9 @@ mod tests {
     }
 
     /// The whole way through the session's portal: a connection registered
-    /// as Heronite gets a GlobalShortcuts session and its shortcut bound.
+    /// as Hearthdeck Hero gets a GlobalShortcuts session and its shortcut bound.
     /// Needs xdg-desktop-portal with a GlobalShortcuts backend and
-    /// `app.heronite.Heronite.desktop` installed; a desktop that asks the
+    /// `app.heronite.Hearthdeck Hero.desktop` installed; a desktop that asks the
     /// user to approve shortcuts shows its dialog.
     #[test]
     #[ignore = "talks to the desktop's portal"]
@@ -306,8 +306,8 @@ mod tests {
         eprintln!("a session on ashpd's shared connection: {shared:?}");
         let (tx, rx) = std::sync::mpsc::channel();
         let mut shortcut = PortalShortcut::start(
-            Some("app.heronite.Heronite".into()),
-            ("heronite-live-test", "Heronite portal test"),
+            Some("app.heronite.Hearthdeck Hero".into()),
+            ("heronite-live-test", "Hearthdeck Hero portal test"),
             "CTRL+ALT+SHIFT+F10".into(),
             Arc::new(|| {}),
             Box::new(move |result| {
@@ -347,7 +347,7 @@ mod tests {
         use ashpd::desktop::ResponseError;
         use ashpd::PortalError;
         let missing = ashpd::Error::Portal(PortalError::NotAllowed("An app id is required".into()));
-        assert_eq!(shortcut_error(&missing), "The desktop refused the shortcut: it could not tell that Heronite asked for it");
+        assert_eq!(shortcut_error(&missing), "The desktop refused the shortcut: it could not tell that Hearthdeck Hero asked for it");
         // Another refusal keeps the portal's own words.
         let other = ashpd::Error::Portal(PortalError::NotAllowed("Not on this seat".into()));
         assert!(shortcut_error(&other).contains("Not on this seat"), "{}", shortcut_error(&other));

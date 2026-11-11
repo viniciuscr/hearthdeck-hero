@@ -479,7 +479,7 @@ fn overlay_board(art: &Art, w: f32, left: bool) -> Div {
         .when(heronite_platform::supported(heronite_platform::Feature::Wrappers), |d| {
             d.child(row(Icon::Tune, tr!("FPS limit"), false).child(keys(&["60"])))
         })
-        .child(row(Icon::Home, tr!("Back to Heronite"), false));
+        .child(row(Icon::Home, tr!("Back to Hearthdeck Hero"), false));
     let pad_x = if left { 600. - 14. - if cfg!(windows) { 220. } else { 150. } } else { 18. };
     let pad_hint =
         b.at(pad_x, 262.).flex().items_center().gap(b.p(8.)).child(icon(Icon::SportsEsports, b.p(48.), theme::white_a(0.8))).child(

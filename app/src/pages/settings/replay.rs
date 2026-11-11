@@ -695,7 +695,7 @@ pub fn render(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<Settin
             &format!(
                 "{} {}",
                 tr!(
-                    "While a game opened by Heronite runs, its last seconds stay in memory. Guide + X or the overlay's \"Save replay\" saves them in the game's screenshots folder, under replays, and marks them as a moment in its journal."
+                    "While a game opened by Hearthdeck Hero runs, its last seconds stay in memory. Guide + X or the overlay's \"Save replay\" saves them in the game's screenshots folder, under replays, and marks them as a moment in its journal."
                 ),
                 tr!("What is on the monitor is in the replay, notifications and the overlay's notices included.")
             ),

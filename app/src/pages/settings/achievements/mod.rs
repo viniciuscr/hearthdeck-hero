@@ -126,7 +126,7 @@ fn gog_rows(d: &SettingsPage, prefs: &Prefs, cx: &mut Context<SettingsPage>) -> 
         "ach-gog-comet",
         tr!("Unlock GOG achievements while you play"),
         Some(tr!(
-            "Heronite runs Comet, an open-source stand-in for GOG Galaxy's service, beside each GOG game, signed in with your GOG account: what the game unlocks counts on GOG and shows here while you play. Off, games that need GOG Galaxy for their achievements unlock nothing."
+            "Hearthdeck Hero runs Comet, an open-source stand-in for GOG Galaxy's service, beside each GOG game, signed in with your GOG account: what the game unlocks counts on GOG and shows here while you play. Off, games that need GOG Galaxy for their achievements unlock nothing."
         )),
         prefs.gog_comet,
     )
@@ -145,7 +145,7 @@ fn gog_rows(d: &SettingsPage, prefs: &Prefs, cx: &mut Context<SettingsPage>) -> 
         row(
             tr!("GOG Galaxy's service"),
             Some(tr!(
-                "Some games look for it before they unlock anything. Without GOG Galaxy installed, Heronite can register Comet's stand-in for it; Windows asks for the administrator once."
+                "Some games look for it before they unlock anything. Without GOG Galaxy installed, Hearthdeck Hero can register Comet's stand-in for it; Windows asks for the administrator once."
             )),
             action,
         )
@@ -267,7 +267,7 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
             "ach-game-files",
             tr!("Read achievements from game files"),
             Some(tr!(
-                "For DRM-free and offline copies that keep their Steam achievements next to the game, as the open-source Steam API emulators do. Heronite only reads them; names and icons may come from Steam's public pages."
+                "For DRM-free and offline copies that keep their Steam achievements next to the game, as the open-source Steam API emulators do. Hearthdeck Hero only reads them; names and icons may come from Steam's public pages."
             )),
             prefs.game_files,
         )

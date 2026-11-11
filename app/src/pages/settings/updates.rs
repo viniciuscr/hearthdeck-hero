@@ -35,7 +35,7 @@ fn status(u: &Updater, cx: &App) -> Status {
     let get = |what: Action| if u.can_install() { what } else { Action::OpenPage };
     match u.phase() {
         Phase::Idle => Status {
-            title: format!("Heronite {current}"),
+            title: format!("Hearthdeck Hero {current}"),
             detail: checked.map(|a| tr!("Last checked {a}", a)).unwrap_or_else(|| tr!("Not checked yet").into()),
             action: Some((tr!("Check for updates"), ButtonKind::Glass, true, Action::Check)),
         },
@@ -45,7 +45,7 @@ fn status(u: &Updater, cx: &App) -> Status {
             action: Some((tr!("Checking\u{2026}"), ButtonKind::Glass, false, Action::Check)),
         },
         Phase::UpToDate => Status {
-            title: tr!("Heronite is up to date").into(),
+            title: tr!("Hearthdeck Hero is up to date").into(),
             detail: tr!("Version {current} \u{b7} checked {when}", current, when = checked.unwrap_or_else(|| tr!("just now").into())),
             action: Some((tr!("Check again"), ButtonKind::Glass, true, Action::Check)),
         },
@@ -63,7 +63,7 @@ fn status(u: &Updater, cx: &App) -> Status {
             }
             let label = if u.can_install() { tr!("Update") } else { tr!("Download") };
             Status {
-                title: tr!("Heronite {version} is available", version),
+                title: tr!("Hearthdeck Hero {version} is available", version),
                 detail,
                 // The AUR helper, Scoop or dnf installs it: nothing to press
                 // (see `Updater::manager_update`).
@@ -71,12 +71,12 @@ fn status(u: &Updater, cx: &App) -> Status {
             }
         }
         Phase::Downloading(p) => Status {
-            title: tr!("Downloading Heronite {version}", version),
+            title: tr!("Downloading Hearthdeck Hero {version}", version),
             detail: update::progress_text(p),
             action: Some((tr!("Cancel"), ButtonKind::Ghost, true, Action::Cancel)),
         },
         Phase::Installing => Status {
-            title: tr!("Installing Heronite {version}", version),
+            title: tr!("Installing Hearthdeck Hero {version}", version),
             detail: tr!("The package manager is installing it. Enter your password if you are asked.").into(),
             action: Some((tr!("Installing\u{2026}"), ButtonKind::Primary, false, Action::Install)),
         },
@@ -84,10 +84,10 @@ fn status(u: &Updater, cx: &App) -> Status {
         Phase::Ready if u.installs_on_quit() => {
             let blocker = crate::system::restart_blocker(cx);
             Status {
-                title: tr!("Heronite {version} is ready to install", version),
+                title: tr!("Hearthdeck Hero {version} is ready to install", version),
                 detail: match &blocker {
-                    Some(why) => tr!("{why}: restart later, or it installs when you quit Heronite.", why),
-                    None => tr!("Restart to install it now, or it installs when you quit Heronite.").into(),
+                    Some(why) => tr!("{why}: restart later, or it installs when you quit Hearthdeck Hero.", why),
+                    None => tr!("Restart to install it now, or it installs when you quit Hearthdeck Hero.").into(),
                 },
                 action: Some((tr!("Restart now"), ButtonKind::Primary, blocker.is_none(), Action::Restart)),
             }
@@ -95,10 +95,10 @@ fn status(u: &Updater, cx: &App) -> Status {
         Phase::Ready => {
             let blocker = crate::system::restart_blocker(cx);
             Status {
-                title: tr!("Heronite {version} is installed", version),
+                title: tr!("Hearthdeck Hero {version} is installed", version),
                 detail: match &blocker {
-                    Some(why) => tr!("{why}: restart later, or it starts the next time you open Heronite.", why),
-                    None => tr!("Restart to use it now, or it starts the next time you open Heronite.").into(),
+                    Some(why) => tr!("{why}: restart later, or it starts the next time you open Hearthdeck Hero.", why),
+                    None => tr!("Restart to use it now, or it starts the next time you open Hearthdeck Hero.").into(),
                 },
                 action: Some((tr!("Restart now"), ButtonKind::Primary, blocker.is_none(), Action::Restart)),
             }
@@ -117,14 +117,14 @@ fn status(u: &Updater, cx: &App) -> Status {
 }
 
 /// Why "Install updates automatically" is off for packages.
-const PACKAGE_NO_AUTO: &str = n_!("Packages ask for your password, so Heronite installs them only when you click Update.");
+const PACKAGE_NO_AUTO: &str = n_!("Packages ask for your password, so Hearthdeck Hero installs them only when you click Update.");
 
 /// Why "Install updates automatically" is off for a package.
 fn package_no_auto(u: &Updater) -> &'static str {
     match u.package() {
-        Some(Package::Aur) => tr!("AUR packages are updated by your AUR helper, not by Heronite."),
-        Some(Package::Scoop) => tr!("Scoop updates this copy, not Heronite."),
-        Some(Package::Copr) => tr!("COPR packages are updated by your package manager, not by Heronite."),
+        Some(Package::Aur) => tr!("AUR packages are updated by your AUR helper, not by Hearthdeck Hero."),
+        Some(Package::Scoop) => tr!("Scoop updates this copy, not Hearthdeck Hero."),
+        Some(Package::Copr) => tr!("COPR packages are updated by your package manager, not by Hearthdeck Hero."),
         _ => tr(PACKAGE_NO_AUTO),
     }
 }
@@ -140,7 +140,7 @@ fn manager_update(u: &Updater) -> Option<&'static str> {
 fn unsupported_text(why: &Unsupported) -> String {
     match why {
         Unsupported::NotAppImage | Unsupported::Flatpak | Unsupported::Missing(_) => {
-            tr!("Only a copy installed with Heronite's setup or unpacked from its portable zip updates itself.").into()
+            tr!("Only a copy installed with Hearthdeck Hero's setup or unpacked from its portable zip updates itself.").into()
         }
         Unsupported::ReadOnly(dir) => {
             tr!("This copy's folder ({dir}) is not writable: download new versions by hand.", dir = dir.display())
@@ -154,7 +154,7 @@ fn unsupported_text(why: &Unsupported) -> String {
     match why {
         Unsupported::NotAppImage => tr!("Only the AppImage updates itself. Update this copy the way you installed it.").into(),
         Unsupported::Flatpak => tr!("Flatpak updates this copy: run flatpak update, or update it in your software center.").into(),
-        Unsupported::Missing(_) => tr!("The AppImage file was moved or deleted while Heronite runs.").into(),
+        Unsupported::Missing(_) => tr!("The AppImage file was moved or deleted while Hearthdeck Hero runs.").into(),
         Unsupported::ReadOnly(dir) => {
             tr!("The AppImage's folder ({dir}) is not writable: download new versions by hand.", dir = dir.display())
         }
@@ -226,9 +226,9 @@ impl SettingsPage {
         let auto_install = {
             let label = tr!("Install updates automatically");
             let desc = if u.installs_on_quit() {
-                tr!("Download new versions in the background. They are checked against Heronite's signing key and install when you quit Heronite.")
+                tr!("Download new versions in the background. They are checked against Hearthdeck Hero's signing key and install when you quit Hearthdeck Hero.")
             } else {
-                tr!("Download new versions in the background. They are checked against Heronite's signing key and start the next time you open Heronite.")
+                tr!("Download new versions in the background. They are checked against Hearthdeck Hero's signing key and start the next time you open Hearthdeck Hero.")
             };
             if unsupported.is_some() {
                 row(label, Some(desc), toggle("upd-auto-install-sw", false, true)).into_any_element()
@@ -301,9 +301,9 @@ pub(super) fn console_rows(cx: &App) -> Vec<Row> {
             .desc(if u.package().is_some() {
                 package_no_auto(u)
             } else if u.installs_on_quit() {
-                tr!("They install when you quit Heronite")
+                tr!("They install when you quit Hearthdeck Hero")
             } else {
-                tr!("They start the next time you open Heronite")
+                tr!("They start the next time you open Hearthdeck Hero")
             })
             .enabled(auto),
     );
@@ -314,7 +314,7 @@ pub(super) fn console_rows(cx: &App) -> Vec<Row> {
         let skipped = u.skipped();
         rows.push(
             Row::action("upd:skip", if skipped { tr!("Don't skip this version") } else { tr!("Skip this version") })
-                .desc(format!("Heronite {}", r.version)),
+                .desc(format!("Hearthdeck Hero {}", r.version)),
         );
     }
     rows
@@ -353,7 +353,7 @@ pub(super) fn palette_commands(cx: &App) -> Vec<crate::pages::commands::PageComm
         Phase::Ready => Some(tr!("An update is installed: restart to use it")),
         _ => None,
     };
-    let mut v = vec![PageCommand::new("upd:check", tr!("Check for updates"), format!("Heronite {}", u.current()), Icon::Update)
+    let mut v = vec![PageCommand::new("upd:check", tr!("Check for updates"), format!("Hearthdeck Hero {}", u.current()), Icon::Update)
         .keywords("update upgrade new version release atualizar atualizacao atualização nova versão")
         .disabled(busy)];
     let version = u.release().map(|r| r.version.clone()).unwrap_or_default();
@@ -361,7 +361,7 @@ pub(super) fn palette_commands(cx: &App) -> Vec<crate::pages::commands::PageComm
         Phase::Available | Phase::InstallFailed(_) if u.can_install() => v.push(
             PageCommand::new(
                 "upd:install",
-                tr!("Update to Heronite {version}", version),
+                tr!("Update to Hearthdeck Hero {version}", version),
                 tr!("Download, verify and install it"),
                 Icon::Download,
             )
@@ -370,8 +370,8 @@ pub(super) fn palette_commands(cx: &App) -> Vec<crate::pages::commands::PageComm
         Phase::Ready => v.push(
             PageCommand::new(
                 "upd:restart",
-                tr!("Restart into Heronite {version}", version),
-                if u.installs_on_quit() { tr!("The update installs as Heronite restarts") } else { tr!("The update is installed") },
+                tr!("Restart into Hearthdeck Hero {version}", version),
+                if u.installs_on_quit() { tr!("The update installs as Hearthdeck Hero restarts") } else { tr!("The update is installed") },
                 Icon::Update,
             )
             .keywords("update upgrade restart relaunch atualizar reiniciar")
