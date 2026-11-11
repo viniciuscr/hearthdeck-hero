@@ -18,7 +18,11 @@ use crate::theme;
 use crate::ui::controls::{action_button, caption, card, card_box, toggle_row, ButtonKind};
 use crate::ui::fields::meta_text;
 
-mod qr;
+pub mod qr;
+
+pub mod registration;
+
+pub use registration as watch_registration;
 
 pub struct State {
     linked: bool,
