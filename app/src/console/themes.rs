@@ -11,17 +11,14 @@
 //! [`update`] is the one way to change the theme in use: it also installs it
 //! in [`super::look`] while console mode is on, so the screen follows at once.
 
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
 
 use heronite_data::console_theme::{ConsolePrefs, ConsoleTheme};
-use heronite_data::json_store;
 use heronite_data::paths::AppPaths;
 
 use crate::collection::Space;
 use crate::fork::watch::space_theme::project;
-use crate::fork::watch::watch_theme::watch_theme;
 
 const GAMES: u8 = 0;
 const WATCH: u8 = 1;
@@ -57,10 +54,6 @@ pub fn active_space() -> Space {
     current_space()
 }
 
-fn watch_path(app: &AppPaths) -> PathBuf {
-    app.config.join("console-watch.json")
-}
-
 fn load(app: &AppPaths, space: Space) -> ConsolePrefs {
     match space {
         Space::Games => {
@@ -68,65 +61,7 @@ fn load(app: &AppPaths, space: Space) -> ConsolePrefs {
             prefs.theme = project(prefs.theme, Space::Games);
             prefs
         }
-        Space::Watch => {
-            let path = watch_path(app);
-            let saved = match json_store::read_value(&path) {
-                Ok(value) if value.is_object() => serde_json::from_value::<ConsolePrefs>(value).ok(),
-                _ => None,
-            };
-            let mut prefs = match saved {
-                Some(prefs) if !is_game_theme(&prefs.theme) => prefs,
-                Some(_) => {
-                    backup(&path);
-                    let prefs = watch_prefs(app);
-                    write_watch(&path, &prefs);
-                    prefs
-                }
-                None => {
-                    let prefs = watch_prefs(app);
-                    write_watch(&path, &prefs);
-                    prefs
-                }
-            };
-            prefs.theme = project(prefs.theme.normalized(), Space::Watch);
-            prefs
-        }
-    }
-}
-
-/// A fresh Watch theme, starting from the Games prefs for the global console
-/// options (fullscreen, idle, open-in) but with its own theme and rails.
-fn watch_prefs(app: &AppPaths) -> ConsolePrefs {
-    let mut prefs = ConsolePrefs::load(app);
-    prefs.theme = watch_theme();
-    prefs.based_on = "watch".into();
-    prefs.last_tab = 0;
-    prefs
-}
-
-/// A Watch file written before the Watch theme existed is a copy of a game
-/// theme: it has game shelves or game tab sources. It is migrated once.
-fn is_game_theme(theme: &ConsoleTheme) -> bool {
-    theme.shelves.iter().any(|shelf| matches!(shelf.kind.as_str(), "installed" | "statuses" | "backlog-short" | "forgotten"))
-        || theme
-            .tabs
-            .iter()
-            .any(|tab| matches!(tab.source.as_str(), "installed" | "pc" | "emulated") || tab.name.to_lowercase().contains("games"))
-}
-
-fn backup(path: &Path) {
-    let backup = path.with_extension("json.bak");
-    if backup.exists() {
-        return;
-    }
-    if let Err(error) = std::fs::copy(path, &backup) {
-        log::warn!("backing up {}: {error}", path.display());
-    }
-}
-
-fn write_watch(path: &Path, prefs: &ConsolePrefs) {
-    if let Err(error) = json_store::write_indented(path, prefs, b"  ") {
-        log::warn!("writing {}: {error:#}", path.display());
+        Space::Watch => crate::fork::watch::prefs::load(app),
     }
 }
 
@@ -235,6 +170,6 @@ fn save(app: &AppPaths, prefs: ConsolePrefs, space: Space) {
 fn write(app: &AppPaths, prefs: &ConsolePrefs, space: Space) -> anyhow::Result<()> {
     match space {
         Space::Games => prefs.save(app),
-        Space::Watch => json_store::write_indented(&watch_path(app), prefs, b"  "),
+        Space::Watch => crate::fork::watch::prefs::save(app, prefs),
     }
 }

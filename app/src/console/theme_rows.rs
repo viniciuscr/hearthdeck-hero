@@ -38,8 +38,6 @@ use heronite_i18n::{n_, tr, trc};
 
 use super::list::{Row, Value};
 use super::look::ACCENTS;
-use super::themes;
-use crate::collection::Space;
 use crate::icons::Icon;
 pub use labels::layout_name;
 use labels::*;
@@ -183,7 +181,7 @@ pub const CARDS: [Card; 14] = [
 
 /// The rows of one card.
 pub fn rows(card: Card, cx: &Ctx) -> Vec<Row> {
-    if watch_locked(card) {
+    if crate::fork::watch::theme_rows::locked(card) {
         return Vec::new();
     }
     let mut v = match card {
@@ -213,7 +211,7 @@ fn cards_rows(cards: &[Card], cx: &Ctx) -> Vec<Row> {
     let titled = cards.len() > 1;
     let mut v = Vec::new();
     for card in cards {
-        if watch_locked(*card) {
+        if crate::fork::watch::theme_rows::locked(*card) {
             continue;
         }
         if titled {
@@ -222,12 +220,6 @@ fn cards_rows(cards: &[Card], cx: &Ctx) -> Vec<Row> {
         v.extend(rows(*card, cx));
     }
     v
-}
-
-/// The Watch space owns its menu, tabs and shelves; the editor only changes
-/// the look. Locking these cards prevents edits that projection would undo.
-fn watch_locked(card: Card) -> bool {
-    themes::active_space() == Space::Watch && matches!(card, Card::Tabs | Card::Shelves | Card::Menu)
 }
 
 fn opt_row(o: &Opt, cx: &Ctx) -> Row {
