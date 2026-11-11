@@ -104,7 +104,7 @@ implementation rules live in `docs/WATCH.md`.
 | F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" | pending |
 | F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection `Space::Watch`, console space item and Stremio Play action | active |
 | F-007 | `crates/data/src/library.rs` | `stremio` source label | active |
-| F-008 | `app/src/fork/watch/{watch_theme,space_theme,prefs,theme_rows,settings}`, `app/src/console/{themes,theme_rows}.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings, QR, per-space prefs, editor lock and one-time migration of game-shaped Watch files | active |
+| F-008 | `app/src/fork/watch/{watch_theme,space_theme,prefs,theme_rows,sources,settings}`, `app/src/console/{themes,theme_rows}.rs`, `app/src/collection/console/{sources,layouts/grid,filters}.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings, QR, per-space prefs, editor lock, source helpers and one-time migration of game-shaped Watch files | active |
 | F-009 | `.github/workflows/{release,flatpak,windows-packages}.yml` | upstream release workflows guarded to the upstream repository | active |
 
 ### Conflict log

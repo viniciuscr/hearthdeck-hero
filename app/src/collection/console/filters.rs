@@ -15,12 +15,12 @@ use heronite_i18n::{n_, tr};
 
 use super::super::CollectionView;
 use super::layouts::{self, category_options, status_options, Filters, SHOW};
-use super::sources;
 use crate::collection::Space;
 use crate::console::kit::{self, u};
 use crate::console::osk::{Osk, OskEvent};
 use crate::console::pointer::{self, Clickable};
 use crate::console::{hint, look, motion, Btn, Hint, Pad};
+use crate::fork::watch::sources as watch_sources;
 use crate::icons::Icon;
 use crate::theme;
 use crate::ui::icon;
@@ -100,10 +100,10 @@ impl CollectionView {
                 v.push(Item::Kind);
             }
             v.push(Item::Sort);
-            if !sources::watch_genres(&games).is_empty() {
+            if !watch_sources::genres(&games).is_empty() {
                 v.push(Item::Genre);
             }
-            if !sources::watch_providers(&games).is_empty() {
+            if !watch_sources::providers(&games).is_empty() {
                 v.push(Item::Provider);
             }
             return v;
@@ -145,8 +145,8 @@ impl CollectionView {
         let pick_n = category_n + self.smart_groups.groups.len();
         let (target, spec) = self.filters_target();
         let watch_games = if self.space == Space::Watch { self.console_games(&spec.source) } else { Vec::new() };
-        let genre_n = sources::watch_genres(&watch_games).len() + 1;
-        let provider_n = sources::watch_providers(&watch_games).len() + 1;
+        let genre_n = watch_sources::genres(&watch_games).len() + 1;
+        let provider_n = watch_sources::providers(&watch_games).len() + 1;
         let before = (self.tab_nav(target).grid.filters.clone(), self.console.search.clone());
         if pad == Pad::X {
             self.console.search.clear();
@@ -411,8 +411,8 @@ impl CollectionView {
         self.lib.as_ref()?;
         let (target, spec) = self.filters_target();
         let games = self.console_games(&spec.source);
-        let genres = sources::watch_genres(&games);
-        let providers = sources::watch_providers(&games);
+        let genres = watch_sources::genres(&games);
+        let providers = watch_sources::providers(&games);
         let shown = self.grid_keys(target, &spec).len();
         let f = self.tab_nav(target).grid.filters.clone();
         let search = self.console.search.clone();

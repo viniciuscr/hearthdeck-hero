@@ -64,38 +64,6 @@ fn status_name(lib: &Library, value: &str) -> String {
         .map_or_else(|| value.to_string(), |s| heronite_data::status::status_label(&s.name).to_string())
 }
 
-/// Whether the provider put the item in its top catalog.
-fn is_top(game: &CollectionGame) -> bool {
-    game.game.extra.as_ref().and_then(|extra| extra.get("stremioTop")).and_then(serde_json::Value::as_bool).unwrap_or(false)
-}
-
-/// `movie` or `series` for the item; games without a watch kind are `movie`.
-pub(super) fn watch_kind(game: &CollectionGame) -> &str {
-    game.game.extra.as_ref().and_then(|extra| extra.get("stremioType")).and_then(serde_json::Value::as_str).unwrap_or("movie")
-}
-
-/// The genres present in a Watch library, sorted.
-pub(super) fn watch_genres(games: &[std::sync::Arc<CollectionGame>]) -> Vec<String> {
-    let mut genres = std::collections::BTreeSet::new();
-    for game in games {
-        if let Some(metadata) = &game.metadata {
-            genres.extend(metadata.genres.iter().filter(|genre| !genre.trim().is_empty()).cloned());
-        }
-    }
-    genres.into_iter().collect()
-}
-
-/// The providers present in a Watch library, sorted.
-pub(super) fn watch_providers(games: &[std::sync::Arc<CollectionGame>]) -> Vec<String> {
-    let mut providers = std::collections::BTreeSet::new();
-    for game in games {
-        if !game.source_label.is_empty() {
-            providers.insert(game.source_label.to_string());
-        }
-    }
-    providers.into_iter().collect()
-}
-
 /// A day number for "YYYY-MM-DD..." (enough to compare ages).
 fn day_number(date: &str) -> Option<i64> {
     let d = chrono::NaiveDate::parse_from_str(date.get(..10)?, "%Y-%m-%d").ok()?;
@@ -196,8 +164,8 @@ impl CollectionView {
             "emulated" => self.game_extras.systems.contains_key(&g.key),
             "status" => status_is(lib, g, value),
             "category" => self.categories.contains(value, &g.runner, &g.app_name),
-            "type" => watch_kind(g) == value,
-            "genre" => g.metadata.as_ref().is_some_and(|metadata| metadata.genres.iter().any(|genre| genre.eq_ignore_ascii_case(value))),
+            "type" => crate::fork::watch::sources::kind(g) == value,
+            "genre" => crate::fork::watch::sources::has_genre(g, value),
             "smart" => self.in_smart(value, g),
             "store" => g.source_label == value,
             "platform" => self.organize().platform(g) == value,
@@ -281,9 +249,13 @@ impl CollectionView {
         let (k, value) = kind.split_once(':').unwrap_or((kind, ""));
         let pick = |f: &dyn Fn(&CollectionGame) -> bool| games.iter().copied().filter(|g| f(g)).collect::<Vec<_>>();
         match k {
-            "provider" if value == "top" => pick(&|g: &CollectionGame| is_top(g)),
-            "provider" if value == "top-movies" => pick(&|g: &CollectionGame| is_top(g) && watch_kind(g) == "movie"),
-            "provider" if value == "top-series" => pick(&|g: &CollectionGame| is_top(g) && watch_kind(g) == "series"),
+            "provider" if value == "top" => pick(&|g: &CollectionGame| crate::fork::watch::sources::top(g)),
+            "provider" if value == "top-movies" => {
+                pick(&|g: &CollectionGame| crate::fork::watch::sources::top(g) && crate::fork::watch::sources::kind(g) == "movie")
+            }
+            "provider" if value == "top-series" => {
+                pick(&|g: &CollectionGame| crate::fork::watch::sources::top(g) && crate::fork::watch::sources::kind(g) == "series")
+            }
             "recent" => {
                 let mut v = by_last_played(pick(&|g| g.last_played.is_some()));
                 v.truncate(20);

@@ -12,7 +12,7 @@ use heronite_i18n::{n_, tr};
 
 use super::super::super::CollectionView;
 use super::super::hero::{clip, HeroSize};
-use super::super::sources::{self, keys};
+use super::super::sources::keys;
 use super::super::tile::label_room;
 use crate::collection::data::played_ago;
 use crate::collection::view_filters::category_label;
@@ -20,6 +20,7 @@ use crate::console::kit::{self, u};
 use crate::console::look;
 use crate::console::motion::{self, Axis, Glide, Goal};
 use crate::console::{Btn, Hint, Pad};
+use crate::fork::watch::sources as watch_sources;
 use crate::icons::Icon;
 use crate::theme;
 
@@ -152,8 +153,8 @@ impl Nav {
         let tokens = heronite_data::fuzzy::tokens(&folded);
         let status = f.status.checked_sub(1).and_then(|i| lib.statuses.get(i)).map(|s| s.id.clone());
         let category: std::collections::BTreeSet<String> = category_options(cats).get(f.category).cloned().flatten().into_iter().collect();
-        let watch_genres = sources::watch_genres(games);
-        let watch_providers = sources::watch_providers(games);
+        let watch_genres = watch_sources::genres(games);
+        let watch_providers = watch_sources::providers(games);
         let mut games: Vec<&CollectionGame> = games
             .iter()
             .map(|g| g.as_ref())
@@ -169,8 +170,8 @@ impl Nav {
         if watch {
             if fixed_kind.is_none() {
                 games.retain(|g| match f.kind {
-                    1 => sources::watch_kind(g) == "movie",
-                    2 => sources::watch_kind(g) == "series",
+                    1 => watch_sources::kind(g) == "movie",
+                    2 => watch_sources::kind(g) == "series",
                     _ => true,
                 });
             }
@@ -216,8 +217,8 @@ impl Nav {
     ) -> [(SharedString, SharedString); CHIPS] {
         let f = &self.filters;
         if watch {
-            let genres = sources::watch_genres(&lib.games);
-            let providers = sources::watch_providers(&lib.games);
+            let genres = watch_sources::genres(&lib.games);
+            let providers = watch_sources::providers(&lib.games);
             let kind = match fixed_kind {
                 Some("movie") => tr!("Movies"),
                 Some("series") => tr!("Series"),
