@@ -20,7 +20,8 @@ pub fn watch_theme() -> ConsoleTheme {
         ShelfSpec { kind: "provider:top-movies".into(), on: true, title: tr!("Top movies").to_string() },
         ShelfSpec { kind: "provider:top-series".into(), on: true, title: tr!("Top series").to_string() },
     ];
-    theme.menu.items = ["watch", "customize", "settings", "separator", "desktop", "power"].into_iter().map(MenuItemSpec::new).collect();
+    theme.menu.items =
+        ["collection", "watch", "customize", "settings", "separator", "desktop", "power"].into_iter().map(MenuItemSpec::new).collect();
     theme.interface.label = tr!("Watch").to_uppercase();
     theme
 }

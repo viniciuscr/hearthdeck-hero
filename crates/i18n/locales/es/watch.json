@@ -1,4 +1,6 @@
 {
+  "Any genre": "Cualquier género",
+  "Any provider": "Cualquier proveedor",
   "Check": "Comprobar",
   "Choose what the Watch home shows. The console uses this theme; ☰ → Customize edits it in detail.": "Elige lo que muestra la pantalla de inicio de Watch. La consola usa este tema; ☰ → Personalizar edita los detalles.",
   "Code {code}": "Código {code}",
@@ -12,11 +14,15 @@
   "Home rails": "Estanterías de inicio",
   "Link with a code": "Vincular con un código",
   "Linked": "Vinculado",
+  "Media type": "Tipo de contenido",
   "Movies": "Películas",
   "Not linked": "Sin vincular",
   "Not linked yet": "Aún no vinculado",
+  "Provider": "Proveedor",
+  "Recently watched": "Vistos recientemente",
   "Reset Watch theme": "Restablecer tema de Watch",
   "Scan the code with the Stremio app, or open {link}": "Escanea el código con la app de Stremio o abre {link}",
+  "Search titles": "Buscar títulos",
   "Series from the provider's catalog.": "Series del catálogo del proveedor.",
   "Stremio account": "Cuenta de Stremio",
   "The Stremio account, providers and Watch home rails": "La cuenta de Stremio, los proveedores y las estanterías de Watch",
@@ -24,5 +30,7 @@
   "Top movies": "Películas destacadas",
   "Top series": "Series destacadas",
   "Unlink": "Desvincular",
-  "Watch": "Ver"
+  "Watch": "Ver",
+  "Year": "Año",
+  "{shown} of {total} titles": "{shown} de {total} títulos"
 }

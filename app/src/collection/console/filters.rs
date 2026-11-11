@@ -15,6 +15,8 @@ use heronite_i18n::{n_, tr};
 
 use super::super::CollectionView;
 use super::layouts::{self, category_options, status_options, Filters, SHOW};
+use super::sources;
+use crate::collection::Space;
 use crate::console::kit::{self, u};
 use crate::console::osk::{Osk, OskEvent};
 use crate::console::pointer::{self, Clickable};
@@ -37,6 +39,9 @@ enum Item {
     Status,
     Category,
     Group,
+    Kind,
+    Genre,
+    Provider,
 }
 
 /// The panel's focus (index in [`CollectionView::filter_items`]).
@@ -54,6 +59,11 @@ impl CollectionView {
             return (tab, spec);
         }
         let theme = look::theme();
+        if self.space == Space::Watch {
+            // The Watch filters are about the whole library: a result grid
+            // over `all`, even when the tab underneath is a rail or a type.
+            return (theme.tabs.len(), TabSpec::new("", Layout::Grid, "all"));
+        }
         match theme.tabs.iter().position(|t| t.layout == Layout::Grid) {
             Some(i) => (i, theme.tabs[i].clone()),
             // The tab's games, in a grid.
@@ -83,6 +93,22 @@ impl CollectionView {
     }
 
     fn filter_items(&self) -> Vec<Item> {
+        if self.space == Space::Watch {
+            let (_, spec) = self.filters_target();
+            let games = self.console_games(&spec.source);
+            let mut v = vec![Item::Search];
+            if spec.source.strip_prefix("type:").is_none() {
+                v.push(Item::Kind);
+            }
+            v.push(Item::Sort);
+            if !sources::watch_genres(&games).is_empty() {
+                v.push(Item::Genre);
+            }
+            if !sources::watch_providers(&games).is_empty() {
+                v.push(Item::Provider);
+            }
+            return v;
+        }
         let mut v = vec![Item::Search, Item::Show, Item::Sort, Item::Favourites];
         if self.lib.as_ref().is_some_and(|l| !l.statuses.is_empty()) {
             v.push(Item::Status);
@@ -121,7 +147,10 @@ impl CollectionView {
         let status_n = self.lib.as_ref().map_or(0, |l| l.statuses.len()) + 1;
         let category_n = category_options(&self.categories).len();
         let group_n = self.smart_groups.groups.len() + 1;
-        let (target, _) = self.filters_target();
+        let (target, spec) = self.filters_target();
+        let watch_games = self.console_games(&spec.source);
+        let genre_n = sources::watch_genres(&watch_games).len() + 1;
+        let provider_n = sources::watch_providers(&watch_games).len() + 1;
         let before = (self.tab_nav(target).grid.filters.clone(), self.console.search.clone());
         if pad == Pad::X {
             self.console.search.clear();
@@ -142,6 +171,9 @@ impl CollectionView {
             (Pad::Left | Pad::Right | Pad::A, Item::Category) => turn(&mut f.category, category_n),
             (Pad::Left | Pad::Right | Pad::A, Item::Group) => turn(&mut f.group, group_n),
             (Pad::Left | Pad::Right | Pad::A, Item::Favourites) => f.favourites = !f.favourites,
+            (Pad::Left | Pad::Right | Pad::A, Item::Kind) => turn(&mut f.kind, 3),
+            (Pad::Left | Pad::Right | Pad::A, Item::Genre) => turn(&mut f.genre, genre_n),
+            (Pad::Left | Pad::Right | Pad::A, Item::Provider) => turn(&mut f.provider, provider_n),
             _ => return true,
         }
         if (self.tab_nav(target).grid.filters.clone(), self.console.search.clone()) != before {
@@ -152,7 +184,8 @@ impl CollectionView {
 
     /// The on-screen keyboard over the panel for the search.
     fn filters_keyboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let osk = cx.new(|_| Osk::new(tr!("Search games"), &self.console.search));
+        let placeholder = if self.space == Space::Watch { tr!("Search titles") } else { tr!("Search games") };
+        let osk = cx.new(|_| Osk::new(placeholder, &self.console.search));
         let sub = cx.subscribe_in(&osk, window, |this, _, ev: &OskEvent, _, cx| {
             if let OskEvent::Done(text) = ev {
                 let text = text.trim().to_string();
@@ -190,6 +223,15 @@ impl CollectionView {
     }
 
     pub(super) fn filters_hints(&self) -> Vec<Hint> {
+        if self.space == Space::Watch {
+            let mut h = match self.focused_filter() {
+                Some(Item::Search) => vec![hint(Btn::A, tr!("Media type"))],
+                _ => vec![hint(Btn::LeftRight, tr!("Change"))],
+            };
+            h.push(hint(Btn::X, tr!("Reset all")));
+            h.push(hint(Btn::B, tr!("Done")));
+            return h;
+        }
         let mut h = match self.focused_filter() {
             Some(Item::Search) => vec![hint(Btn::A, tr!("Type"))],
             Some(Item::Favourites) => vec![hint(Btn::A, tr!("Change"))],
@@ -201,6 +243,9 @@ impl CollectionView {
     }
 
     pub(super) fn render_console_filters(&mut self) -> Option<AnyElement> {
+        if self.space == Space::Watch {
+            return self.render_watch_filters();
+        }
         let focus = self.focused_filter()?;
         let lib = self.lib.clone()?;
         let (target, spec) = self.filters_target();
@@ -376,6 +421,149 @@ impl CollectionView {
                 .occlude()
                 .on_pads([Pad::B])
                 .child(motion::enter("console-filters", panel, 280, 40., 0.))
+                .into_any_element(),
+        )
+    }
+
+    /// The Watch Filters panel: Type, Sort, Genre and Provider; search on top.
+    fn render_watch_filters(&mut self) -> Option<AnyElement> {
+        let focus = self.focused_filter()?;
+        self.lib.as_ref()?;
+        let (target, spec) = self.filters_target();
+        let games = self.console_games(&spec.source);
+        let genres = sources::watch_genres(&games);
+        let providers = sources::watch_providers(&games);
+        let shown = self.grid_keys(target, &spec).len();
+        let f = self.tab_nav(target).grid.filters.clone();
+        let search = self.console.search.clone();
+        let fixed = spec.source.starts_with("type:");
+
+        let tint = |on: bool| -> Hsla {
+            if on {
+                theme::console_on_focus().into()
+            } else {
+                theme::text_muted().into()
+            }
+        };
+        let items = self.filter_items();
+        let at = items.iter().position(|i| *i == focus).unwrap_or(0);
+        let to = |item: Item, then: &[Pad]| -> Vec<Pad> {
+            let Some(j) = items.iter().position(|i| *i == item) else { return Vec::new() };
+            let mut pads = pointer::along(at, j, Pad::Up, Pad::Down);
+            pads.extend_from_slice(then);
+            pads
+        };
+        let field =
+            kit::row_base(focus == Item::Search)
+                .on_hover_pads(to(Item::Search, &[]))
+                .on_pads(to(Item::Search, &[Pad::A]))
+                .when(focus != Item::Search, |d| d.bg(kit::ink(0.07)))
+                .child(div().relative().child(icon(Icon::FaSearch, u(18.), tint(focus == Item::Search))))
+                .child(
+                    div().relative().flex_1().min_w_0().truncate().text_size(u(17.)).when(search.is_empty(), |d| d.opacity(0.6)).child(
+                        if search.is_empty() { SharedString::from(tr!("Search titles")) } else { format!("{search}\u{2502}").into() },
+                    ),
+                );
+        let kinds: Vec<(SharedString, Option<usize>)> =
+            [(tr!("All"), 0usize), (tr!("Movies"), 1), (tr!("Series"), 2)].into_iter().map(|(label, _)| (label.into(), None)).collect();
+        let sorts: Vec<(SharedString, Option<usize>)> = [(tr!("Title"), 0usize), (tr!("Year"), 1), (tr!("Recently watched"), 2)]
+            .into_iter()
+            .map(|(label, _)| (label.into(), None))
+            .collect();
+        let genre = f.genre.checked_sub(1).and_then(|i| genres.get(i)).cloned().unwrap_or_else(|| tr!("Any genre").to_string());
+        let provider = f.provider.checked_sub(1).and_then(|i| providers.get(i)).cloned().unwrap_or_else(|| tr!("Any provider").to_string());
+        let row = |item: Item, label: String, ic: Icon, value: AnyElement| {
+            let on = focus == item;
+            kit::row_base(on)
+                .on_hover_pads(to(item, &[]))
+                .on_pads(to(item, &[Pad::A]))
+                .child(div().relative().child(icon(ic, u(20.), tint(on))))
+                .child(div().relative().flex_1().min_w_0().truncate().text_size(u(17.)).child(label))
+                .child(div().relative().child(value))
+        };
+        let mut body = div().flex().flex_col().gap(u(6.)).child(field);
+        if !fixed {
+            body = body.child(kit::caption(tr!("Media type"))).child(segments(&kinds, f.kind, focus == Item::Kind, |k| {
+                to(Item::Kind, &pointer::along(f.kind, k, Pad::Left, Pad::Right))
+            }));
+        }
+        body = body
+            .child(kit::caption(tr!("Sort")))
+            .child(segments(&sorts, f.sort, focus == Item::Sort, |k| to(Item::Sort, &pointer::along(f.sort, k, Pad::Left, Pad::Right))));
+        if !genres.is_empty() {
+            let on = focus == Item::Genre;
+            body = body.child(row(
+                Item::Genre,
+                tr!("Genre").to_string(),
+                Icon::GridView,
+                kit::choice_clickable(
+                    genre,
+                    on,
+                    f.genre > 0,
+                    f.genre < genres.len(),
+                    140.,
+                    to(Item::Genre, &[Pad::Left]),
+                    to(Item::Genre, &[Pad::Right]),
+                )
+                .into_any_element(),
+            ));
+        }
+        if !providers.is_empty() {
+            let on = focus == Item::Provider;
+            body = body.child(row(
+                Item::Provider,
+                tr!("Provider").to_string(),
+                Icon::Storefront,
+                kit::choice_clickable(
+                    provider,
+                    on,
+                    f.provider > 0,
+                    f.provider < providers.len(),
+                    140.,
+                    to(Item::Provider, &[Pad::Left]),
+                    to(Item::Provider, &[Pad::Right]),
+                )
+                .into_any_element(),
+            ));
+        }
+        let footer = div()
+            .flex()
+            .items_center()
+            .px(u(8.))
+            .pt(u(12.))
+            .border_t_1()
+            .border_color(kit::ink(0.08))
+            .text_size(u(15.))
+            .text_color(theme::text_muted())
+            .child(tr!("{shown} of {total} titles", shown, total = games.len()));
+        let panel = div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right_0()
+            .w(u(470.))
+            .flex()
+            .flex_col()
+            .gap(u(14.))
+            .px(u(18.))
+            .pt(u(26.))
+            .pb(u(70.))
+            .bg(theme::console_sidebar())
+            .border_l_1()
+            .border_color(kit::ink(0.08))
+            .shadow(kit::shadow(0.5, 0., 40.))
+            .eats_clicks()
+            .child(div().px(u(8.)).child(kit::title(tr!("Filters"), 30.)))
+            .child(body)
+            .child(div().flex_1())
+            .child(footer);
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .occlude()
+                .on_pads([Pad::B])
+                .child(motion::enter("console-watch-filters", panel, 280, 40., 0.))
                 .into_any_element(),
         )
     }

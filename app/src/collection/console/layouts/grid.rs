@@ -12,7 +12,7 @@ use heronite_i18n::{n_, tr};
 
 use super::super::super::CollectionView;
 use super::super::hero::{clip, HeroSize};
-use super::super::sources::keys;
+use super::super::sources::{self, keys};
 use super::super::tile::label_room;
 use crate::collection::data::played_ago;
 use crate::collection::view_filters::category_label;
@@ -60,6 +60,12 @@ pub(crate) struct Filters {
     pub category: usize,
     /// 0 = any, else the smart group `group - 1` (`CollectionView::smart_groups`).
     pub group: usize,
+    /// Watch: 0 all, 1 films, 2 series.
+    pub kind: usize,
+    /// Watch: 0 = any, else a genre (the sorted list of the library).
+    pub genre: usize,
+    /// Watch: 0 = any, else a provider (the sorted list of the library).
+    pub provider: usize,
 }
 
 pub(crate) const SHOW: [&str; 3] = [n_!("All games"), n_!("Installed"), n_!("Not installed")];
@@ -99,6 +105,9 @@ impl Nav {
             status: status.map_or(0, |i| i + 1),
             category: 0,
             group: 0,
+            kind: 0,
+            genre: 0,
+            provider: 0,
         };
         self.index = 0;
         self.toolbar = None;
@@ -106,12 +115,22 @@ impl Nav {
     }
 
     /// The games the grid shows, in order (best search matches first).
-    fn keys(&self, games: &[std::sync::Arc<CollectionGame>], lib: &Library, cats: &Categories, search: &str) -> Vec<SharedString> {
+    fn keys(
+        &self,
+        games: &[std::sync::Arc<CollectionGame>],
+        lib: &Library,
+        cats: &Categories,
+        search: &str,
+        watch: bool,
+        fixed_kind: Option<&str>,
+    ) -> Vec<SharedString> {
         let f = &self.filters;
         let folded = heronite_data::fuzzy::fold(search.trim());
         let tokens = heronite_data::fuzzy::tokens(&folded);
         let status = f.status.checked_sub(1).and_then(|i| lib.statuses.get(i)).map(|s| s.id.clone());
         let category: std::collections::BTreeSet<String> = category_options(cats).get(f.category).cloned().flatten().into_iter().collect();
+        let watch_genres = sources::watch_genres(games);
+        let watch_providers = sources::watch_providers(games);
         let mut games: Vec<&CollectionGame> = games
             .iter()
             .map(|g| g.as_ref())
@@ -124,10 +143,33 @@ impl Nav {
             .filter(|g| status.as_ref().is_none_or(|s| &g.status_id == s))
             .filter(|g| cats.matches(&category, &g.runner, &g.app_name))
             .collect();
-        match f.sort {
-            1 => games.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.title_lower.cmp(&b.title_lower))),
-            2 => games.sort_by(|a, b| b.playtime_minutes.cmp(&a.playtime_minutes).then_with(|| a.title_lower.cmp(&b.title_lower))),
-            _ => games.sort_by(|a, b| a.title_lower.cmp(&b.title_lower)),
+        if watch {
+            if fixed_kind.is_none() {
+                games.retain(|g| match f.kind {
+                    1 => sources::watch_kind(g) == "movie",
+                    2 => sources::watch_kind(g) == "series",
+                    _ => true,
+                });
+            }
+            if let Some(genre) = f.genre.checked_sub(1).and_then(|i| watch_genres.get(i)) {
+                games.retain(|g| g.metadata.as_ref().is_some_and(|m| m.genres.iter().any(|x| x == genre)));
+            }
+            if let Some(provider) = f.provider.checked_sub(1).and_then(|i| watch_providers.get(i)) {
+                games.retain(|g| g.source_label == *provider);
+            }
+        }
+        if watch {
+            match f.sort {
+                1 => games.sort_by(|a, b| release_key(b).cmp(release_key(a)).then_with(|| a.title_lower.cmp(&b.title_lower))),
+                2 => games.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.title_lower.cmp(&b.title_lower))),
+                _ => games.sort_by(|a, b| a.title_lower.cmp(&b.title_lower)),
+            }
+        } else {
+            match f.sort {
+                1 => games.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.title_lower.cmp(&b.title_lower))),
+                2 => games.sort_by(|a, b| b.playtime_minutes.cmp(&a.playtime_minutes).then_with(|| a.title_lower.cmp(&b.title_lower))),
+                _ => games.sort_by(|a, b| a.title_lower.cmp(&b.title_lower)),
+            }
         }
         if !tokens.is_empty() {
             // Same search as the desktop Collection; stable, so the sort orders ties.
@@ -140,8 +182,44 @@ impl Nav {
     }
 
     /// `group`: the Filters panel's smart group, shown before what Show shows.
-    fn chips(&self, lib: &Library, cats: &Categories, search: &str, group: Option<&str>) -> [(SharedString, SharedString); CHIPS] {
+    fn chips(
+        &self,
+        lib: &Library,
+        cats: &Categories,
+        search: &str,
+        group: Option<&str>,
+        watch: bool,
+        fixed_kind: Option<&str>,
+    ) -> [(SharedString, SharedString); CHIPS] {
         let f = &self.filters;
+        if watch {
+            let genres = sources::watch_genres(&lib.games);
+            let providers = sources::watch_providers(&lib.games);
+            let kind = match fixed_kind {
+                Some("movie") => tr!("Movies"),
+                Some("series") => tr!("Series"),
+                _ => match f.kind {
+                    1 => tr!("Movies"),
+                    2 => tr!("Series"),
+                    _ => tr!("All"),
+                },
+            };
+            let genre = f.genre.checked_sub(1).and_then(|i| genres.get(i)).cloned().unwrap_or_else(|| tr!("Any genre").to_string());
+            let provider =
+                f.provider.checked_sub(1).and_then(|i| providers.get(i)).cloned().unwrap_or_else(|| tr!("Any provider").to_string());
+            let sort = match f.sort {
+                1 => tr!("Year"),
+                2 => tr!("Recently watched"),
+                _ => tr!("Title"),
+            };
+            return [
+                (tr!("Media type").into(), kind.into()),
+                (tr!("Sort").into(), sort.into()),
+                (tr!("Genre").into(), genre.into()),
+                (tr!("Provider").into(), provider.into()),
+                (tr!("Search").into(), if search.is_empty() { "\u{2014}".into() } else { search.to_string().into() }),
+            ];
+        }
         let status = status_options(lib);
         let category = match category_options(cats).get(f.category).cloned().flatten() {
             None => tr!("Any category").to_string(),
@@ -213,6 +291,11 @@ fn panel_width(vw: f32) -> f32 {
     (vw * 0.31).round().min(380.)
 }
 
+/// Watch titles sort by year descending: their release date is ISO or a year.
+fn release_key(game: &CollectionGame) -> &str {
+    game.metadata.as_ref().and_then(|metadata| metadata.release_date.as_deref()).unwrap_or("")
+}
+
 /// A "label  value" line of the facts under the art.
 pub(super) fn fact(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Div {
     div()
@@ -252,7 +335,9 @@ impl CollectionView {
         }
         let search = self.console.search.clone();
         let cats = std::mem::take(&mut self.categories);
-        let keys = self.tab_nav(tab).grid.keys(&games, &lib, &cats, &search);
+        let fixed_kind = spec.source.strip_prefix("type:");
+        let watch = self.space == crate::collection::Space::Watch;
+        let keys = self.tab_nav(tab).grid.keys(&games, &lib, &cats, &search, watch, fixed_kind);
         self.categories = cats;
         keys
     }
@@ -282,8 +367,10 @@ impl CollectionView {
         let group = self.console.tab_navs.get(tab).map_or(0, |n| n.grid.filters.group);
         let group = group.checked_sub(1).and_then(|i| self.smart_groups.groups.get(i)).map(|g| g.name.clone());
         let cats = std::mem::take(&mut self.categories);
+        let watch = self.space == crate::collection::Space::Watch;
+        let fixed_kind = spec.source.strip_prefix("type:");
         let nav = &mut self.tab_nav(tab).grid;
-        let chips = nav.chips(&lib, &cats, &search, group.as_deref());
+        let chips = nav.chips(&lib, &cats, &search, group.as_deref(), watch, fixed_kind);
         self.categories = cats;
         let nav = &mut self.tab_nav(tab).grid;
         nav.cols = cols;

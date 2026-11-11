@@ -69,8 +69,30 @@ fn is_top(game: &CollectionGame) -> bool {
 }
 
 /// `movie` or `series` for the item; games without a watch kind are `movie`.
-fn watch_kind(game: &CollectionGame) -> &str {
+pub(super) fn watch_kind(game: &CollectionGame) -> &str {
     game.game.extra.as_ref().and_then(|extra| extra.get("stremioType")).and_then(serde_json::Value::as_str).unwrap_or("movie")
+}
+
+/// The genres present in a Watch library, sorted.
+pub(super) fn watch_genres(games: &[std::sync::Arc<CollectionGame>]) -> Vec<String> {
+    let mut genres = std::collections::BTreeSet::new();
+    for game in games {
+        if let Some(metadata) = &game.metadata {
+            genres.extend(metadata.genres.iter().filter(|genre| !genre.trim().is_empty()).cloned());
+        }
+    }
+    genres.into_iter().collect()
+}
+
+/// The providers present in a Watch library, sorted.
+pub(super) fn watch_providers(games: &[std::sync::Arc<CollectionGame>]) -> Vec<String> {
+    let mut providers = std::collections::BTreeSet::new();
+    for game in games {
+        if !game.source_label.is_empty() {
+            providers.insert(game.source_label.to_string());
+        }
+    }
+    providers.into_iter().collect()
 }
 
 /// A day number for "YYYY-MM-DD..." (enough to compare ages).
