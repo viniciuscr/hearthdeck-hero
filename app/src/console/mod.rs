@@ -24,6 +24,7 @@ pub mod spatial;
 pub mod startup;
 pub mod theme_rows;
 pub mod themes;
+pub mod watch_theme;
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};

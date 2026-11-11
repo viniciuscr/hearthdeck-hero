@@ -296,11 +296,27 @@ impl CollectionView {
     fn load_ui_for(&self, space: Space) -> UiState {
         match space {
             Space::Games => UiState::load(&self.app_paths),
-            Space::Watch => heronite_data::json_store::read_value(&self.watch_ui_state_path())
-                .ok()
-                .filter(|value| value.is_object())
-                .map(|value| UiState::from_value(&value))
-                .unwrap_or_default(),
+            Space::Watch => {
+                let path = self.watch_ui_state_path();
+                let saved = heronite_data::json_store::read_value(&path)
+                    .ok()
+                    .filter(|value| value.is_object())
+                    .map(|value| UiState::from_value(&value));
+                match saved {
+                    Some(ui) if !is_game_ui(&ui) => ui,
+                    other => {
+                        if other.is_some() {
+                            let backup = path.with_extension("json.bak");
+                            if !backup.exists() {
+                                let _ = std::fs::copy(&path, &backup);
+                            }
+                        }
+                        let ui = watch_ui();
+                        let _ = heronite_data::json_store::write(&path, &ui.to_value());
+                        ui
+                    }
+                }
+            }
         }
     }
 
@@ -793,4 +809,19 @@ impl Drop for RenderTimer {
     fn drop(&mut self) {
         log::debug!("render {:?}", self.0.elapsed());
     }
+}
+
+/// A Watch view state written before the Watch space existed carries game
+/// grouping, statuses or install filters. It is migrated once.
+fn is_game_ui(ui: &UiState) -> bool {
+    ui.group_by != heronite_data::organize::GroupBy::None
+        || ui.install_filter != heronite_data::collection::InstallFilter::All
+        || !ui.statuses.is_empty()
+        || !ui.categories.is_empty()
+        || !ui.smart_groups.is_empty()
+}
+
+/// A clean Watch view state: no game statuses, install filter or grouping.
+fn watch_ui() -> UiState {
+    UiState { group_by: heronite_data::organize::GroupBy::None, views_seeded: true, saved_views: Vec::new(), ..UiState::default() }
 }

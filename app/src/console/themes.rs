@@ -11,16 +11,16 @@
 //! [`update`] is the one way to change the theme in use: it also installs it
 //! in [`super::look`] while console mode is on, so the screen follows at once.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
 
-use heronite_data::console_theme::{ConsolePrefs, ConsoleTheme, ShelfSpec};
+use heronite_data::console_theme::{ConsolePrefs, ConsoleTheme};
 use heronite_data::json_store;
 use heronite_data::paths::AppPaths;
-use heronite_i18n::tr;
 
 use crate::collection::Space;
+use crate::console::watch_theme::watch_theme;
 
 const GAMES: u8 = 0;
 const WATCH: u8 = 1;
@@ -64,46 +64,60 @@ fn load(app: &AppPaths, space: Space) -> ConsolePrefs {
                 Ok(value) if value.is_object() => serde_json::from_value::<ConsolePrefs>(value).ok(),
                 _ => None,
             };
-            let mut prefs = saved.unwrap_or_else(|| watch_from(ConsolePrefs::load(app)));
+            let mut prefs = match saved {
+                Some(prefs) if !is_game_theme(&prefs.theme) => prefs,
+                Some(_) => {
+                    backup(&path);
+                    let prefs = watch_prefs(app);
+                    write_watch(&path, &prefs);
+                    prefs
+                }
+                None => {
+                    let prefs = watch_prefs(app);
+                    write_watch(&path, &prefs);
+                    prefs
+                }
+            };
             prefs.theme = prefs.theme.normalized();
             prefs
         }
     }
 }
 
-/// The first Watch session starts from the Games theme, with watch rails and
-/// labels. It is only a starting point: the user's saved theme wins next time.
-fn watch_from(mut prefs: ConsolePrefs) -> ConsolePrefs {
-    let theme = &mut prefs.theme;
-    theme.tabs.retain(|tab| {
-        matches!(tab.source.as_str(), "all" | "installed" | "favourites")
-            || tab.source.starts_with("genre:")
-            || tab.source.starts_with("store:")
-    });
-    for tab in &mut theme.tabs {
-        if matches!(tab.source.as_str(), "all" | "installed") {
-            tab.name = tr!("Watch").to_string();
-            tab.source = "all".into();
-        }
-    }
-    theme.shelves.retain(|shelf| {
-        matches!(shelf.kind.as_str(), "recent" | "favourites") || shelf.kind.starts_with("genre:") || shelf.kind.starts_with("store:")
-    });
-    for shelf in &mut theme.shelves {
-        if shelf.kind == "recent" {
-            shelf.title = tr!("Continue watching").to_string();
-        }
-    }
-    if !theme.shelves.iter().any(|shelf| shelf.kind == "recent") {
-        theme.shelves.insert(0, ShelfSpec { kind: "recent".into(), on: true, title: tr!("Continue watching").to_string() });
-    }
-    if !theme.shelves.iter().any(|shelf| shelf.kind == "provider:top-movies") {
-        theme.shelves.push(ShelfSpec { kind: "provider:top-movies".into(), on: true, title: tr!("Top movies").to_string() });
-    }
-    if !theme.shelves.iter().any(|shelf| shelf.kind == "provider:top-series") {
-        theme.shelves.push(ShelfSpec { kind: "provider:top-series".into(), on: true, title: tr!("Top series").to_string() });
-    }
+/// A fresh Watch theme, starting from the Games prefs for the global console
+/// options (fullscreen, idle, open-in) but with its own theme and rails.
+fn watch_prefs(app: &AppPaths) -> ConsolePrefs {
+    let mut prefs = ConsolePrefs::load(app);
+    prefs.theme = watch_theme();
+    prefs.based_on = "watch".into();
+    prefs.last_tab = 0;
     prefs
+}
+
+/// A Watch file written before the Watch theme existed is a copy of a game
+/// theme: it has game shelves or game tab sources. It is migrated once.
+fn is_game_theme(theme: &ConsoleTheme) -> bool {
+    theme.shelves.iter().any(|shelf| matches!(shelf.kind.as_str(), "installed" | "statuses" | "backlog-short" | "forgotten"))
+        || theme
+            .tabs
+            .iter()
+            .any(|tab| matches!(tab.source.as_str(), "installed" | "pc" | "emulated") || tab.name.to_lowercase().contains("games"))
+}
+
+fn backup(path: &Path) {
+    let backup = path.with_extension("json.bak");
+    if backup.exists() {
+        return;
+    }
+    if let Err(error) = std::fs::copy(path, &backup) {
+        log::warn!("backing up {}: {error}", path.display());
+    }
+}
+
+fn write_watch(path: &Path, prefs: &ConsolePrefs) {
+    if let Err(error) = json_store::write_indented(path, prefs, b"  ") {
+        log::warn!("writing {}: {error:#}", path.display());
+    }
 }
 
 /// The prefs, read from disk the first time.
@@ -111,12 +125,21 @@ pub fn prefs(app: &AppPaths) -> ConsolePrefs {
     read(app, ConsolePrefs::clone)
 }
 
-/// `f` over the prefs without copying them (it must be quick: it holds the lock).
-pub fn read<R>(app: &AppPaths, f: impl FnOnce(&ConsolePrefs) -> R) -> R {
-    let space = current_space();
+/// The prefs of one space, without switching the active space.
+pub fn prefs_for(app: &AppPaths, space: Space) -> ConsolePrefs {
+    read_for(app, space, ConsolePrefs::clone)
+}
+
+/// `f` over one space's prefs without copying them (it must be quick: it holds the lock).
+pub fn read_for<R>(app: &AppPaths, space: Space, f: impl FnOnce(&ConsolePrefs) -> R) -> R {
     let mut cur = PREFS.lock().unwrap_or_else(|e| e.into_inner());
     let slot = &mut cur[index(space)];
     f(slot.get_or_insert_with(|| load(app, space)))
+}
+
+/// `f` over the prefs without copying them (it must be quick: it holds the lock).
+pub fn read<R>(app: &AppPaths, f: impl FnOnce(&ConsolePrefs) -> R) -> R {
+    read_for(app, current_space(), f)
 }
 
 /// Keeps `tab` as the one console mode reopens on. Unlike [`update`] it leaves
@@ -137,7 +160,12 @@ pub fn remember_tab(app: &AppPaths, tab: usize) {
 
 /// Changes the prefs, installs the theme while console mode is on and saves.
 pub fn update(app: &AppPaths, change: impl FnOnce(&mut ConsolePrefs)) -> ConsolePrefs {
-    let space = current_space();
+    update_for(app, current_space(), change)
+}
+
+/// Changes one space's prefs and saves them there. It installs the theme only
+/// when that space is the one on screen.
+pub fn update_for(app: &AppPaths, space: Space, change: impl FnOnce(&mut ConsolePrefs)) -> ConsolePrefs {
     let next = {
         let mut cur = PREFS.lock().unwrap_or_else(|e| e.into_inner());
         let p = cur[index(space)].get_or_insert_with(|| load(app, space));
@@ -145,7 +173,7 @@ pub fn update(app: &AppPaths, change: impl FnOnce(&mut ConsolePrefs)) -> Console
         p.theme = std::mem::take(&mut p.theme).normalized();
         p.clone()
     };
-    if super::active() {
+    if space == current_space() && super::active() {
         super::look::set(next.theme.clone());
     }
     save(app, next.clone(), space);

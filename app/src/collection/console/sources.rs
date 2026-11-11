@@ -156,6 +156,7 @@ impl CollectionView {
             "emulated" => self.game_extras.systems.contains_key(&g.key),
             "status" => status_is(lib, g, value),
             "category" => self.categories.contains(value, &g.runner, &g.app_name),
+            "type" => watch_kind(g) == value,
             "store" => g.source_label == value,
             "platform" => self.organize().platform(g) == value,
             _ => true,

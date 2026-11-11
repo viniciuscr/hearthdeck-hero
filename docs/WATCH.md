@@ -19,6 +19,14 @@ Watch feature's definitions and the rules that apply while building it.
 > not require changes to the Collection or console screens. The provider name
 > travels in `GameInfo.runner` / `source` and in `WatchItem.provider`.
 
+> **Revision 2026-11-11 — Watch settings and migration.**
+> Settings → Watch owns the Stremio account and the home rails; console
+> Customize edits the same Watch theme. A game-shaped `console-watch.json` or
+> `watch-ui-state.json` is backed up as `*.json.bak` and replaced once with the
+> Watch defaults: Home / Movies / Series, and Continue watching / Top movies /
+> Top series. The Watch theme is fork-owned (`app/src/console/watch_theme.rs`),
+> not a transformed game preset.
+
 ## Scope
 
 **In:** Linux/CachyOS, films and series, a Stremio account linked by code,

@@ -12,6 +12,8 @@ pub enum Section {
     Appearance,
     /// Console mode's themes and options (also ☰ → Customize).
     ConsoleMode,
+    /// The Stremio account, provider and the Watch home rails.
+    Watch,
     Advanced,
     GameDefaults,
     Downloads,
@@ -45,8 +47,9 @@ pub enum Section {
 
 impl Section {
     /// Left navigation: caption + sections (the caption is translated when drawn).
-    pub const GROUPS: [(&'static str, &'static [Section]); 6] = [
+    pub const GROUPS: [(&'static str, &'static [Section]); 7] = [
         (n_!("App"), &[Section::General, Section::Appearance, Section::ConsoleMode]),
+        (n_!("Watch"), &[Section::Watch]),
         (n_!("Games"), &[Section::GameDefaults, Section::Downloads, Section::Launchers, Section::Integrations]),
         (n_!("Collection"), &[Section::Library, Section::Metadata, Section::Achievements]),
         (n_!("While playing"), &[Section::Overlay, Section::Screenshots, Section::Replay]),
@@ -55,10 +58,11 @@ impl Section {
     ];
 
     /// Same order as [`Section::GROUPS`].
-    pub const ALL: [Section; 20] = [
+    pub const ALL: [Section; 21] = [
         Section::General,
         Section::Appearance,
         Section::ConsoleMode,
+        Section::Watch,
         Section::GameDefaults,
         Section::Downloads,
         Section::Launchers,
@@ -92,6 +96,7 @@ impl Section {
             Section::Saves => supported(Feature::SaveBackups),
             // Its options are mostly Wine's.
             Section::GameDefaults => supported(Feature::Wine),
+            Section::Watch => heronite_watch::available(),
             _ => true,
         }
     }
@@ -101,6 +106,7 @@ impl Section {
             Section::General => tr!("General"),
             Section::Appearance => tr!("Appearance"),
             Section::ConsoleMode => tr!("Console mode"),
+            Section::Watch => tr!("Watch"),
             Section::Advanced => tr!("Advanced"),
             Section::GameDefaults => tr!("Game defaults"),
             Section::Downloads => tr!("Downloads"),
@@ -126,6 +132,7 @@ impl Section {
             Section::General => Icon::Settings,
             Section::Appearance => Icon::Visibility,
             Section::ConsoleMode => Icon::Tv,
+            Section::Watch => Icon::Videocam,
             Section::Advanced => Icon::Build,
             Section::GameDefaults => Icon::Tune,
             Section::Downloads => Icon::Download,
@@ -152,6 +159,7 @@ impl Section {
             Section::General => tr!("Language, folders, the tray, shortcuts and where Wine and Proton are looked for."),
             Section::Appearance => tr!("Profiles, the theme and its colours, menus and panels, the picture behind the Collection, covers, text and layout."),
             Section::ConsoleMode => tr!("The controller-first TV mode: its themes, tabs and shelves, covers, background, interface and controls. Changes show at once; ☰ → Customize in console mode has the same options."),
+            Section::Watch => tr!("The Stremio account, the provider and the Watch home rails: Continue watching, Top movies and Top series."),
             Section::Advanced => tr!("Logs, folders and cache."),
             Section::GameDefaults => tr!("What new games start with. To change a game you already have, open its own settings."),
             Section::Downloads => tr!("Downloads and updates of Epic Games, GOG and Amazon Games games."),
@@ -181,6 +189,7 @@ impl Section {
             Section::General => "general folders tray shortcuts wine proton language theme geral pastas bandeja atalhos idioma tema",
             Section::Appearance => "appearance background blur dim darkening saturation cover aspect grey uninstalled artwork glass opacity transparent transparency solid interface panels menus dialogs colour tint collection accent contrast zoom scale scaling size bigger smaller larger dpi hidpi 4k tv accessibility font density corners badges categories category tags ribbon strip bookmarks hover screenshot slideshow picture animations motion layout sections profile theme light dark mode system import export aparencia plano de fundo desfoque escurecer saturacao capa cinza nao instalados arte vidro opacidade transparente transparencia solido paineis cor colecao destaque contraste zoom escala tamanho maior menor ampliar aumentar diminuir acessibilidade fonte densidade cantos selos categorias categoria etiquetas fita faixa marcadores estrela animacoes movimento secoes perfil tema claro escuro modo sistema importar exportar imagem",
             Section::ConsoleMode => "console mode tv couch controller gamepad theme themes tabs shelves layout covers background font scale clock accent colours glyphs hints menu startup customize export import preset modo console televisao sofa controle tema temas abas prateleiras capas fundo fonte tamanho relogio destaque cores botoes dicas menu personalizar exportar importar perfil",
+            Section::Watch => "watch stremio movies series provider rails continue watching top movies top series account link qr filmes series provedor prateleiras continuar assistindo link conta",
             Section::Advanced => "advanced cache folders copy settings avancado pastas copiar configuracoes",
             Section::GameDefaults => "game defaults wine proton version prefix dxvk nvapi esync fsync sync wayland wow64 gpu performance fps gamescope launch options new games padroes dos jogos versao prefixo desempenho opcoes de inicializacao novos jogos",
             Section::Downloads => "downloads epic updates install atualizacoes instalar baixar",
@@ -215,6 +224,7 @@ impl Section {
             "general" => Some(Section::General),
             "appearance" => Some(Section::Appearance),
             "console-mode" | "console" => Some(Section::ConsoleMode),
+            "watch" | "movies" => Some(Section::Watch),
             "advanced" => Some(Section::Advanced),
             "defaults" => Some(Section::GameDefaults),
             "downloads" => Some(Section::Downloads),

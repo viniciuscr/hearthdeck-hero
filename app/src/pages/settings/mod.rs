@@ -56,6 +56,7 @@ mod section;
 mod storage;
 pub mod sysinfo;
 mod updates;
+mod watch;
 
 pub use advanced::open_folder;
 pub use backup::format_time;
@@ -151,6 +152,7 @@ pub struct SettingsPage {
     advanced: advanced::State,
     about: about::State,
     logs: logs::State,
+    watch: watch::State,
     console_mode: Option<console_mode::State>,
     /// Console mode focus, keyboard and pickers.
     console: console::ConsoleState,
@@ -229,6 +231,7 @@ impl SettingsPage {
             _ => {}
         })
         .detach();
+        let watch = watch::State::new(&ctx);
         let mut this = Self {
             settings,
             error: None,
@@ -249,6 +252,7 @@ impl SettingsPage {
             advanced: advanced::State::default(),
             about: about::State::default(),
             logs: logs::State::default(),
+            watch,
             console_mode: None,
             console: Default::default(),
             nav_scroll: ScrollHandle::new(),
@@ -767,6 +771,7 @@ impl SettingsPage {
             }
             Section::Cloud => cloud::render(self, window, cx),
             Section::ConsoleMode => console_mode::render(self, window, cx),
+            Section::Watch => watch::render(self, window, cx),
             Section::Logs => self.logs_section(cx),
             Section::About => self.about_section(cx).into_any_element(),
         }
