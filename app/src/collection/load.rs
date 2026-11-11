@@ -7,11 +7,11 @@ use std::time::Instant;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use heronite_data::hltb::WikiCache;
-use heronite_data::{art, ArtContext, DataPaths, Library};
+use heronite_data::{art, AppPaths, ArtContext, DataPaths, Library};
 use heronite_i18n::tr;
 use heronite_images::ImageRef;
 
-use super::{stage, CollectionView};
+use super::{stage, CollectionView, Space};
 use crate::images::to_chain;
 
 /// Everything loaded from disk off the UI thread.
@@ -26,16 +26,20 @@ struct Loaded {
     stages: HashMap<SharedString, Vec<ImageRef>>,
 }
 
-fn load_all(data_paths: &DataPaths, cache: &std::path::Path, include_hidden: bool) -> anyhow::Result<Loaded> {
+fn load_all(data_paths: &DataPaths, app: &AppPaths, cache: &std::path::Path, include_hidden: bool, space: Space) -> anyhow::Result<Loaded> {
     let t = Instant::now();
-    let lib = Library::load_with(data_paths, include_hidden)?;
-    let wiki = WikiCache::load(data_paths);
-    let categories = heronite_data::categories::Categories::load(data_paths);
-    let smart_groups = heronite_data::smart_groups::SmartGroups::load(data_paths);
-    let extras = super::organize::game_extras(&lib, data_paths, cache);
-    let actions = heronite_data::game_actions::load(data_paths);
+    let lib = match space {
+        Space::Games => Library::load_with(data_paths, include_hidden)?,
+        Space::Movies => heronite_movies::collection::library(app, include_hidden)?,
+    };
+    let paths = &lib.paths;
+    let wiki = WikiCache::load(paths);
+    let categories = heronite_data::categories::Categories::load(paths);
+    let smart_groups = heronite_data::smart_groups::SmartGroups::load(paths);
+    let extras = super::organize::game_extras(&lib, paths, cache);
+    let actions = heronite_data::game_actions::load(paths);
     let shots = (!lib.settings.screenshots.folder.is_empty()).then(|| std::path::PathBuf::from(&lib.settings.screenshots.folder));
-    let ctx = ArtContext::new(data_paths, shots.as_deref());
+    let ctx = ArtContext::new(paths, shots.as_deref());
     let mut covers = HashMap::new();
     let mut stages = HashMap::new();
     for g in &lib.games {
@@ -65,8 +69,8 @@ pub fn preload_library(cx: &App) {
     let data_paths = DataPaths::detect();
     let app_paths = heronite_data::AppPaths::for_data(&data_paths);
     let include_hidden = heronite_data::ui_state::UiState::load(&app_paths).show_hidden;
-    let (paths, cache) = (data_paths.clone(), app_paths.cache);
-    let task = cx.background_spawn(async move { load_all(&paths, &cache, include_hidden) });
+    let (paths, app, cache) = (data_paths.clone(), app_paths.clone(), app_paths.cache);
+    let task = cx.background_spawn(async move { load_all(&paths, &app, &cache, include_hidden, Space::Games) });
     PRELOAD.with(|p| *p.borrow_mut() = Some(Preload { root: data_paths.root, include_hidden, task }));
 }
 
@@ -84,14 +88,16 @@ fn take_preload(data_paths: &DataPaths, include_hidden: bool) -> Option<Task<any
 
 impl CollectionView {
     pub(super) fn spawn_load(&self, cx: &mut Context<Self>) {
-        let data_paths = self.data_paths.clone();
+        let data_paths = self.active_data_paths();
+        let app = self.app_paths.clone();
         let cache = self.app_paths.cache.clone();
         let include_hidden = self.ui.show_hidden;
-        let preloaded = if self.lib.is_none() { take_preload(&data_paths, include_hidden) } else { None };
+        let space = self.space;
+        let preloaded = if self.lib.is_none() && space == Space::Games { take_preload(&data_paths, include_hidden) } else { None };
         cx.spawn(async move |this, cx| {
             let loaded = match preloaded {
                 Some(task) => task.await,
-                None => cx.background_spawn(async move { load_all(&data_paths, &cache, include_hidden) }).await,
+                None => cx.background_spawn(async move { load_all(&data_paths, &app, &cache, include_hidden, space) }).await,
             };
             this.update(cx, |this, cx| {
                 this.refreshing = false;

@@ -10,6 +10,7 @@ use gpui_kit::*;
 
 use super::super::CollectionView;
 use super::Screen;
+use crate::collection::Space;
 use crate::console::kit::{self, u};
 use crate::console::pointer::Clickable;
 use crate::console::Pad;
@@ -24,6 +25,8 @@ use heronite_i18n::tr;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Item {
     Go(Page),
+    /// Switches the Collection between games and movies.
+    Space(Space),
     /// Epic Games, GOG and Amazon Games: the store page shown last.
     Stores,
     AddGame,
@@ -46,6 +49,8 @@ impl Item {
     fn label(self) -> &'static str {
         match self {
             Item::Go(p) => p.title(),
+            Item::Space(Space::Games) => tr!("Games"),
+            Item::Space(Space::Movies) => tr!("Movies"),
             Item::Stores => crate::pages::stores::title(),
             Item::AddGame => tr!("Add game"),
             Item::Customize => tr!("Customize"),
@@ -58,6 +63,8 @@ impl Item {
     fn icon(self) -> Icon {
         match self {
             Item::Go(p) => p.icon(),
+            Item::Space(Space::Games) => Icon::GridView,
+            Item::Space(Space::Movies) => Icon::Videocam,
             Item::Stores => Icon::Storefront,
             Item::AddGame => Icon::Add,
             Item::Customize => Icon::Tune,
@@ -73,7 +80,8 @@ impl Item {
     pub fn parse(name: &str) -> Option<Item> {
         Some(match name {
             "collection" => Item::Go(Page::Collection),
-            "movies" => Item::Go(Page::Movies),
+            "games" => Item::Space(Space::Games),
+            "movies" => Item::Space(Space::Movies),
             "downloads" => Item::Go(Page::Downloads),
             "wine-manager" => Item::Go(Page::WineManager),
             "stores" => Item::Stores,
@@ -99,6 +107,7 @@ pub(super) fn items() -> Vec<Item> {
         let Some(item) = Item::parse(&spec.item) else { continue };
         let available = match item {
             Item::Go(page) => page.available(),
+            Item::Space(_) => true,
             Item::Stores => crate::pages::stores::PAGES.iter().any(|p| p.available()),
             _ => true,
         };
@@ -119,11 +128,11 @@ pub(super) fn items() -> Vec<Item> {
     while out.last() == Some(&Item::Separator) {
         out.pop();
     }
-    if Page::Movies.available() && !out.contains(&Item::Go(Page::Movies)) {
+    if !out.contains(&Item::Space(Space::Movies)) {
         if out.last() == Some(&Item::Separator) {
             out.pop();
         }
-        out.push(Item::Go(Page::Movies));
+        out.push(Item::Space(Space::Movies));
     }
     out
 }
@@ -202,7 +211,15 @@ impl CollectionView {
     /// The menu item of the page shown (where the menu opens).
     pub(super) fn sidebar_current(&self) -> usize {
         let items = items();
-        items.iter().position(|i| i.page() == Some(self.page)).or_else(|| items.iter().position(|i| *i != Item::Separator)).unwrap_or(0)
+        let wanted = match self.space {
+            Space::Games => None,
+            Space::Movies => Some(Item::Space(Space::Movies)),
+        };
+        wanted
+            .and_then(|wanted| items.iter().position(|item| *item == wanted))
+            .or_else(|| items.iter().position(|i| i.page() == Some(self.page)))
+            .or_else(|| items.iter().position(|i| *i != Item::Separator))
+            .unwrap_or(0)
     }
 
     pub(super) fn sidebar_pad(&mut self, pad: Pad, window: &mut Window, cx: &mut Context<Self>) {
@@ -219,12 +236,17 @@ impl CollectionView {
             self.console.sidebar = None;
             match items[cur] {
                 Item::Go(Page::Collection) => {
+                    self.set_space(Space::Games, cx);
                     self.navigate(Page::Collection, window, cx);
                     if matches!(self.console.screen, Screen::Game(_)) {
                         self.console.screen = Screen::Tabs;
                     }
                 }
                 Item::Go(page) => self.navigate(page, window, cx),
+                Item::Space(space) => {
+                    self.set_space(space, cx);
+                    self.navigate(Page::Collection, window, cx);
+                }
                 Item::Stores => {
                     let page = self.pages.stores_page();
                     self.navigate(page, window, cx);

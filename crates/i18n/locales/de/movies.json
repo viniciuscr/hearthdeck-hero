@@ -1,24 +1,4 @@
 {
-  "Check": "Prüfen",
-  "Code {code}": "Code {code}",
-  "Continue watching": "Weiterschauen",
-  "Could not load the movies": "Filme konnten nicht geladen werden",
-  "Could not load the streams": "Streams konnten nicht geladen werden",
-  "Link with a code": "Mit Code verbinden",
-  "Linked": "Verbunden",
-  "Movies": "Filme",
-  "No movies to show yet.": "Noch keine Filme.",
-  "No streams found": "Keine Streams gefunden",
-  "Not linked": "Nicht verbunden",
-  "Not linked yet": "Noch nicht verbunden",
-  "Open in Stremio": "In Stremio öffnen",
-  "Opening the player…": "Player wird geöffnet…",
-  "Playing in mpv…": "Wiedergabe in mpv…",
-  "The player stopped": "Der Player wurde beendet",
-  "Popular": "Beliebt",
-  "Scan the code with the Stremio app, or open {link}": "Scanne den Code mit der Stremio-App oder öffne {link}",
-  "Streams": "Streams",
-  "Stremio account": "Stremio-Konto",
-  "This stream has no playable address": "Dieser Stream hat keine abspielbare Adresse",
-  "Unlink": "Trennen"
+  "Could not open Stremio: {error}": "Stremio konnte nicht geöffnet werden: {error}",
+  "Movies": "Filme"
 }

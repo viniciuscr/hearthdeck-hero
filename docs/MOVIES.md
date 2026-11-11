@@ -4,6 +4,15 @@ Status: specification for Phases 0–5. Nothing here is implemented yet.
 `docs/FORK.md` owns the fork's change-control rules; this document owns the
 Movies feature's definitions and the rules that apply while building it.
 
+> **Revision 2026-11-11 — the Movies space is the Collection.**
+> The separate `Page::Movies`/`app/src/pages/movies` interface was removed.
+> `crates/movies::collection` writes Stremio films into a synthetic
+> Heroic-format root, and `CollectionView` loads it under `Space::Movies`.
+> The same grid, Focus panel, shelves, filters, game page and console layout
+> render it; only the `Library` behind them changes. Console mode is the
+> primary target; the desktop menu carries the same switch. A film's Play
+> action opens `stremio:///detail/<type>/<id>`.
+
 ## Scope
 
 **In:** Linux/CachyOS, films, a Stremio account linked by code, discovery
@@ -24,7 +33,7 @@ string or a crash report. No write may delete or un-watch an account record.
 | Unit | Responsibility | May depend on | Must not |
 |---|---|---|---|
 | `crates/movies` | Stremio account, datastore, addon protocol, streaming-server client, mpv supervisor, local movie store | `heronite-data`, `heronite-images`, `heronite-platform`, `heronite-launch`, `ureq` | GPUI, `app`, or any upstream crate edited in place |
-| `app/src/pages/movies/` | Movies state, desktop/console rendering, `PageCtx`/`PageEvent` adapter, controller routing | `crates/movies` | HTTP, process spawning, file I/O on the UI thread |
+| `app/src/collection/` (`Space::Movies`) | The same Collection/console screens, loading the proxy `Library` | `crates/movies`, `heronite-data` | A second grid, Focus panel or shelves implementation |
 | `app/src/pages/mod.rs` | One `Page::Movies` arm per match | — | Movies logic beyond the arm |
 | `app/src/collection/nav.rs`, `collection/console/*`, `collection/palette/*` | Navigation and shell route entries | — | Feature logic |
 
@@ -303,8 +312,8 @@ Envelope, source `stremio-core`:
 - **P1:** `crates/movies` compiles on Linux and Windows; fixture tests pass; no UI.
 - **P2:** link + datastore + merge/write with mock-server tests; real-account
   test ignored.
-- **P3:** `Page::Movies` desktop page, loader, locales, account surface; gate green.
-- **P4:** console route, picker, handoff; controller ownership verified.
+- **P3:** `Space::Movies` in the Collection (desktop), proxy Library, locales; gate green.
+- **P4:** console Movies item, same shelves and game page, Stremio Play handoff.
 - **P5:** native mpv, streaming server, gamepad modes; hardware checklist green.
 
 ## Probe log

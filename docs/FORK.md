@@ -102,7 +102,8 @@ implementation rules live in `docs/MOVIES.md`.
 | F-003 | `packaging/*`, `scripts/appimage.sh`, `scripts/sign-release.sh`, binary and package names | fork packages, release asset names and signing key | pending |
 | F-004 | `.github/workflows/fork-ci.yml` | fork verification gate (new file, no upstream conflict) | active |
 | F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" | pending |
-| F-006 | `app/src/pages/mod.rs`, `app/src/collection/nav.rs`, `app/src/collection/palette/*` | `Page::Movies`, nav and palette arms (one arm each); the console route lands in Phase 4 | active |
+| F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection movies space, console space item and Stremio Play action | active |
+| F-007 | `crates/data/src/library.rs` | `stremio` source label | active |
 
 ### Conflict log
 

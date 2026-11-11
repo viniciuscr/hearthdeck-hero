@@ -6,6 +6,7 @@
 pub mod account;
 pub mod addon;
 pub mod auth;
+pub mod collection;
 pub mod datastore;
 pub mod deep_link;
 pub mod endpoints;

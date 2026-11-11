@@ -126,6 +126,13 @@ impl CollectionView {
         let playing = self.playing.contains_key(&game.app_name);
         let mut v = Vec::new();
 
+        // Films are not installed or configured here: the one action is Play,
+        // which hands the title to Stremio.
+        if game.runner == "stremio" {
+            v.push(item(A::Primary, "primary", tr!("Play"), Icon::PlayArrow, "play stremio film movie assistir").palette_only());
+            return v;
+        }
+
         let (label, ic, kw) = if playing {
             (tr!("Stop"), Icon::Stop, "quit close kill end exit parar fechar encerrar sair")
         } else if game.installed {

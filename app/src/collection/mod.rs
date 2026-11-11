@@ -121,11 +121,21 @@ enum ToastAction {
     ShowAgeRatings,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Space {
+    #[default]
+    Games,
+    Movies,
+}
+
 pub struct CollectionView {
     started: Instant,
     first_frame_logged: bool,
     data_paths: DataPaths,
     app_paths: AppPaths,
+    /// Where the Collection's data comes from: the game stores, or the
+    /// Stremio-backed movies proxy.
+    space: Space,
     lib: Option<Arc<Library>>,
     wiki: Arc<WikiCache>,
     /// Games whose HowLongToBeat times were looked up this session.
@@ -246,6 +256,37 @@ pub struct CollectionView {
 }
 
 impl CollectionView {
+    pub fn space_title(&self) -> &'static str {
+        match self.space {
+            Space::Games => heronite_i18n::tr!("Collection"),
+            Space::Movies => heronite_i18n::tr!("Movies"),
+        }
+    }
+
+    /// Switches the Collection between games and Stremio movies. The same
+    /// screens render either; only the `Library` behind them changes.
+    pub(super) fn set_space(&mut self, space: Space, cx: &mut Context<Self>) {
+        if self.space == space {
+            return;
+        }
+        self.space = space;
+        self.lib = None;
+        self.search.clear();
+        self.selected = None;
+        self.focus = None;
+        self.console.screen = console::Screen::Tabs;
+        self.images.clear_failed();
+        self.reload(cx);
+        cx.notify();
+    }
+
+    fn active_data_paths(&self) -> DataPaths {
+        match self.space {
+            Space::Games => self.data_paths.clone(),
+            Space::Movies => DataPaths::at(self.app_paths.cache.join(heronite_movies::collection::ROOT)),
+        }
+    }
+
     pub fn new(started: Instant, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let list_state = ListState::new(0, ListAlignment::Top, px(500.));
         let weak = cx.entity().downgrade();
@@ -345,6 +386,7 @@ impl CollectionView {
             first_frame_logged: false,
             data_paths,
             app_paths,
+            space: Space::Games,
             lib: None,
             wiki: Arc::new(WikiCache::default()),
             hltb_tried: Default::default(),

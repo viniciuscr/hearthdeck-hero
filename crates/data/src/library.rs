@@ -152,6 +152,7 @@ fn source_label(meta: Option<&LocalGameMeta>, runner: &str) -> &'static str {
             "playnite" => return "Playnite",
             "manual" => return tr!("Local"),
             "other" => return tr!("Other"),
+            "stremio" => return "Stremio",
             other => {
                 if let Some(client) = crate::clients::Client::from_id(other) {
                     return client.store();
