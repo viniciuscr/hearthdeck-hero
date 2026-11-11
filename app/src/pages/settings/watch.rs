@@ -18,6 +18,8 @@ use crate::theme;
 use crate::ui::controls::{action_button, caption, card, card_box, toggle_row, ButtonKind};
 use crate::ui::fields::meta_text;
 
+mod qr;
+
 pub struct State {
     linked: bool,
     busy: bool,
@@ -75,7 +77,7 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
     );
     if let Some(offer) = &d.watch.offer {
         let mut detail = div().flex().items_center().gap(px(16.)).p(px(12.)).rounded(px(10.)).bg(theme::ink_a(0.03));
-        if let Some(qr) = crate::ui::qr::qr_code(&offer.link, 4.0) {
+        if let Some(qr) = qr::qr_code(&offer.link, 4.0) {
             detail = detail.child(qr);
         }
         detail = detail.child(

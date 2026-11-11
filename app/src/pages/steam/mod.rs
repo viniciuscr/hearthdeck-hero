@@ -1,13 +1,10 @@
-//! The Steam page of the Stores (`services::steam_library`), laid out as
-//! the two import methods ([`super::methods`]):
+//! The Steam page of the Stores (`services::steam_library`): the library
+//! read from the Steam client running here (signed in already), with no
+//! login. The card says whether it can be read and opens or restarts Steam
+//! when that is what is missing.
 //!
-//! 1. Local, no login: the library read from the Steam client running here
-//!    (signed in already). The card says whether it can be read and opens
-//!    or restarts Steam when that is what is missing.
-//! 2. Online, optional ([`account`]): the Steam account signed in with a QR
-//!    code, read whenever the client cannot be.
-
-mod account;
+//! Heronite no longer signs in to Steam: its sign-in with a QR code, as the
+//! Steam mobile app, got accounts locked by Steam's security.
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -145,9 +142,6 @@ impl SteamPage {
             "open" => self.svc.update(cx, |s, cx| s.open(cx)),
             "restart" => self.svc.update(cx, |s, cx| s.restart(cx)),
             "read" => self.read_now(cx),
-            "sign-in" => self.svc.update(cx, |s, cx| s.begin_sign_in(cx)),
-            "cancel-sign-in" => self.svc.update(cx, |s, cx| s.cancel_sign_in(cx)),
-            "sign-out" => self.svc.update(cx, |s, cx| s.sign_out(cx)),
             _ => {}
         }
     }
@@ -179,13 +173,31 @@ impl SteamPage {
             return Some((e.clone(), true));
         }
         match s.last.as_ref()? {
-            Ok(r) if r.added > 0 => Some((trn!(r.added, "Added {n} game to the Collection.", "Added {n} games to the Collection."), false)),
-            Ok(_) => Some((tr!("The Collection already has every game of your library.").to_string(), false)),
+            Ok(r) => {
+                let mut said: Vec<String> = Vec::new();
+                if r.added > 0 {
+                    said.push(trn!(r.added, "Added {n} game to the Collection.", "Added {n} games to the Collection.").to_string());
+                }
+                if r.hidden_added > 0 {
+                    said.push(
+                        trn!(
+                            r.hidden_added,
+                            "Added {n} game you hid in Steam, hidden here too",
+                            "Added {n} games you hid in Steam, hidden here too"
+                        )
+                        .to_string(),
+                    );
+                }
+                if said.is_empty() {
+                    said.push(tr!("The Collection already has every game of your library.").to_string());
+                }
+                Some((said.join("  \u{b7}  "), false))
+            }
             Err(e) => Some((e.clone(), true)),
         }
     }
 
-    /// Method 1: the Steam client on this PC.
+    /// The Steam client on this PC.
     fn render_local(&mut self, cx: &mut Context<Self>) -> Div {
         let state = self.svc.read(cx).state();
         let stuck = self.svc.read(cx).client_stuck();
@@ -204,14 +216,14 @@ impl SteamPage {
         let notice =
             self.explanation(cx).map(|text| (text, if stuck || state == SteamState::Failed { Tone::Warning } else { Tone::Neutral }));
         methods::method_card(Method {
-            eyebrow: methods::local_eyebrow(),
+            eyebrow: tr!("Local"),
             icon: Icon::Computer,
             title: tr!("From Steam on this PC").into(),
             badge: methods::no_login(),
             status: Some(self.status(cx)).map(|(text, tone)| (text.into(), tone)),
             facts: vec![
                 methods::brings(tr!("Reads the Steam app already open and signed in here")),
-                methods::brings(tr!("Leaves out the games you hid in Steam and brings Family Sharing games")),
+                methods::brings(tr!("Brings the games you hid in Steam, hidden here too, and Family Sharing games")),
                 methods::needs(tr!("Needs Steam running on this PC")),
             ],
             notice,
@@ -232,7 +244,7 @@ impl SteamPage {
                 .desc(self.summary_line(cx))
                 .icon(Icon::Refresh)
                 .enabled(!syncing),
-            Row::header(format!("{} \u{b7} {}", methods::local_eyebrow(), tr!("No login needed"))),
+            Row::header(format!("{} \u{b7} {}", tr!("Local"), tr!("No login needed"))),
             Row::info("status", tr!("From Steam on this PC"), status).icon(Icon::Computer),
         ];
         if action != "read" {
@@ -244,7 +256,6 @@ impl SteamPage {
         if let Some((text, _)) = self.result_line(cx) {
             rows.push(Row::info("result", text, ""));
         }
-        rows.extend(self.account_console_rows(cx));
         rows
     }
 
@@ -299,12 +310,13 @@ impl Render for SteamPage {
             cx.listener(|this, _, _, cx| this.run_action("read", cx)),
         );
         let strip = methods::library_strip(self.summary_line(cx), self.result_line(cx), read);
-        let cards = methods::methods(wide, self.render_local(cx), self.render_account(cx));
+        let card = self.render_local(cx);
+        let cards = div().w_full().when(wide, |d| d.max_w(px(640.))).child(card);
         let note = methods::footnote(tr!(
             "Only games come in: no tools, soundtracks or demos. A game you already have from another store or added yourself is not added twice: it gets Steam's install instead. Steam keeps installing, updating and launching its games."
         ));
         let body = methods::page(strip, cards, [note.into_any_element()]);
-        let lead = tr!("Two ways to bring your Steam library in. Heronite always tries this PC first.");
+        let lead = tr!("Heronite reads your Steam library from the Steam app on this PC. It never asks you to sign in to Steam.");
         div().size_full().relative().child(stores::sheet("steam-page", Page::Steam, lead, cx, body)).into_any_element()
     }
 }

@@ -13,7 +13,8 @@ use serde_json::json;
 
 use crate::json_store;
 use crate::models::{
-    BackgroundSettings, BackupSettings, CollectionSettingsFile, LudusaviSettings, MetadataSettings, ScreenshotsSettings, StoreConfigFile,
+    BackgroundSettings, BackupSettings, CollectionSettingsFile, LudusaviSettings, MetadataSettings, ScreenshotsSettings, SourcePrefs,
+    StoreConfigFile,
 };
 use crate::num::{js_round, JsNum};
 use crate::paths::DataPaths;
@@ -41,23 +42,78 @@ pub const METADATA_FIELDS: [&str; 14] = [
     "hero",
 ];
 
-const SOURCE_IDS: [&str; 6] = ["igdb", "steam", "store", "playnite", "lutris", "manual"];
+/// The fields of the cover families beside the tall one (`cover`), see
+/// [`crate::cover_family`]. They are merged like [`METADATA_FIELDS`], but
+/// only for the families an installation keeps; the screens that list
+/// `METADATA_FIELDS` leave them out.
+pub const FAMILY_COVER_FIELDS: [&str; 2] = ["coverSquare", "coverWide"];
 
-/// `DEFAULT_FIELD_PRIORITY`.
+/// Every field the merge knows: [`METADATA_FIELDS`], then [`FAMILY_COVER_FIELDS`].
+pub const ALL_FIELDS: [&str; 16] = [
+    "description",
+    "releaseDate",
+    "developers",
+    "publishers",
+    "genres",
+    "themes",
+    "gameModes",
+    "platforms",
+    "series",
+    "features",
+    "criticScore",
+    "ageRatings",
+    "cover",
+    "hero",
+    "coverSquare",
+    "coverWide",
+];
+
+/// `MetadataSourceId`: the built-in ids of a `fieldPriority`. Every one but
+/// `manual` is a details source of `heronite_metadata::sources` (its tests
+/// check the two agree). A saved list keeps other ids too.
+pub const SOURCE_IDS: [&str; 7] = ["igdb", "steam", "store", "playnite", "lutris", "launchbox", "manual"];
+
+/// Sources added after `fieldPriority` lists were already saved in
+/// every settings file (the lists are written whole). A saved list that is
+/// the default without them still reads as the default, and a list the
+/// user set that lacks one gets it at the end where the default names it
+/// (see `heronite_metadata::sources::order`), so a new source fills those
+/// fields without a migration of the file. In the order they were added: a
+/// list saved between two of them lacks only the later ones.
+pub const ADDED_SOURCES: [&str; 2] = ["launchbox", "libretro"];
+
+/// Ids of extensions that the default lists of some saved files name, as
+/// the builds that wrote them had the source built in (VNDB): last of the
+/// sources of their time, followed only by [`ADDED_SOURCES`]. A saved list that is a default but for one of
+/// them, at that place, still reads as the default; the extension of that
+/// id, once installed, joins its end like any extension.
+pub const DEFAULT_LISTED_EXTENSIONS: [&str; 1] = ["vndb"];
+
+/// `DEFAULT_FIELD_PRIORITY`. Uses only [`SOURCE_IDS`], but for the square
+/// and wide covers, which SteamGridDB gives too, and for the covers
+/// libretro-thumbnails gives (a pictures source, like SteamGridDB: not in
+/// [`SOURCE_IDS`]). The LaunchBox Games Database and libretro-thumbnails
+/// come last: they fill what the others left empty (and move ahead for the
+/// emulated games they find surely, see `heronite_metadata::sources::order`).
 pub fn default_field_priority(field: &str) -> Vec<String> {
     let list: &[&str] = match field {
-        "description" | "releaseDate" => &["igdb", "steam", "store", "lutris", "playnite"],
-        "developers" | "genres" => &["igdb", "steam", "store", "playnite", "lutris"],
-        "publishers" => &["igdb", "steam", "store", "playnite"],
-        "themes" | "series" => &["igdb", "playnite"],
-        "gameModes" => &["igdb"],
-        "platforms" => &["igdb", "store", "playnite", "lutris"],
+        "description" | "releaseDate" => &["igdb", "steam", "store", "lutris", "playnite", "launchbox"],
+        "developers" | "genres" => &["igdb", "steam", "store", "playnite", "lutris", "launchbox"],
+        "publishers" => &["igdb", "steam", "store", "playnite", "launchbox"],
+        "themes" => &["igdb", "playnite"],
+        "series" => &["igdb", "playnite"],
+        "gameModes" => &["igdb", "launchbox"],
+        "platforms" => &["igdb", "store", "playnite", "lutris", "launchbox"],
         "features" => &["igdb", "steam", "playnite"],
-        "criticScore" => &["igdb", "steam"],
+        "criticScore" => &["igdb", "steam", "launchbox"],
         // Both are read: the first fills the boards it has, the next the rest.
         "ageRatings" => &["igdb", "steam"],
-        "cover" => &["igdb", "steam", "lutris", "playnite", "store"],
-        "hero" => &["igdb", "steam", "lutris", "playnite"],
+        "cover" => &["igdb", "steam", "lutris", "playnite", "store", "launchbox", "libretro"],
+        "hero" => &["igdb", "steam", "lutris", "playnite", "launchbox"],
+        // Official art first (Steam's header, the store's wide box art),
+        // then SteamGridDB's.
+        "coverSquare" => &["steamgriddb", "launchbox", "libretro"],
+        "coverWide" => &["steam", "store", "steamgriddb", "libretro"],
         _ => &[],
     };
     list.iter().map(|s| s.to_string()).collect()
@@ -307,9 +363,12 @@ fn as_screenshot_cache_limit(value: Option<f64>) -> f64 {
     }
 }
 
+/// A saved list of source ids. An id this build does not know (an
+/// extension's, or one a newer build added) is kept: it never answers here,
+/// and the list stays the same for the build that knows it.
 fn as_source_list(value: Option<&Vec<String>>, fallback: Vec<String>) -> Vec<String> {
     let Some(list) = value else { return fallback };
-    let next: Vec<String> = list.iter().filter(|s| SOURCE_IDS.contains(&s.as_str())).cloned().collect();
+    let next = clean_ids(list);
     if next.is_empty() {
         fallback
     } else {
@@ -317,10 +376,35 @@ fn as_source_list(value: Option<&Vec<String>>, fallback: Vec<String>) -> Vec<Str
     }
 }
 
+/// `ids` without blanks and repeats, in order.
+fn clean_ids(ids: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(ids.len());
+    for id in ids.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if !out.iter().any(|o| o == id) {
+            out.push(id.to_owned());
+        }
+    }
+    out
+}
+
+fn https_only(urls: Vec<String>) -> Vec<String> {
+    urls.into_iter().filter(|u| u.get(..8).is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))).collect()
+}
+
+fn normalize_source_prefs(value: Option<&IndexMap<String, SourcePrefs>>) -> IndexMap<String, SourcePrefs> {
+    value
+        .into_iter()
+        .flatten()
+        .filter(|(id, _)| !id.trim().is_empty())
+        .map(|(id, p)| (id.clone(), SourcePrefs { fields_off: clean_ids(&p.fields_off), ..p.clone() }))
+        .filter(|(_, p)| !p.is_empty())
+        .collect()
+}
+
 /// `normalizeMetadata`.
 pub fn normalize_metadata(value: Option<&MetadataSettings>) -> MetadataSettings {
     let mut field_priority: IndexMap<String, Vec<String>> = IndexMap::new();
-    for field in METADATA_FIELDS {
+    for field in ALL_FIELDS {
         let current = value.and_then(|v| v.field_priority.get(field));
         field_priority.insert(field.to_owned(), as_source_list(current, default_field_priority(field)));
     }
@@ -329,6 +413,7 @@ pub fn normalize_metadata(value: Option<&MetadataSettings>) -> MetadataSettings 
         igdb_client_secret: value.map(|v| v.igdb_client_secret.clone()).unwrap_or_default(),
         cover_aspect: CoverAspect::parse(value.map(|v| v.cover_aspect.as_str()).unwrap_or("")).as_str().to_owned(),
         download_images: value.is_some_and(|v| v.download_images),
+        allow_adult_covers: value.is_some_and(|v| v.allow_adult_covers),
         auto_fill_missing: value.map(|v| v.auto_fill_missing).unwrap_or(true),
         show_age_ratings: value.map(|v| v.show_age_ratings).unwrap_or(true),
         steam_tags: value.map(|v| v.steam_tags).unwrap_or(true),
@@ -340,8 +425,28 @@ pub fn normalize_metadata(value: Option<&MetadataSettings>) -> MetadataSettings 
             .unwrap_or(crate::age_rating::AUTO)
             .to_owned(),
         field_priority,
-        extra: Default::default(),
+        sources: normalize_source_prefs(value.map(|v| &v.sources)),
+        source_order: value.map(|v| clean_ids(&v.source_order)).unwrap_or_default(),
+        keep_cover_families: value.map(|v| clean_ids(&v.keep_cover_families)).unwrap_or_default(),
+        fill_cover_families: value.is_some_and(|v| v.fill_cover_families),
+        // Addresses only: a list the user adds is https; a path here (a
+        // hand-edited or synced file) would be read as a list on this computer.
+        extension_lists: value.map(|v| https_only(clean_ids(&v.extension_lists))).unwrap_or_default(),
+        // Keys a newer build added stay for it.
+        extra: value.map(|v| v.extra.clone()).unwrap_or_default(),
     }
+}
+
+/// Read-modify-write of `settings.metadata` through `edit`, normalized
+/// before and after; the rest of the file is untouched.
+pub fn update_metadata(paths: &DataPaths, edit: impl FnOnce(&mut MetadataSettings)) -> Result<EffectiveSettings> {
+    json_store::update::<CollectionSettingsFile, _>(&paths.collection_settings(), |file| {
+        let mut m = normalize_metadata(file.metadata.as_ref());
+        edit(&mut m);
+        file.metadata = Some(normalize_metadata(Some(&m)));
+        Ok(())
+    })?;
+    load(paths)
 }
 
 // Setters (read-modify-write of local_library/settings.json)
@@ -462,6 +567,22 @@ pub fn save_metadata(paths: &DataPaths, patch: &MetadataSettings) -> Result<Effe
     load(paths)
 }
 
+/// Keeps the cover `family` (`square` or `wide`) even while no view uses it,
+/// or stops keeping it. The tall one is always kept.
+pub fn set_cover_family_kept(paths: &DataPaths, family: crate::cover_family::CoverFamily, keep: bool) -> Result<EffectiveSettings> {
+    update_metadata(paths, |m| {
+        m.keep_cover_families.retain(|id| id != family.id());
+        if keep && family != crate::cover_family::CoverFamily::Tall {
+            m.keep_cover_families.push(family.id().to_owned());
+        }
+    })
+}
+
+/// Whether a family a view starts using is fetched for the games lacking it.
+pub fn set_fill_cover_families(paths: &DataPaths, on: bool) -> Result<EffectiveSettings> {
+    update_metadata(paths, |m| m.fill_cover_families = on)
+}
+
 /// Saves just the grey-uninstalled flag (the toggle in the settings dialog).
 pub fn save_grey_uninstalled(paths: &DataPaths, grey: bool) -> Result<EffectiveSettings> {
     save_ui(paths, Some(grey), None)
@@ -498,7 +619,10 @@ mod tests {
         assert_eq!(s.cover_aspect, CoverAspect::Steam);
         assert!(s.metadata.auto_fill_missing);
         assert!(!s.metadata.download_images);
-        assert_eq!(s.metadata.field_priority["cover"], ["igdb", "steam", "lutris", "playnite", "store"]);
+        assert_eq!(s.metadata.field_priority["cover"], ["igdb", "steam", "lutris", "playnite", "store", "launchbox", "libretro"]);
+        assert!(!s.metadata.allow_adult_covers);
+        assert_eq!(s.metadata.field_priority["coverSquare"], ["steamgriddb", "launchbox", "libretro"]);
+        assert!(s.metadata.keep_cover_families.is_empty() && !s.metadata.fill_cover_families);
         assert_eq!(s.backup.interval, "weekly");
         assert_eq!(s.ludusavi.format, "zip");
         assert_eq!(s.ludusavi.compression, "deflate");
@@ -507,6 +631,23 @@ mod tests {
         assert_eq!(s.theme, "midnightMirage");
         assert_eq!(s.language, "en");
         assert!(!s.all_tiles_in_color);
+    }
+
+    #[test]
+    fn only_https_addresses_are_kept_as_lists_of_extensions() {
+        let m = MetadataSettings {
+            extension_lists: [
+                "https://a.example.org/x.json",
+                "/home/me/index.json",
+                "file:///tmp/index.json",
+                "http://b.example.org",
+                " HTTPS://C.example.org/y.json ",
+            ]
+            .map(String::from)
+            .to_vec(),
+            ..Default::default()
+        };
+        assert_eq!(normalize_metadata(Some(&m)).extension_lists, ["https://a.example.org/x.json", "HTTPS://C.example.org/y.json"]);
     }
 
     #[test]
@@ -591,8 +732,34 @@ mod tests {
         let s = save_metadata(&paths, &md).unwrap();
         assert_eq!(s.metadata.igdb_client_id, "id");
         assert_eq!(s.cover_aspect, CoverAspect::Dvd);
-        assert_eq!(s.metadata.field_priority["cover"], ["steam"]);
-        assert_eq!(s.metadata.field_priority["hero"], ["igdb", "steam", "lutris", "playnite"]);
+        // An id this build does not know is kept (it never answers).
+        assert_eq!(s.metadata.field_priority["cover"], ["steam", "bogus"]);
+        assert_eq!(s.metadata.field_priority["hero"], ["igdb", "steam", "lutris", "playnite", "launchbox"]);
+    }
+
+    #[test]
+    fn cover_family_settings_are_additive() {
+        let (_d, paths) = temp();
+        std::fs::create_dir_all(paths.local_library()).unwrap();
+        std::fs::write(paths.collection_settings(), r#"{"metadata":{"coverAspect":"square","igdbClientId":"x"}}"#).unwrap();
+        let s = load(&paths).unwrap();
+        assert!(s.metadata.keep_cover_families.is_empty() && !s.metadata.fill_cover_families);
+        let s = set_cover_family_kept(&paths, crate::cover_family::CoverFamily::Wide, true).unwrap();
+        assert_eq!(s.metadata.keep_cover_families, ["wide"]);
+        set_cover_family_kept(&paths, crate::cover_family::CoverFamily::Tall, true).unwrap();
+        let s = set_fill_cover_families(&paths, true).unwrap();
+        assert!(s.metadata.fill_cover_families);
+        let v = json_store::read_value(&paths.collection_settings()).unwrap();
+        assert_eq!(v["metadata"]["keepCoverFamilies"], json!(["wide"]));
+        assert_eq!(v["metadata"]["fillCoverFamilies"], true);
+        assert_eq!(v["metadata"]["fieldPriority"]["coverWide"], json!(["steam", "store", "steamgriddb", "libretro"]));
+        let s = set_fill_cover_families(&paths, false).unwrap();
+        assert!(!s.metadata.fill_cover_families);
+        let v = json_store::read_value(&paths.collection_settings()).unwrap();
+        assert!(v["metadata"].get("fillCoverFamilies").is_none(), "off is the default: not written");
+        set_cover_family_kept(&paths, crate::cover_family::CoverFamily::Wide, false).unwrap();
+        let v = json_store::read_value(&paths.collection_settings()).unwrap();
+        assert!(v["metadata"].get("keepCoverFamilies").is_none());
     }
 
     #[test]

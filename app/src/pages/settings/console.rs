@@ -10,8 +10,8 @@ use gpui_kit::*;
 use heronite_i18n::{n_, tr};
 
 use super::{
-    about, advanced, appearance, backup, console_mode, launchers, library, logs, metadata, overlay, replay, saves, screenshots, storage,
-    watch, Section, SettingsPage,
+    about, advanced, appearance, backup, console_mode, launchers, library, logs, metadata, mods, overlay, replay, saves, screenshots,
+    storage, watch, Section, SettingsPage,
 };
 use crate::console::kit::{self, u};
 use crate::console::list::{Outcome, Row};
@@ -58,6 +58,7 @@ const GROUPS: [(&str, &[CSec]); 5] = [
             CSec::Rows(Section::Library),
             CSec::Rows(Section::Launchers),
             CSec::Rows(Section::Storage),
+            CSec::Rows(Section::Mods),
             CSec::Rows(Section::Overlay),
             CSec::Rows(Section::Replay),
         ],
@@ -155,6 +156,7 @@ impl SettingsPage {
             CSec::Rows(Section::Library) => library::console_rows(self),
             CSec::Rows(Section::Launchers) => launchers::console_rows(self, cx),
             CSec::Rows(Section::Storage) => storage::console_rows(self),
+            CSec::Rows(Section::Mods) => mods::console_rows(self, cx),
             CSec::Rows(Section::Overlay) => overlay::console_rows(self, cx),
             CSec::Rows(Section::Replay) => replay::console_rows(self, cx),
             CSec::Rows(Section::About) => about::console_rows(self, cx),
@@ -176,6 +178,7 @@ impl SettingsPage {
             CSec::Rows(Section::Library) => library::console_apply(self, outcome, cx),
             CSec::Rows(Section::Launchers) => launchers::console_apply(self, outcome, cx),
             CSec::Rows(Section::Storage) => storage::console_apply(self, outcome, cx),
+            CSec::Rows(Section::Mods) => mods::console_apply(self, outcome, window, cx),
             CSec::Rows(Section::Overlay) => overlay::console_apply(self, outcome, cx),
             CSec::Rows(Section::Replay) => replay::console_apply(self, outcome, cx),
             CSec::Rows(Section::About) => about::console_apply(self, outcome, cx),
@@ -247,6 +250,9 @@ impl SettingsPage {
                 div().flex().flex_col().size_full().child(panel).into_any_element()
             }
             None => {
+                if sec == CSec::Rows(Section::Metadata) {
+                    metadata::ensure_rows(self, window, cx);
+                }
                 let rows = self.console_rows(sec, cx);
                 let entry = (!layer_open).then_some(&[Pad::Right][..]);
                 self.console.list.render_entered("console-settings-rows", &rows, content_focus, entry).size_full().into_any_element()
@@ -343,6 +349,9 @@ impl PadTarget for SettingsPage {
                 if sec == CSec::Rows(Section::ConsoleMode) && console_mode::console_extra_pad(self, pad, cx) {
                     cx.notify();
                     return true;
+                }
+                if sec == CSec::Rows(Section::Metadata) {
+                    metadata::ensure_rows(self, window, cx);
                 }
                 let rows = self.console_rows(sec, cx);
                 match self.console.list.on_pad(pad, &rows) {

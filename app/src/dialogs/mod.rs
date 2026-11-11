@@ -15,6 +15,7 @@ pub mod add_game;
 pub mod art_images;
 pub mod batch_edit;
 pub mod client_settings;
+pub mod covers;
 pub mod detail_rows;
 pub mod emulator_confirm;
 pub mod emulator_detect;
@@ -23,6 +24,7 @@ pub mod epic_confirm;
 pub mod epic_import;
 pub mod epic_install;
 pub mod epic_modify;
+pub mod extensions;
 pub mod game_settings;
 pub mod hltb_match;
 pub mod launch_problem;
@@ -33,7 +35,11 @@ pub mod manage_categories;
 pub mod manage_fields;
 pub mod manage_statuses;
 pub mod metadata;
-pub mod metadata_wizard;
+pub mod metadata_review;
+pub mod metadata_update;
+pub mod mod_installer;
+pub mod mod_link_game;
+pub mod mods;
 pub mod onboarding;
 pub mod pick_rom;
 pub mod quit_confirm;
@@ -51,6 +57,9 @@ pub mod store_import;
 pub mod store_install;
 pub mod web_image;
 pub mod whats_new;
+
+/// The metadata hub, where the other modules reach it.
+pub use metadata_update::hub as metadata_wizard;
 
 use std::sync::Arc;
 
@@ -89,11 +98,41 @@ pub fn handle_escape(view: &AnyView, window: &mut Window, cx: &mut App) -> bool 
     if let Ok(d) = view.clone().downcast::<batch_edit::BatchEditDialog>() {
         return d.update(cx, |d, cx| d.on_escape(cx));
     }
+    if let Ok(d) = view.clone().downcast::<mods::ModsDialog>() {
+        return d.update(cx, |d, cx| d.on_escape(cx));
+    }
+    if let Ok(d) = view.clone().downcast::<mod_installer::ModInstallerDialog>() {
+        return d.update(cx, |d, cx| d.on_escape(cx));
+    }
+    if let Ok(d) = view.clone().downcast::<mod_link_game::ModLinkGameDialog>() {
+        return d.update(cx, |d, cx| d.on_escape(cx));
+    }
     if let Ok(d) = view.clone().downcast::<game_settings::GameSettingsDialog>() {
         return d.update(cx, |d, cx| d.on_escape(cx));
     }
     if let Ok(d) = view.clone().downcast::<client_settings::ClientSettingsDialog>() {
         return d.update(cx, |d, cx| d.on_escape(cx));
+    }
+    if let Ok(d) = view.clone().downcast::<metadata_update::MetadataUpdate>() {
+        return d.update(cx, |d, cx| d.on_escape(cx));
+    }
+    if let Ok(d) = view.clone().downcast::<metadata::MetadataDialog>() {
+        return d.update(cx, |d, cx| d.on_escape(cx));
+    }
+    if let Ok(d) = view.clone().downcast::<covers::CoversDialog>() {
+        return d.update(cx, |d, cx| d.on_escape(cx));
+    }
+    if let Ok(d) = view.clone().downcast::<extensions::ExtensionsDialog>() {
+        return d.update(cx, |d, cx| d.on_escape(cx));
+    }
+    false
+}
+
+/// A key other than Esc, offered to the open dialog before the Collection
+/// sees it. True when the dialog used it ("Review matches": ↑ ↓, Enter, S).
+pub fn handle_key(view: &AnyView, ev: &KeyDownEvent, window: &mut Window, cx: &mut App) -> bool {
+    if let Ok(d) = view.clone().downcast::<metadata_review::MetadataReview>() {
+        return d.update(cx, |d, cx| d.on_key(ev, window, cx));
     }
     false
 }

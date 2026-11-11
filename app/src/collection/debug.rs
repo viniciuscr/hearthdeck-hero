@@ -34,6 +34,8 @@ fn debug_flyout() -> Flyout {
         Flyout::Shortcuts
     } else if on("HERONITE_DEBUG_MENU_HELP") {
         Flyout::Help
+    } else if on("HERONITE_DEBUG_MENU_METADATA") {
+        Flyout::Metadata
     } else {
         Flyout::Status
     }
@@ -43,11 +45,12 @@ impl CollectionView {
     /// `HERONITE_DEBUG_MENU=<card key>` opens its context menu (with the
     /// status flyout; `HERONITE_DEBUG_MENU_CATEGORIES=1` for the categories
     /// one, `HERONITE_DEBUG_MENU_MANAGE=1` for Manage installation's,
-    /// `HERONITE_DEBUG_MENU_SAVES=1` for the saves'), `HERONITE_DEBUG_DROPDOWN=view|nav|downloads|update|display` opens a header menu
+    /// `HERONITE_DEBUG_MENU_SAVES=1` for the saves', `HERONITE_DEBUG_MENU_METADATA=1`
+    /// for a selection's Metadata one), `HERONITE_DEBUG_DROPDOWN=view|nav|downloads|update|display` opens a header menu
     /// (`facets`, `categories`, `stores` or `view:<text>`: the View menu with
     /// that search typed; `views`: its views in edit mode; `views-select`:
     /// their select open; `more-group` / `more-sort` / `more-filters`: the "More" list of
-    /// that row; `groups-select`: the smart groups list; `manage`: the footer's list; `quick-sort|quick-install|quick-group|quick-presets`: the
+    /// that row; `manage`: the footer's list; `quick-sort|quick-install|quick-group|quick-presets`: the
     /// corresponding quick toolbar menu, only if its trigger fits),
     /// `HERONITE_DEBUG_ORGANIZE=<group>,<sort>` groups and sorts
     /// the list (`year,releaseDate`), `HERONITE_DEBUG_DIALOG=<name>` opens a dialog on
@@ -55,9 +58,13 @@ impl CollectionView {
     ///
     /// `HERONITE_DEBUG_MULTI=<n>` selects the first n games shown (a
     /// selection: the dock, the tick circles); `HERONITE_DEBUG_DOCK=status|
-    /// categories` opens that dock popover. With a selection,
+    /// categories|metadata` opens that dock popover.
+    /// `HERONITE_DEBUG_METADATA_JOB` makes up a bulk metadata job (see
+    /// `dialogs/metadata_update/fake.rs`); `HERONITE_DEBUG_DROPDOWN=metadata`
+    /// opens the header pill's popover. With a selection,
     /// `HERONITE_DEBUG_MENU` on a selected game opens the batch menu and
-    /// `HERONITE_DEBUG_DIALOG=batchedit` the fields editor and
+    /// `HERONITE_DEBUG_DIALOG=batchedit` the fields editor, `batchremove` the
+    /// removal confirmation, and
     /// `HERONITE_DEBUG_BATCH` runs batch changes (see `open_pending_debug_dialog`).
     pub(super) fn apply_debug_env(&mut self, cx: &mut Context<Self>) {
         if let Some(n) = crate::env::parse::<usize>("HERONITE_DEBUG_MULTI") {
@@ -65,10 +72,18 @@ impl CollectionView {
             self.sel.pop = match crate::env::value("HERONITE_DEBUG_DOCK").as_deref() {
                 Some("status") => Some(super::selection::DockPop::Status),
                 Some("categories") => Some(super::selection::DockPop::Categories),
+                Some("metadata") => {
+                    self.ensure_meta_counts(cx);
+                    Some(super::selection::DockPop::Metadata)
+                }
                 _ => None,
             };
         }
+        self.debug_metadata_job(cx);
         if let Some(key) = crate::env::value("HERONITE_DEBUG_MENU") {
+            if debug_flyout() == Flyout::Metadata {
+                self.ensure_meta_counts(cx);
+            }
             self.context_menu = Some(context_menu::ContextMenuState {
                 batch: self.sel.contains(&key),
                 key: key.into(),
@@ -112,13 +127,12 @@ impl CollectionView {
                     self.view_menu.set_select_open(true);
                     Some(Menu::View)
                 }
-                "more-group" | "more-sort" | "more-filters" | "groups-select" | "manage" => {
+                "more-group" | "more-sort" | "more-filters" | "manage" => {
                     use super::view_menu::organize::More;
                     self.view_menu.set_more(match menu.as_str() {
                         "more-group" => More::Group,
                         "more-sort" => More::Sort,
                         "more-filters" => More::Filters,
-                        "groups-select" => More::Groups,
                         _ => More::Manage,
                     });
                     Some(Menu::View)
@@ -127,6 +141,7 @@ impl CollectionView {
                 "downloads" => Some(Menu::Downloads),
                 "update" => Some(Menu::Update),
                 "steam" => Some(Menu::Steam),
+                "metadata" => Some(Menu::Metadata),
                 "display" => Some(Menu::Display),
                 m if m.starts_with("quick-") => quick_menu(&m[6..]).map(Menu::Quick),
                 _ if query.is_some() => Some(Menu::View),
@@ -273,9 +288,11 @@ impl CollectionView {
                 let section = w.strip_prefix("settings:").and_then(crate::pages::settings::Section::parse);
                 self.open_settings_section(section.unwrap_or(crate::pages::settings::Section::Appearance), window, cx);
             }
+            w if w.starts_with("mod") && self.mods_debug_dialog(w, window, cx) => {}
             "statuses" => self.open_manage_statuses(window, cx),
             "hltb" => self.open_hltb_match(window, cx),
             "batchedit" => self.open_batch_edit(window, cx),
+            "batchremove" => self.open_batch_remove(cx),
             "categories" => self.open_manage_categories(window, cx),
             // smartgroup (a new one), smartgroup:<id> (that one), smartgroup-filters (from the filters on screen)
             "smartgroup" => self.open_group_editor(None, None, window, cx),
@@ -318,8 +335,21 @@ impl CollectionView {
                 };
                 self.open_game_settings_tab(tab, window, cx);
             }
-            "metadata" | "gamesettings" | "gamesettings:details" | "gamesettings:launch" | "webimage" | "wizard" => {
+            "metadata" | "gamesettings" | "gamesettings:details" | "gamesettings:launch" | "webimage" | "wizard" | "review" | "covers" => {
                 self.open_metadata_debug(which.as_str(), window, cx)
+            }
+            w if w.starts_with("wizard:") || w.starts_with("metadata:") || w.starts_with("review:") || w.starts_with("covers:") => {
+                self.open_metadata_debug(w, window, cx)
+            }
+            // "Get more sources" (`sources:<id>` picks that entry) and the
+            // installer of a package (`extension-file:<path>`).
+            w if w == "sources" || w.starts_with("sources:") => {
+                let pick = w.strip_prefix("sources:").map(str::to_owned);
+                self.open_sources(crate::dialogs::extensions::SourcesRequest::Gallery { pick }, window, cx);
+            }
+            w if w.starts_with("extension-file:") => {
+                let path = std::path::PathBuf::from(&w["extension-file:".len()..]);
+                self.open_sources(crate::dialogs::extensions::SourcesRequest::File(path), window, cx);
             }
             w if w.starts_with("launch-problem:") => self.debug_launch_problem(&w["launch-problem:".len()..], false, cx),
             w if w.starts_with("launch-problem-toast:") => self.debug_launch_problem(&w["launch-problem-toast:".len()..], true, cx),

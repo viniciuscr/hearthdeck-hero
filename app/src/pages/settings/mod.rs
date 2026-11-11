@@ -10,7 +10,7 @@
 //! - Storage: what the games take on disk and cleaning it up (`storage/`).
 //! - Advanced extras: folders, cache, copy settings (`advanced.rs`).
 //! - Appearance, Metadata, Screenshots, Backups: Collection settings, backed
-//!   by `local_library/settings.json` (`appearance.rs`, `metadata.rs`,
+//!   by `local_library/settings.json` (`appearance.rs`, `metadata/`,
 //!   `screenshots.rs`, `saves.rs` + `backup/`). Any write ends in
 //!   [`SettingsPage::saved`].
 //! - Integrations: Sunshine, for Moonlight (`integrations.rs`,
@@ -29,7 +29,7 @@
 //!
 //! Debug: `HERONITE_DEBUG_SETTINGS_SEARCH=<text>` types it in the search (`<text>!`: and presses Enter),
 //! `HERONITE_DEBUG_SETTINGS_KEYS=down,down,enter` then presses those keys in it (`lang:pt-BR` switches the language);
-//! `HERONITE_DEBUG_PAGE=settings[:general|appearance|console-mode|advanced|defaults[:wine|other|advanced|gamescope]|downloads|library|launchers|integrations|storage|overlay|replay|metadata|screenshots|backups|cloud|logs|about]`.
+//! `HERONITE_DEBUG_PAGE=settings[:general|appearance|console-mode|advanced|defaults[:wine|other|advanced|gamescope]|downloads|library|launchers|integrations|storage|mods|overlay|replay|metadata|screenshots|backups|cloud|logs|about]`.
 
 mod about;
 mod achievements;
@@ -44,6 +44,7 @@ mod launchers;
 mod library;
 pub mod logs;
 mod metadata;
+mod mods;
 mod nav_keys;
 mod overlay;
 mod palette;
@@ -61,6 +62,8 @@ mod watch;
 pub use advanced::open_folder;
 pub use backup::format_time;
 pub use launchers::launcher_icon;
+/// How a metadata source reads on screen (its mark, name, the fields it fills).
+pub(crate) use metadata::labels as metadata_labels;
 pub use section::Section;
 
 use std::collections::HashMap;
@@ -148,6 +151,7 @@ pub struct SettingsPage {
     integrations: integrations::State,
     overlay: overlay::State,
     replay: replay::State,
+    mods: mods::State,
     storage: storage::State,
     advanced: advanced::State,
     about: about::State,
@@ -206,7 +210,6 @@ impl SettingsPage {
         let appearance = appearance::State::new(&ctx, &settings, chain, window, cx);
         let screenshots = screenshots::State::new(&ctx, &settings, window, cx);
         let achievements = achievements::State::new(window, cx);
-        let metadata = metadata::State::new(&ctx, &settings, window, cx);
         let backup = backup::State::new(&ctx, &settings, window, cx);
         let saves = saves::State::new(&ctx, &settings, window, cx);
         let cloud = cloud::State::new(&ctx, window, cx);
@@ -238,7 +241,7 @@ impl SettingsPage {
             appearance,
             screenshots,
             achievements,
-            metadata,
+            metadata: Default::default(),
             backup,
             saves,
             saves_restore: Default::default(),
@@ -248,6 +251,7 @@ impl SettingsPage {
             integrations: integrations::State::new(window, cx),
             overlay: overlay::State::new(&ctx, cx),
             replay: replay::State::new(&ctx, cx),
+            mods: mods::State::new(window, cx),
             storage,
             advanced: advanced::State::default(),
             about: about::State::default(),
@@ -357,6 +361,7 @@ impl SettingsPage {
             if let Ok(fresh) = cx.background_spawn(async move { store::load(&data_paths) }).await {
                 this.update(cx, |this, cx| {
                     this.settings = fresh;
+                    this.metadata.settings_changed();
                     cx.notify();
                 })
                 .ok();
@@ -380,6 +385,9 @@ impl SettingsPage {
     pub fn set_library(&mut self, offer: LibraryOffer, cx: &mut Context<Self>) {
         let changed = self.storage.set_library(offer.lib, offer.chains, offer.stages);
         console_mode::library_changed(self);
+        if changed {
+            metadata::library_changed(self, cx);
+        }
         if changed && self.section == Section::Storage {
             storage::State::shown(self, cx);
         }
@@ -391,6 +399,7 @@ impl SettingsPage {
         match result {
             Ok(s) => {
                 self.settings = s;
+                self.metadata.settings_changed();
                 self.error = None;
                 cx.emit(PageEvent::LibraryChanged);
             }
@@ -442,9 +451,11 @@ impl SettingsPage {
             Section::Replay => replay::shown(self, cx),
             Section::Saves => saves::State::shown(self, window, cx),
             Section::Storage => storage::State::shown(self, cx),
+            Section::Mods => mods::shown(cx),
             Section::Backups => backup::shown(self, cx),
             Section::Cloud => cloud::shown(self, window, cx),
             Section::ConsoleMode => console_mode::shown(self, window, cx),
+            Section::Metadata => metadata::shown(self, window, cx),
             _ => {}
         }
     }
@@ -661,6 +672,9 @@ impl SettingsPage {
         if section == Section::Replay {
             replay::reveal(self, setting.label);
         }
+        if section == Section::Metadata {
+            metadata::reveal(self, setting.label);
+        }
         crate::ui::find::set_target(tr(setting.label).to_string());
         self.find_frames = FIND_FRAMES;
         self.find_task = Some(cx.spawn(async move |this, cx| {
@@ -741,6 +755,7 @@ impl SettingsPage {
             Section::GameDefaults => self.defaults_view(window, cx),
             Section::Library => self.library_section(cx).into_any_element(),
             Section::Storage => storage::render(self, window, cx),
+            Section::Mods => mods::render(self, window, cx),
             Section::Overlay => overlay::render(self, window, cx),
             Section::Launchers => launchers::render(self, cx),
             Section::Integrations => integrations::render(self, window, cx),

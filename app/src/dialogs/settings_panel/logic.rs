@@ -233,20 +233,43 @@ pub fn wrappers() -> bool {
     heronite_platform::supported(heronite_platform::Feature::Wrappers)
 }
 
+/// Whether the GPU tab picks Windows' per-program GPU preference instead of
+/// Linux's variables (`heronite_launch::gpu::preference`): Windows, where
+/// Heronite starts the game's program itself.
+pub fn windows_gpu() -> bool {
+    cfg!(windows)
+}
+
 /// A game whose Performance tab is ReShade alone: Steam starts it as it is,
 /// or Linux's tools (wrappers, overlays, gamescope) are not there (Windows).
 pub fn reshade_only(run_kind: RunKind) -> bool {
     run_kind == RunKind::SteamDirect || (run_kind == RunKind::Native && !wrappers())
 }
 
+/// Whether a game gets the Cloud saves tab: an Epic or GOG game with cloud
+/// saves whose Windows build runs through Wine, or as it is on Windows (the
+/// stores resolve the save folders of this PC then).
+pub fn saves_tab(run_kind: RunKind, runner: &str, cloud_saves: bool) -> bool {
+    cloud_saves && matches!(runner, "legendary" | "gog") && (run_kind == RunKind::Wine || (run_kind == RunKind::Native && cfg!(windows)))
+}
+
 /// The panel's sections of a game, in tab order.
 pub fn sections_for(run_kind: RunKind, runner: &str, cloud_saves_tab: bool) -> Vec<Section> {
     let mut out = vec![Section::Launch];
+    let saves = saves_tab(run_kind, runner, cloud_saves_tab);
     match run_kind {
         RunKind::None => return Vec::new(),
         // Their Performance tab only has ReShade (`reshade_only`).
         RunKind::SteamDirect | RunKind::Native if reshade_only(run_kind) => {
             out.extend(run_kind.reshade().map(|_| Section::Performance));
+            // Steam starts its games itself: Heronite cannot set the
+            // preference for the program it runs.
+            if run_kind == RunKind::Native && windows_gpu() {
+                out.push(Section::Gpu);
+            }
+            if saves {
+                out.push(Section::Saves);
+            }
             return out;
         }
         RunKind::SteamDirect => return out,
@@ -257,7 +280,7 @@ pub fn sections_for(run_kind: RunKind, runner: &str, cloud_saves_tab: bool) -> V
     if run_kind != RunKind::Steam {
         out.push(Section::Sandbox);
     }
-    if run_kind == RunKind::Wine && matches!(runner, "legendary" | "gog") && cloud_saves_tab {
+    if saves {
         out.push(Section::Saves);
     }
     out
@@ -487,7 +510,8 @@ mod tests {
         // ReShade where it applies.
         let native: &[Section] = match (wrappers(), cfg!(windows)) {
             (true, _) => &[Launch, Performance, Gpu, Sandbox],
-            (false, true) => &[Launch, Performance],
+            // Windows' own GPU preference.
+            (false, true) => &[Launch, Performance, Gpu],
             (false, false) => &[Launch],
         };
         assert_eq!(sections_for(RunKind::Native, "sideload", false), native);
@@ -498,6 +522,23 @@ mod tests {
         assert_eq!(sections_for(RunKind::Steam, "sideload", true), [Launch, Compatibility, Performance, Gpu]);
         let direct: &[Section] = if cfg!(windows) { &[Launch, Performance] } else { &[Launch] };
         assert_eq!(sections_for(RunKind::SteamDirect, "sideload", true), direct);
+    }
+
+    /// Windows builds that run as they are on Windows sync their cloud saves
+    /// too; Linux builds do not (the stores only list Windows folders).
+    #[test]
+    fn native_windows_games_get_cloud_saves() {
+        for runner in ["legendary", "gog"] {
+            assert_eq!(sections_for(RunKind::Native, runner, true).contains(&Section::Saves), cfg!(windows), "{runner}");
+            assert!(!sections_for(RunKind::Native, runner, false).contains(&Section::Saves), "{runner}");
+        }
+        assert!(!sections_for(RunKind::Native, "sideload", true).contains(&Section::Saves));
+        assert!(!sections_for(RunKind::SteamDirect, "legendary", true).contains(&Section::Saves));
+        if cfg!(windows) && !wrappers() {
+            use Section::*;
+            // The GPU tab (Windows' own GPU preference) before Cloud saves, as on Linux.
+            assert_eq!(sections_for(RunKind::Native, "legendary", true), [Launch, Performance, Gpu, Saves]);
+        }
     }
 
     #[test]

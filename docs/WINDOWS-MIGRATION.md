@@ -24,6 +24,7 @@ What works on Windows, what is left, and what Windows does not need.
 - Steam's per-game launch options (Settings → Launch of a Steam game, `Feature::SteamGameSettings`): through the running client, or in `userdata\<account>\config\localconfig.vdf` while Steam is closed, as on Linux; the account is the registry's `ActiveProcess\ActiveUser`, else the latest login. No compatibility tool: Steam starts Windows games as they are
 - Native launch extras: before/after scripts (`.bat`, `.cmd`, `.ps1`, programs), delayed companions and presets (variables and arguments); for Steam games they run around `steam://rungameid` (`heronite_launch::steam_extras`); real-process tests cover environment, working folders, normal exit, stop and cancellation before a companion starts
 - Restoring a backup made on Linux
+- Game settings → GPU: the card a game's program asks Windows for ("Power saving" or "High performance", the `HKCU\Software\Microsoft\DirectX\UserGpuPreferences` value of Settings → Display → Graphics), written right before the game starts and put back after it only while it still holds Heronite's value (`heronite_launch::gpu::preference`). DXGI names the card behind each choice. Steam games, store clients, Playnite, Xbox games and emulators keep Windows' own choice; tests use a fake registry
 - Steam tests: library and session fixtures run on Windows without reading the host's registry, Steam folders or process list; achievement fixtures are isolated too
 - Tray menus follow the app's light/dark theme (including System and Custom) on Windows 10 1903+ and Windows 11. High contrast keeps Windows' native colours. Older Windows versions, or missing uxtheme exports, fall back to the native menu with a warning
 
@@ -31,6 +32,7 @@ What works on Windows, what is left, and what Windows does not need.
 ## ⬜ To do
 
 - Replay buffer (separate from the overlay; hidden on Windows)
+- Mods (`docs/MODS.md`, hidden on Windows): open mod archives without 7-Zip or bsdtar on the PATH, retry putting the game's folder back while a file is locked, and make the cross-drive copy of a backed-up file safe to interrupt
 - RetroAchievements sign-in for the remaining emulators (DuckStation, PCSX2, PPSSPP, Dolphin and Flycast): their Windows config locations and, where needed, token encryption still need support
 - Ludusavi registry entries: in a backup made on Windows, Ludusavi restores them itself, but they are missing from the restore preview and from the undo copy
 - Screenshots of games in legacy exclusive fullscreen: Desktop Duplication loses the display while such a game holds it. HDR capture also still needs a check on a real HDR monitor

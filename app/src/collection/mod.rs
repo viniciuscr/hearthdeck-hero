@@ -7,6 +7,7 @@ mod age_rows;
 mod backdrop;
 mod card;
 pub(crate) mod category_badges;
+mod category_kinds;
 mod clients;
 mod console;
 mod context_menu;
@@ -18,6 +19,7 @@ mod downloads_pill;
 mod emulation;
 mod epic;
 mod extras;
+mod family_art;
 mod focus;
 mod focus_left;
 mod folder_size;
@@ -27,6 +29,7 @@ mod grid;
 mod grid_drawer;
 mod header;
 mod hltb_ui;
+mod home;
 mod html;
 mod install_options;
 mod journal;
@@ -42,7 +45,11 @@ mod list_row;
 mod list_view;
 mod load;
 mod look;
+mod metadata_menu;
+mod metadata_pill;
+mod metadata_review;
 mod metadata_ui;
+mod mods;
 mod nav;
 mod onboarding;
 mod open_links;
@@ -112,6 +119,8 @@ enum ToastAction {
     RestoreNote(String, Box<heronite_data::journal::Entry>),
     /// Puts back the "where I left off" line just cleared (game key, the line).
     RestoreLeftOff(String, Box<heronite_data::journal::LeftOff>),
+    /// Opens the Mods manager of this game (key).
+    OpenMods(String),
     /// Opens Settings → Other launchers, where games in the Collection twice
     /// are merged.
     ReviewDuplicates,
@@ -119,6 +128,8 @@ enum ToastAction {
     LaunchProblem(std::sync::Arc<crate::diagnosis::Report>),
     /// Shows the age ratings just hidden again.
     ShowAgeRatings,
+    /// Undoes the last bulk metadata update.
+    UndoMetadata,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -181,6 +192,12 @@ pub struct CollectionView {
     categories: heronite_data::categories::Categories,
     /// Smart groups (`local_library/groups.json`), loaded with the library.
     smart_groups: heronite_data::smart_groups::SmartGroups,
+    /// Today, while [`refresh_groups`](Self::refresh_groups) runs: the
+    /// groups' day counts read it once per pass, not once per game.
+    group_today: std::cell::Cell<Option<chrono::NaiveDate>>,
+    /// Games per smart group (by id) for the View menu, until the list is
+    /// built again.
+    group_members: std::cell::RefCell<std::collections::HashMap<String, std::rc::Rc<std::collections::HashSet<String>>>>,
     /// Dates added, sizes and systems the extra sorts and groups read (`organize.rs`).
     game_extras: Arc<heronite_data::organize::GameExtras>,
     /// The actions users added to their games, by game key, loaded with the library.
@@ -228,11 +245,15 @@ pub struct CollectionView {
     /// The focused game's journal (`journal/`).
     journal: journal::JournalUi,
     focus_scroll: ScrollHandle,
+    /// The Mods manager, FOMOD wizard and game picker (`mods.rs`).
+    mods: mods::ModsUi,
     shots: screenshots::Shots,
     toast_task: Option<Task<()>>,
     images: ImageStore,
     cover_chains: HashMap<SharedString, Vec<ImageRef>>,
     stage_chains: HashMap<SharedString, Vec<ImageRef>>,
+    /// The games' own square and wide covers (`family_art.rs`).
+    family_chains: family_art::FamilyChains,
     /// Last stage texture shown, kept while the next one loads.
     shown_stage: Option<(SharedString, Arc<RenderImage>)>,
     /// Last glass backdrop (blurred art behind menus and dialogs), kept while
@@ -248,6 +269,8 @@ pub struct CollectionView {
     grid: grid::GridUi,
     /// Settings → Appearance applied to the Collection (`look.rs`).
     look: look::LookState,
+    /// The picture behind the Collection with no game selected (`home.rs`).
+    home: home::HomeState,
     /// The panel whose edge is being dragged (`resize.rs`) and where the
     /// pointer grabbed it (pointer x − edge x).
     resizing: Option<(resize::Panel, f32)>,
@@ -260,12 +283,20 @@ pub struct CollectionView {
     selected: Option<SharedString>,
     /// Several games picked at once (`selection.rs`, the dock in `dock.rs`).
     sel: selection::Selection,
+    /// The counts of the selection's Metadata menu (`metadata_menu.rs`).
+    meta_menu: metadata_menu::MetaMenu,
+    /// The metadata pill's popover was opened while it announced games the
+    /// idle fill sent to review: it stops announcing them once closed.
+    metadata_idle_opened: bool,
     hovered: Option<SharedString>,
     leaving: Option<SharedString>,
     focus: Option<FocusVm>,
     scrim: stage::Scrim,
     blur_px: f32,
     saturation: f32,
+    /// How much the stage's highlights are rolled off (0-1): follows the
+    /// Darkening, settled (the slider changes it when let go).
+    rolloff: f32,
     stage_enabled: bool,
     /// The view menu's sections and sliders (`view_options.rs`).
     view_look: view_options::LookMenu,
@@ -468,6 +499,8 @@ impl CollectionView {
             ui_save: None,
             categories: Default::default(),
             smart_groups: Default::default(),
+            group_today: Default::default(),
+            group_members: Default::default(),
             game_extras: Default::default(),
             user_actions: Default::default(),
             update_apps: Default::default(),
@@ -501,10 +534,12 @@ impl CollectionView {
             facts: Default::default(),
             journal: Default::default(),
             focus_scroll: ScrollHandle::new(),
+            mods: Default::default(),
             shots: Default::default(),
             images,
             cover_chains: HashMap::new(),
             stage_chains: HashMap::new(),
+            family_chains: Default::default(),
             shown_stage: None,
             shown_glass: None,
             groups: Vec::new(),
@@ -513,18 +548,22 @@ impl CollectionView {
             card_w: theme::CARD_W,
             grid: grid::GridUi { drawer_closed, ..Default::default() },
             look: Default::default(),
+            home: Default::default(),
             resizing: None,
             list_state,
             row_heights: Default::default(),
             stuck_group: None,
             selected: None,
             sel: Default::default(),
+            meta_menu: Default::default(),
+            metadata_idle_opened: false,
             hovered: None,
             leaving: None,
             focus: None,
             scrim: stage::Scrim { dim: 0.14, scrim: 1. },
             blur_px: 6.,
             saturation: 0.94,
+            rolloff: heronite_images::backdrop_rolloff(0.14),
             stage_enabled: true,
             view_look: Default::default(),
             grey_uninstalled: false,
@@ -549,6 +588,7 @@ impl CollectionView {
         this.watch_clients(cx);
         this.watch_library_sync(cx);
         this.init_metadata(window, cx);
+        this.init_mods(window, cx);
         this.spawn_disk_watch(cx);
         this.spawn_debug_browse(cx);
         this
@@ -557,7 +597,13 @@ impl CollectionView {
 
 impl CollectionView {
     fn render_toast(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let action = self.toast_action.clone().filter(|a| !matches!(a, ToastAction::Undo) || self.sel.can_undo());
+        let metadata_undo = cx.has_global::<crate::dialogs::metadata_update::hub::HubGlobal>()
+            && crate::dialogs::metadata_update::hub::hub(cx).read(cx).can_undo();
+        let action = self.toast_action.clone().filter(|a| match a {
+            ToastAction::Undo => self.sel.can_undo(),
+            ToastAction::UndoMetadata => metadata_undo,
+            _ => true,
+        });
         self.toast.clone().map(|(text, error)| {
             div().absolute().bottom(px(84.)).left_0().right_0().flex().justify_center().child(
                 div()
@@ -596,11 +642,13 @@ impl CollectionView {
                                 ToastAction::Undo
                                 | ToastAction::RestoreNote(..)
                                 | ToastAction::RestoreLeftOff(..)
-                                | ToastAction::ShowAgeRatings => {
+                                | ToastAction::ShowAgeRatings
+                                | ToastAction::UndoMetadata => {
                                     heronite_i18n::tr!("Undo")
                                 }
                                 ToastAction::ViewLog(_) => heronite_i18n::tr!("View log"),
                                 ToastAction::ScriptInstall => heronite_i18n::tr!("Details"),
+                                ToastAction::OpenMods(_) => heronite_i18n::tr!("Open"),
                                 ToastAction::ReviewDuplicates => heronite_i18n::tr!("Review"),
                                 ToastAction::LaunchProblem(r) if r.opens_by_itself() => {
                                     heronite_i18n::tr!("How to fix")
@@ -610,6 +658,10 @@ impl CollectionView {
                             .when(matches!(action, ToastAction::Undo), |d| d.child(crate::ui::controls::kbd("Ctrl Z")))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 match &action {
+                                    ToastAction::OpenMods(key) => {
+                                        this.toast = None;
+                                        this.open_mods(key, window, cx);
+                                    }
                                     ToastAction::Undo => {
                                         this.undo_batch(cx);
                                     }
@@ -638,6 +690,10 @@ impl CollectionView {
                                         this.journal_restore_left_off(key.clone(), (**left).clone(), cx);
                                     }
                                     ToastAction::ShowAgeRatings => this.set_age_ratings_shown(true, cx),
+                                    ToastAction::UndoMetadata => {
+                                        this.toast = None;
+                                        crate::dialogs::metadata_update::hub::hub(cx).update(cx, |h, cx| h.undo(cx));
+                                    }
                                 }
                                 cx.notify();
                             }))
@@ -659,6 +715,14 @@ impl CollectionView {
     }
 
     fn on_key_down(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if ev.keystroke.key != "escape" {
+            if let Some(dialog) = self.dialog.clone() {
+                if crate::dialogs::handle_key(&dialog, ev, window, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+        }
         if self.shortcuts_key(ev, window, cx) {
             return;
         }
@@ -763,9 +827,7 @@ impl CollectionView {
         }
         let stage_el = match self.stage_image(window) {
             Some((key, src)) => stage::stage(Some(src), key, self.scrim, crate::theme::appearance().collection_opacity / 100.),
-            None if self.stage_enabled && theme::appearance().background == heronite_data::appearance::BackgroundSource::Solid => {
-                stage::solid(self.scrim)
-            }
+            None if self.stage_enabled && self.stage_is_solid() => stage::solid(self.scrim),
             None => stage::stage(None, SharedString::default(), self.scrim, 1.),
         };
         let vh = f32::from(area.height);

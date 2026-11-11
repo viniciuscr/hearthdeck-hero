@@ -150,6 +150,11 @@ impl CollectionView {
                 e.disable(tr!("Sign in to Epic Games first"));
             }
         }
+        let waiting = cx.has_global::<crate::dialogs::metadata_wizard::HubGlobal>()
+            && !crate::dialogs::metadata_wizard::hub(cx).read(cx).queue.is_empty();
+        if let Some(e) = v.iter_mut().find(|e| e.act == Act::ReviewMatches).filter(|_| !waiting) {
+            e.disable(tr!("No game waits for review"));
+        }
         // The game selected in the Collection: its actions, by name (those
         // of the copy its card acts on, as its context menu).
         let selected = self.selected.clone().filter(|_| self.page == Page::Collection);
@@ -159,7 +164,8 @@ impl CollectionView {
         }
         v.extend(self.page_commands(cx).iter().map(|(page, c)| sources::page_entry(*page, c)));
         let Some(lib) = self.lib.clone() else { return v };
-        v.extend(sources::view_entries(&self.ui, &collect_facet_options(&lib.games), &self.categories));
+        let smart: Vec<(String, String)> = self.smart_groups.groups.iter().map(|g| (g.id.clone(), g.name.clone())).collect();
+        v.extend(sources::view_entries(&self.ui, &collect_facet_options(&lib.games), &self.categories, &smart));
         let mut games: Vec<_> = lib.games.iter().collect();
         games.sort_by(|a, b| a.title_lower.cmp(&b.title_lower).then(a.key.cmp(&b.key)));
         v.reserve(games.len());
@@ -310,6 +316,11 @@ impl CollectionView {
             Act::Shortcuts => self.open_shortcuts(cx),
             Act::ManageStatuses => self.open_manage_statuses(window, cx),
             Act::ManageFields => self.open_manage_fields(None, window, cx),
+            Act::UpdateMetadata => {
+                self.open_metadata_update(true, window, cx);
+            }
+            Act::ReviewMatches => self.open_review(Default::default(), window, cx),
+            Act::GetMoreSources => self.open_sources(crate::dialogs::extensions::SourcesRequest::Gallery { pick: None }, window, cx),
             // The quit question needs the window: ask once this update ended.
             Act::Quit => cx.defer(crate::system::request_quit),
             Act::View(cmd) => self.run_view_cmd(cmd, window, cx),
@@ -346,6 +357,7 @@ impl CollectionView {
             ViewCmd::ClearFilters => {
                 self.ui.clear_facets();
                 self.ui.categories.clear();
+                self.ui.smart_groups.clear();
                 self.ui.statuses.clear();
                 self.save_ui();
                 self.refresh_groups();
@@ -354,7 +366,9 @@ impl CollectionView {
             ViewCmd::SortDirection => self.toggle_sort_direction(cx),
             ViewCmd::Only(only, on) => self.set_only(only, on, cx),
             ViewCmd::Category(name) => self.toggle_category_filter(&name, cx),
+            ViewCmd::SmartCategory(id) => self.toggle_smart_group_filter(&id, cx),
             ViewCmd::ManageCategories => self.open_manage_categories(window, cx),
+            ViewCmd::NewSmartCategory => self.open_group_editor(None, None, window, cx),
         }
         self.reveal_selected();
         cx.notify();

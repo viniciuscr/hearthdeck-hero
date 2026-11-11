@@ -58,7 +58,9 @@ pub(crate) struct Filters {
     pub status: usize,
     /// Index in [`category_options`].
     pub category: usize,
-    /// 0 = any, else the smart group `group - 1` (`CollectionView::smart_groups`).
+    /// 0 = any, else the smart category `group - 1` (`CollectionView::smart_groups`).
+    /// At most one of `category` and `group` is set: the Category chip and
+    /// row go through the manual choices, then the smart ones.
     pub group: usize,
     /// Watch: 0 all, 1 films, 2 series.
     pub kind: usize,
@@ -66,6 +68,27 @@ pub(crate) struct Filters {
     pub genre: usize,
     /// Watch: 0 = any, else a provider (the sorted list of the library).
     pub provider: usize,
+}
+
+impl Filters {
+    /// Where the Category choice is among the `category_n` manual choices
+    /// ("any" included) followed by the smart categories.
+    pub(crate) fn category_pick(&self, category_n: usize) -> usize {
+        if self.group > 0 {
+            category_n + self.group - 1
+        } else {
+            self.category
+        }
+    }
+
+    /// Sets the Category choice to `pick` (see [`category_pick`](Self::category_pick)).
+    pub(crate) fn set_category_pick(&mut self, pick: usize, category_n: usize) {
+        if pick < category_n {
+            (self.category, self.group) = (pick, 0);
+        } else {
+            (self.category, self.group) = (0, pick - category_n + 1);
+        }
+    }
 }
 
 pub(crate) const SHOW: [&str; 3] = [n_!("All games"), n_!("Installed"), n_!("Not installed")];
@@ -221,18 +244,15 @@ impl Nav {
             ];
         }
         let status = status_options(lib);
-        let category = match category_options(cats).get(f.category).cloned().flatten() {
-            None => tr!("Any category").to_string(),
-            Some(name) => category_label(&name),
+        let category = match (group, category_options(cats).get(f.category).cloned().flatten()) {
+            (Some(name), _) => name.to_string(),
+            (None, None) => tr!("Any category").to_string(),
+            (None, Some(name)) => category_label(&name),
         };
         let show = match (f.show, f.favourites) {
             (0, true) => tr!("Favourites").to_string(),
             (s, true) => format!("{} \u{b7} {}", heronite_i18n::tr(SHOW[s]), tr!("Favourites")),
             (s, false) => heronite_i18n::tr(SHOW[s]).to_string(),
-        };
-        let show = match group {
-            Some(name) => format!("{name} \u{b7} {show}"),
-            None => show,
         };
         [
             (tr!("Show").into(), show.into()),
@@ -577,6 +597,7 @@ impl CollectionView {
         let keys = self.grid_keys(tab, spec);
         let status_n = lib.statuses.len() + 1;
         let category_n = category_options(&self.categories).len();
+        let pick_n = category_n + self.smart_groups.groups.len();
         let wrap = look::theme().nav.wrap;
         let by_letter = self.grid_letters(tab);
         let nav = &mut self.tab_nav(tab).grid;
@@ -595,7 +616,7 @@ impl CollectionView {
                         }
                         1 => f.sort = (f.sort + 1) % SORT.len(),
                         2 => f.status = (f.status + 1) % status_n,
-                        3 => f.category = (f.category + 1) % category_n,
+                        3 => f.set_category_pick((f.category_pick(category_n) + 1) % pick_n, category_n),
                         _ => {
                             self.console_search(window, cx);
                             return true;
@@ -608,7 +629,7 @@ impl CollectionView {
                         0 => (f.show, f.favourites) = (0, false),
                         1 => f.sort = 0,
                         2 => f.status = 0,
-                        3 => f.category = 0,
+                        3 => (f.category, f.group) = (0, 0),
                         _ => self.console.search.clear(),
                     }
                 }
@@ -720,5 +741,20 @@ mod tests {
         assert_eq!(jump_letter(&l, 1, false), 0);
         assert_eq!(jump_letter(&l, 0, false), 0);
         assert_eq!(jump_letter(&[], 0, true), 0);
+    }
+
+    /// The Category choice goes through "any", the manual categories and
+    /// "Uncategorized" (4 here), then the smart ones; only one kind is set.
+    #[test]
+    fn the_category_choice_runs_through_manual_then_smart() {
+        let mut f = Filters { category: 2, ..Default::default() };
+        assert_eq!(f.category_pick(4), 2);
+        f.set_category_pick(4, 4);
+        assert_eq!((f.category, f.group), (0, 1), "the first smart category");
+        assert_eq!(f.category_pick(4), 4);
+        f.set_category_pick(5, 4);
+        assert_eq!((f.category, f.group), (0, 2));
+        f.set_category_pick(3, 4);
+        assert_eq!((f.category, f.group), (3, 0), "back to a manual one");
     }
 }

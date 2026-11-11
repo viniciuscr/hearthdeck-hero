@@ -96,6 +96,11 @@ fn main() {
             log::info!("stop request: Heronite is not running, nothing to close");
             return;
         }
+        // `heronite://screenshot` with no instance running: no game to capture.
+        SingleInstance::Primary { .. } if cli.screenshot && cli.launch.is_none() => {
+            log::info!("screenshot request: Heronite is not running, nothing to capture");
+            return;
+        }
         // `--handoff` (Sunshine's entries) with no instance running: the
         // instance starts on its own and this process exits at once, so
         // Sunshine sees a detached launch and its stream does not own
@@ -198,8 +203,10 @@ fn single_instance(cli: &system::cli::Cli) -> SingleInstance {
     let socket = socket_path(&heronite_data::DataPaths::detect().root);
     let msg = Message {
         launch: cli.launch.clone(),
+        mod_link: cli.mod_link.clone(),
         open_client: cli.open_client,
         stop: cli.stop.clone(),
+        screenshot: cli.screenshot,
         no_gui: cli.no_gui,
         console: cli.console,
         fullscreen: cli.fullscreen,

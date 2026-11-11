@@ -25,9 +25,11 @@ heronite-i18n = { path = "../crates/i18n" }
 heronite-images = { path = "../crates/images" }
 heronite-launch = { path = "../crates/launch" }
 heronite-metadata = { path = "../crates/metadata" }
+heronite-metadata-ext = { path = "../crates/metadata-ext" }
 serde_json.workspace = true
 heronite-media = { path = "../crates/media" }
 heronite-watch = { path = "../crates/watch" }
+heronite-mods = { path = "../crates/mods" }
 heronite-platform = { path = "../crates/platform" }
 fork-brand = { path = "../crates/fork-brand" }
 heronite-overlay = { path = "../crates/overlay" }
@@ -40,7 +42,9 @@ heronite-gog = { path = "../crates/gog" }
 heronite-amazon = { path = "../crates/amazon" }
 heronite-update = { path = "../crates/update" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "ico"] }
+qrcodegen = "1"
 smallvec = "1"
+indexmap = "2"
 libc = "0.2"
 signal-hook = "0.3"
 futures = "0.3"
@@ -48,8 +52,6 @@ trash = "5"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 heronite-shortcuts = { path = "../crates/shortcuts" }
 heronite-steam = { path = "../crates/steam" }
-# The QR code of the Steam sign-in.
-qrcodegen = "1.8"
 heronite-xbox = { path = "../crates/xbox" }
 heronite-storage = { path = "../crates/storage" }
 heronite-sunshine = { path = "../crates/sunshine" }

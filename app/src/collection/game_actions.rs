@@ -45,12 +45,16 @@ pub(super) enum GameAction {
     Favourite,
     OpenFolder,
     Settings,
+    /// The Mods manager (installed PC games).
+    Mods,
     /// The game settings on the ReShade section.
     Reshade,
     EditGame,
     /// An emulated game played as a PC game from now on (a native port).
     PlayAsPc,
     Metadata,
+    /// The game's picture of each cover family and its background.
+    Covers,
     Hide,
     RemoveRecent,
     Log,
@@ -241,6 +245,20 @@ impl CollectionView {
                 ));
             }
         }
+        // Emulated games have no mods; console mode builds no manager.
+        if crate::services::mods::available()
+            && game.installed
+            && game.launch_kind.as_deref() != Some("emulator")
+            && !crate::console::active()
+        {
+            v.push(item(
+                A::Mods,
+                "mods",
+                tr!("Mods"),
+                Icon::Extension,
+                "mod mods nexus thunderstore plugin plugins fomod load order modificacoes complementos",
+            ));
+        }
         // Sideloaded programs and browser games; not Steam/emulated entries,
         // nor the ones another launcher or a store client starts.
         if game.runner == "sideload"
@@ -272,14 +290,20 @@ impl CollectionView {
                 "native port pc version executable linux windows nativo versao pc executavel",
             ));
         }
-        // Game settings has its own button; the palette keeps it.
+        v.push(item(
+            A::Metadata,
+            "metadata",
+            tr!("Metadata"),
+            Icon::TravelExplore,
+            "igdb cover art genre description source match metadados capa arte genero descricao fonte",
+        ));
         v.push(
             item(
-                A::Metadata,
-                "metadata",
-                tr!("Collection metadata"),
-                Icon::TravelExplore,
-                "igdb cover art genre description metadados capa arte genero descricao",
+                A::Covers,
+                "covers",
+                tr!("Covers\u{2026}"),
+                Icon::Collections,
+                "cover art square wide banner picture capa arte imagem quadrada",
             )
             .palette_only(),
         );
@@ -370,12 +394,14 @@ impl CollectionView {
                 let view = cx.new(|cx| crate::dialogs::game_settings::GameSettingsDialog::new(ctx, g, tab, window, cx));
                 self.open_dialog(view, cx);
             }
+            A::Mods => self.open_mods(key, window, cx),
             A::Reshade => self.open_reshade(key, window, cx),
             A::EditGame => {
                 self.open_edit_game(key, window, cx);
             }
             A::PlayAsPc => self.open_play_as_pc(key, window, cx),
             A::Metadata => self.open_metadata_for(key, window, cx),
+            A::Covers => self.open_covers_for(key, window, cx),
             A::Log => self.open_game_log(key, cx),
             A::Troubleshoot => self.troubleshoot_launch(key, None, cx),
             A::Details => self.open_details(key, cx),
