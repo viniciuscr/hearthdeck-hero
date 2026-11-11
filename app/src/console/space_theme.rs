@@ -23,16 +23,30 @@ pub fn project(mut theme: ConsoleTheme, space: Space) -> ConsoleTheme {
                 theme.menu.items.push(MenuItemSpec::new("customize"));
             }
 
-            let home_layout = theme.tabs.first().map_or(Layout::Shelves, |tab| tab.layout);
-            theme.tabs.retain(|tab| {
-                matches!(tab.source.as_str(), "all" | "favourites")
-                    || tab.source.starts_with("genre:")
-                    || tab.source.starts_with("store:")
-                    || tab.source.starts_with("type:")
-            });
-            if !theme.tabs.iter().any(|tab| tab.source == "all") {
-                theme.tabs.insert(0, TabSpec::new(tr!("Watch"), home_layout, "all"));
+            let current = std::mem::take(&mut theme.tabs);
+            let home = current
+                .iter()
+                .find(|tab| tab.source == "all" && tab.layout == Layout::Shelves)
+                .or_else(|| current.iter().find(|tab| tab.source == "all"))
+                .cloned()
+                .unwrap_or_else(|| TabSpec::new(tr!("Watch"), Layout::Shelves, "all"));
+            let mut tabs = vec![home];
+            for (source, name) in [("type:movie", tr!("Movies")), ("type:series", tr!("Series"))] {
+                if !tabs.iter().any(|tab| tab.source == source) {
+                    tabs.push(TabSpec::new(name, Layout::Grid, source));
+                }
             }
+            for tab in &current {
+                if matches!(tab.source.as_str(), "all" | "type:movie" | "type:series") {
+                    continue;
+                }
+                if (matches!(tab.source.as_str(), "favourites") || tab.source.starts_with("genre:") || tab.source.starts_with("store:"))
+                    && !tabs.iter().any(|existing| existing.source == tab.source)
+                {
+                    tabs.push(tab.clone());
+                }
+            }
+            theme.tabs = tabs;
             for tab in &mut theme.tabs {
                 if tab.source == "all" {
                     tab.name = tr!("Watch").to_string();
@@ -40,11 +54,6 @@ pub fn project(mut theme: ConsoleTheme, space: Space) -> ConsoleTheme {
                     tab.name = tr!("Movies").to_string();
                 } else if tab.source == "type:series" {
                     tab.name = tr!("Series").to_string();
-                }
-            }
-            for (source, name) in [("type:movie", tr!("Movies")), ("type:series", tr!("Series"))] {
-                if !theme.tabs.iter().any(|tab| tab.source == source) {
-                    theme.tabs.push(TabSpec::new(name, Layout::Grid, source));
                 }
             }
 
@@ -67,8 +76,32 @@ pub fn project(mut theme: ConsoleTheme, space: Space) -> ConsoleTheme {
                     theme.shelves.push(ShelfSpec { kind: kind.into(), on: true, title: title.to_string() });
                 }
             }
-            theme.interface.label = tr!("Watch").to_uppercase();
             theme
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use heronite_data::console_theme::presets;
+
+    #[test]
+    fn a_preset_gets_one_tab_per_watch_source() {
+        let theme = project(presets::cinema(), Space::Watch);
+        assert_eq!(theme.tabs.iter().filter(|tab| tab.source == "all").count(), 1);
+        assert_eq!(theme.tabs.iter().filter(|tab| tab.source == "type:movie").count(), 1);
+        assert_eq!(theme.tabs.iter().filter(|tab| tab.source == "type:series").count(), 1);
+        assert!(theme.shelves.iter().all(|shelf| !matches!(shelf.kind.as_str(), "installed" | "statuses" | "backlog-short" | "forgotten")));
+    }
+
+    #[test]
+    fn watch_projection_keeps_the_theme_look() {
+        let mut theme = presets::cinema();
+        theme.colors.background = "#112233".into();
+        theme.interface.label = "My channel".into();
+        let projected = project(theme, Space::Watch);
+        assert_eq!(projected.colors.background, "#112233");
+        assert_eq!(projected.interface.label, "My channel");
     }
 }
