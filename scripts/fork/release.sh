@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tags fork/main for a tag-driven release. The tag starts
-# .github/workflows/fork-release.yml, which builds the signed Arch repository
+# .github/workflows/fork-release.yml, which builds the unsigned Arch repository
 # on GitHub Pages and the GitHub release.
 #   usage: scripts/fork/release.sh 1.5.0-hearthdeck.1
 set -euo pipefail

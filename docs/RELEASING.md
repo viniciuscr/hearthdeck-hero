@@ -16,7 +16,7 @@ The tag starts `.github/workflows/fork-release.yml`:
 
 1. verify the tag commit is on `origin/fork/main` and run the full gate;
 2. build with Ubuntu 22.04 (the glibc floor), package with nfpm 2.47.0;
-3. `repo-add --sign` the Arch package in an `archlinux:base` container;
+3. `repo-add` the Arch package **without signatures** in an `archlinux:base` container;
 4. publish `arch/x86_64/` to the `gh-pages` branch;
 5. create the GitHub release.
 
