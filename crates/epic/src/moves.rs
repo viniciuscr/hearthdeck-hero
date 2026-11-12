@@ -859,6 +859,6 @@ mod tests {
     fn app_paths_of_a_fixture_never_point_at_the_real_config() {
         let data_paths = DataPaths::at("/tmp/heronite-fixture-x");
         let app = AppPaths::for_data(&data_paths);
-        assert_eq!(app.epic_move_journal(), PathBuf::from("/tmp/heronite-fixture-x.heronite/config/epic-move.json"));
+        assert_eq!(app.epic_move_journal(), PathBuf::from("/tmp/heronite-fixture-x.hearthdeck/config/epic-move.json"));
     }
 }
