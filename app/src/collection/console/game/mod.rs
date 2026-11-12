@@ -79,8 +79,10 @@ impl CollectionView {
         }
         let mut rows = vec![primary];
         // Watch titles have no install, status, saves, settings, playtime or
-        // manage rows: they open in the provider from the single Play action.
+        // manage rows: Play resolves the film's streams and the streams
+        // themselves are the page's rows (`watch_playback.rs`).
         if !self.space.capabilities().install {
+            rows.extend(self.watch_console_rows(g));
             return rows;
         }
         // The actions the user added; one that plays waits for the game to end.
@@ -455,6 +457,11 @@ impl CollectionView {
         }
         let rows = self.game_rows(&g, cx);
         match self.console.game.list.on_pad(pad, &rows) {
+            Outcome::Activate(id) if id.starts_with("stream:") => {
+                if let Ok(index) = id["stream:".len()..].parse::<usize>() {
+                    self.watch_play_stream(&g, index, cx);
+                }
+            }
             Outcome::Activate(id) if id.starts_with("epic:") => self.epic_console_activate(&id, key, cx),
             Outcome::Changed(id, _) if id.as_ref() == "epic:eos" => self.epic_console_activate(&id, key, cx),
             Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("sys:") => {

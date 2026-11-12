@@ -33,6 +33,7 @@ use heronite_data::console_theme::{AButton, BackgroundSource, Clock, Hints, Kept
 use heronite_images::Variant;
 
 use super::CollectionView;
+use super::Space;
 use crate::console::input::{self, PadMsg};
 use crate::console::kit::{self, u};
 use crate::console::osk::{Osk, OskEvent};
@@ -168,7 +169,7 @@ impl CollectionView {
             self.enter_console(false, window, cx);
         }
         if let Some(key) = debug.as_deref().and_then(|d| d.strip_prefix("game:")) {
-            self.open_game_page(key.to_string().into());
+            self.open_game_page(key.to_string().into(), cx);
         }
         if debug.as_deref() == Some("menu") {
             self.open_sidebar();
@@ -677,9 +678,14 @@ impl CollectionView {
         self.console.sidebar = Some(self.sidebar_current());
     }
 
-    pub(super) fn open_game_page(&mut self, key: SharedString) {
+    pub(super) fn open_game_page(&mut self, key: SharedString, cx: &mut Context<Self>) {
         self.console.game = game::GameNav::default();
-        self.console.screen = Screen::Game(key);
+        self.console.screen = Screen::Game(key.clone());
+        if self.space == Space::Watch {
+            if let Some(game) = self.lib.as_ref().and_then(|library| library.get(&key)).cloned() {
+                self.watch_ensure_streams(&game, cx);
+            }
+        }
     }
 
     fn close_game_page(&mut self) {
@@ -691,7 +697,7 @@ impl CollectionView {
     pub(super) fn console_activate(&mut self, key: SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) {
         let details = (pad == Pad::A) == (look::theme().nav.a_button == AButton::Details);
         if details {
-            self.open_game_page(key);
+            self.open_game_page(key, cx);
         } else {
             self.primary_action(&key, cx);
         }

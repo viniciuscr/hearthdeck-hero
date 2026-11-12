@@ -86,13 +86,12 @@ mod unix {
     }
 
     impl MpvSession {
-        pub fn start(mpv: &Path, url: &str, start_ms: Option<u64>, gamepad: bool) -> Result<Self> {
-            let url = url::Url::parse(url).context("stream URL")?;
+        pub fn start(mpv: &Path, request: &PlayRequest, gamepad: bool) -> Result<Self> {
             let dir = std::env::temp_dir().join(format!("hearthdeck-mpv-{}", std::process::id()));
             fs::create_dir_all(&dir)?;
             fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
             let socket = dir.join("mpv.sock");
-            let mut args = mpv_arguments(&PlayRequest { url, start_ms, title: None }, &socket)?;
+            let mut args = mpv_arguments(request, &socket)?;
             if gamepad {
                 let at = args.len().saturating_sub(2);
                 args.insert(at, "--input-gamepad=yes".to_owned());
@@ -102,14 +101,29 @@ mod unix {
             heronite_data::proc::guard(&mut cmd);
             let child = heronite_data::proc::spawn(&mut cmd).with_context(|| format!("starting {}", mpv.display()))?;
             let ipc = MpvIpc::connect_retry(&socket).ok();
-            Ok(Self { child, ipc, dir, position_ms: start_ms.unwrap_or(0), duration_ms: 0 })
+            Ok(Self { child, ipc, dir, position_ms: request.start_ms.unwrap_or(0), duration_ms: 0 })
         }
 
         /// Waits for mpv to exit, keeping the last position and duration.
         pub fn wait(&mut self) -> Result<PlaybackOutcome> {
+            self.wait_until(&std::sync::atomic::AtomicBool::new(false))
+        }
+
+        /// [`wait`](Self::wait), quitting mpv once `stop` is set.
+        pub fn wait_until(&mut self, stop: &std::sync::atomic::AtomicBool) -> Result<PlaybackOutcome> {
+            use std::sync::atomic::Ordering;
+            let mut stop_sent = None;
             loop {
+                if stop.load(Ordering::Relaxed) && stop_sent.is_none() {
+                    self.stop();
+                    stop_sent = Some(Instant::now());
+                }
                 if self.child.try_wait()?.is_some() {
                     break;
+                }
+                // A player that ignored the IPC quit still ends within a wait.
+                if stop_sent.is_some_and(|since| since.elapsed() > Duration::from_secs(5)) {
+                    let _ = self.child.kill();
                 }
                 if let Some(ipc) = &mut self.ipc {
                     if let Some(position) = ipc.property("time-pos") {

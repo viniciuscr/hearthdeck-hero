@@ -118,6 +118,8 @@ pub(super) struct FocusProps {
     pub related_ui: RelatedUi,
     pub details_ui: DetailsUi,
     pub space: Space,
+    /// The film's streams (`watch_playback.rs`); `None` for games.
+    pub watch: Option<AnyElement>,
 }
 
 /// Panels built outside the focus panel (see `extras.rs`).
@@ -288,6 +290,7 @@ pub(super) fn focus_panel(props: FocusProps, actions: FocusActions) -> AnyElemen
         related_ui,
         details_ui,
         space,
+        watch,
     } = props;
     let on_scroll: Rc<dyn Fn(&mut Window, &mut App)> = Rc::from(actions.on_scroll);
     let scrollbar = crate::ui::scrollbar_draggable(
@@ -330,6 +333,7 @@ pub(super) fn focus_panel(props: FocusProps, actions: FocusActions) -> AnyElemen
         details: details_section(details, details_ui.titles, &actions.on_title),
         hltb: hltb_section(&vm, details_ui.titles, &actions.on_hltb, &actions.on_title),
         space,
+        watch,
     };
     let body = body(&lay, sections);
     // Wide: the title sits above a fixed left column and the scrolling
@@ -419,13 +423,27 @@ pub(super) struct StackedProps {
     pub related_ui: RelatedUi,
     pub details_ui: DetailsUi,
     pub space: Space,
+    /// The film's streams (`watch_playback.rs`); `None` for games.
+    pub watch: Option<AnyElement>,
 }
 
 /// The details of the focus panel in one column (the grid's drawer): no
 /// title and no left column, which the caller lays out itself.
 pub(super) fn stacked_details(props: StackedProps, actions: FocusActions) -> Div {
-    let StackedProps { vm, cover_for, html_images, width, active_facets, screenshots, timeline, extras, related_ui, details_ui, space } =
-        props;
+    let StackedProps {
+        vm,
+        cover_for,
+        html_images,
+        width,
+        active_facets,
+        screenshots,
+        timeline,
+        extras,
+        related_ui,
+        details_ui,
+        space,
+        watch,
+    } = props;
     let lay = Layout { narrow: true, left_w: 0., stacked: true, main_w: width, side_w: width, offset: 0. };
     let rows = shown_rows(&vm.details, &details_ui.hidden);
     let details = details_panel(
@@ -450,6 +468,7 @@ pub(super) fn stacked_details(props: StackedProps, actions: FocusActions) -> Div
             details: details_section(details, details_ui.titles, &actions.on_title),
             hltb: hltb_section(&vm, details_ui.titles, &actions.on_hltb, &actions.on_title),
             space,
+            watch,
         },
     )
 }
@@ -484,6 +503,8 @@ struct Sections {
     details: Div,
     hltb: Option<Div>,
     space: Space,
+    /// The film's streams, placed with the main column (`watch_playback.rs`).
+    watch: Option<AnyElement>,
 }
 
 /// `column_w`: width the description images are sized for.
@@ -506,7 +527,7 @@ fn overview(vm: &FocusVm, html_images: &CoverFor, column_w: f32) -> Div {
 /// does not push them out of sight). How Long To Beat travels with
 /// "Details" but stays when it is hidden.
 fn body(lay: &Layout, s: Sections) -> Div {
-    let Sections { screenshots, overview, timeline, related, achievements, details, hltb, space } = s;
+    let Sections { screenshots, overview, timeline, related, achievements, details, hltb, space, watch } = s;
     // Films have no screenshots, HLTB, timeline or achievements in v1.
     let (screenshots, timeline, related, achievements, hltb) =
         if space == Space::Watch { (None, None, None, None, None) } else { (screenshots, timeline, related, achievements, hltb) };
@@ -530,16 +551,23 @@ fn body(lay: &Layout, s: Sections) -> Div {
     let is_side = |s: &Section| matches!(s, Section::Details | Section::Achievements);
     if lay.stacked {
         let mut col = div().flex().flex_col().gap(px(24.)).min_w_0();
+        let mut watch = watch;
         for section in look.order() {
             col = if is_side(&section) {
                 col.children(side_part(section))
             } else if look.shown(section) {
-                col.children(take(section))
+                let col = col.children(take(section));
+                // The streams follow the overview, not the whole column.
+                if section == Section::Overview {
+                    col.children(watch.take())
+                } else {
+                    col
+                }
             } else {
                 col
             };
         }
-        return col;
+        return col.children(watch);
     }
     let main = look
         .visible()
@@ -550,7 +578,8 @@ fn body(lay: &Layout, s: Sections) -> Div {
         .into_iter()
         .filter(is_side)
         .fold(div().flex().flex_col().gap(px(24.)).min_w_0(), |col, section| col.children(side_part(section)));
-    div().flex().items_start().gap(px(COL_GAP)).child(main.flex_1()).child(side.w(px(lay.side_w)).flex_none())
+    // Films have no other main sections, so the streams follow the overview.
+    div().flex().items_start().gap(px(COL_GAP)).child(main.children(watch).flex_1()).child(side.w(px(lay.side_w)).flex_none())
 }
 
 #[cfg(test)]

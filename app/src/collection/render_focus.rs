@@ -27,6 +27,7 @@ impl CollectionView {
                 .into_any_element();
         };
         let vm = self.with_folder_rows(vm);
+        let watch = self.watch_detail_section(vm.key.as_str(), cx);
         let covers = self.focus_covers(&vm, scale);
         let html_images = self.focus_html_images(&vm, focus::main_column_width(vw - list_w), scale);
         let lay = focus::layout(vw - list_w);
@@ -52,6 +53,7 @@ impl CollectionView {
                 related_ui: self.facts.related.clone(),
                 details_ui: self.details_ui(cx),
                 space: self.space,
+                watch,
             },
             self.focus_actions(cx),
         )

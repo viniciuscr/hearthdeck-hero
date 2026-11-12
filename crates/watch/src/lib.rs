@@ -11,6 +11,7 @@ pub mod datastore;
 pub mod deep_link;
 pub mod endpoints;
 pub mod http;
+pub mod playback;
 pub mod player;
 pub mod progress;
 pub mod store;

@@ -73,6 +73,13 @@ pub struct StreamChoice {
     pub seeders: Option<u32>,
 }
 
+impl StreamChoice {
+    /// Whether there is something to hand to the player.
+    pub fn is_playable(&self) -> bool {
+        self.url.is_some() || self.info_hash.is_some()
+    }
+}
+
 /// Local, non-secret progress. Stremio remains the cross-device source.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MovieProgress {

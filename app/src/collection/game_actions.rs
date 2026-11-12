@@ -130,10 +130,15 @@ impl CollectionView {
         let playing = self.playing.contains_key(&game.app_name);
         let mut v = Vec::new();
 
-        // Watch titles are not installed or configured here: the one action is
-        // Play, which hands the title to Stremio.
+        // Watch titles are not installed or configured here: the actions are
+        // Play (or Stop), which resolves the film's streams and starts mpv.
         if !self.space.capabilities().install {
-            v.push(item(A::Primary, "primary", tr!("Play"), Icon::PlayArrow, "play stremio film movie assistir").palette_only());
+            let (label, ic, kw) = if playing {
+                (tr!("Stop"), Icon::Stop, "quit stop parar filme movie")
+            } else {
+                (tr!("Play"), Icon::PlayArrow, "play stream torrent mpv film movie assistir")
+            };
+            v.push(item(A::Primary, "primary", label, ic, kw).palette_only());
             return v;
         }
 

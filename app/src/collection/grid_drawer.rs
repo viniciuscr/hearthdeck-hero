@@ -37,6 +37,7 @@ impl CollectionView {
 
     fn render_grid_drawer(&mut self, width: f32, vh: f32, scale: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
         let vm = self.with_folder_rows(self.focus.clone()?);
+        let watch = self.watch_detail_section(vm.key.as_str(), cx);
         let inner_w = width - 2. * PAD;
         // Shorter art on short windows, so the controls stay in sight.
         let hero_h = (vh * 0.22).clamp(150., 220.);
@@ -70,6 +71,7 @@ impl CollectionView {
                 related_ui: self.facts.related.clone(),
                 details_ui: self.details_ui(cx),
                 space: self.space,
+                watch,
             },
             self.focus_actions(cx),
         );

@@ -86,6 +86,7 @@ pub use load::{discard_preload, preload_library};
 pub use screenshots::screenshots_global;
 pub mod stage;
 mod vm;
+mod watch_playback;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -313,6 +314,8 @@ pub struct CollectionView {
     palette: palette::Host,
     /// Console mode state (`console/`).
     console: console::ConsoleUi,
+    /// The focused film's streams and its mpv session (`watch_playback.rs`).
+    watch: watch_playback::WatchPlayback,
     /// Language the precomputed view models and the search placeholder were
     /// built in.
     lang: heronite_i18n::Lang,
@@ -334,6 +337,7 @@ impl CollectionView {
         }
         // Each space keeps its own filters, sort and grid state.
         self.save_ui();
+        self.watch_reset();
         self.space = space;
         crate::console::themes::set_space(space);
         self.ui = self.load_ui_for(space);
@@ -574,6 +578,7 @@ impl CollectionView {
             pages: nav::Pages::default(),
             palette: palette::Host::new(window, cx),
             console: Default::default(),
+            watch: Default::default(),
             lang: heronite_i18n::current(),
         };
         this.apply_start_view();

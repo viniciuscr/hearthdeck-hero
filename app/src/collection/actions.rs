@@ -269,7 +269,7 @@ impl CollectionView {
     pub(super) fn primary_action_on(&mut self, game: &heronite_data::collection::Game, cx: &mut Context<Self>) {
         let key = game.key.as_str();
         if !self.space.capabilities().install {
-            self.open_stremio(game, cx);
+            self.watch_primary(game, cx);
             return;
         }
         if self.preparing.contains_key(&game.app_name) {
@@ -302,16 +302,6 @@ impl CollectionView {
         let result = if game.installed { self.runtime.play(game) } else { self.runtime.install(game) };
         if let Err(err) = result {
             self.report_launch_error(err, cx);
-        }
-    }
-
-    /// A film's Play: Stremio's own title page, the verified handoff.
-    fn open_stremio(&mut self, game: &heronite_data::collection::Game, cx: &mut Context<Self>) {
-        let kind =
-            game.game.extra.as_ref().and_then(|extra| extra.get("stremioType")).and_then(serde_json::Value::as_str).unwrap_or("movie");
-        let uri = format!("stremio:///detail/{kind}/{}", game.app_name);
-        if let Err(error) = heronite_platform::shell::open(uri.as_str()) {
-            self.show_toast(tr!("Could not open Stremio: {error}", error = error.to_string()), true, cx);
         }
     }
 

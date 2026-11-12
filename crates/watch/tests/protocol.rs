@@ -11,6 +11,8 @@ use heronite_watch::account::{addon_collection, create_link, read_link, LinkPoll
 use heronite_watch::addon::AddonClient;
 use heronite_watch::datastore::{continue_watching, probe_put, write_progress, DatastoreClient, Probe};
 use heronite_watch::endpoints::Endpoints;
+use heronite_watch::playback;
+use heronite_watch::store;
 use heronite_watch::streaming::StreamingServer;
 use heronite_watch::types::MovieProgress;
 use heronite_watch::{AuthKey, Transport};
@@ -131,6 +133,29 @@ fn the_account_addon_collection_keeps_stream_addons() {
     assert_eq!(addons.len(), 1);
     assert!(addons[0].serves("stream"));
     assert_eq!(addons[0].transport_url, "https://torrentio.strem.fun/manifest.json");
+}
+
+#[test]
+fn streams_come_from_the_accounts_installed_addons() {
+    let fake = Fake::new();
+    let dir = tempfile::tempdir().unwrap();
+    let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+    store::write_auth(&app, &AuthKey::new("test-session-key")).unwrap();
+    let endpoints = Endpoints::default();
+    let streams = playback::streams_with(&fake, &endpoints, &app, "movie", "tt26657236").unwrap();
+    assert_eq!(streams.len(), 1);
+    assert_eq!(streams[0].info_hash.as_deref(), Some(HASH));
+    assert_eq!(streams[0].addon, "Torrentio");
+    assert!(fake.calls.lock().unwrap().iter().any(|(path, _)| path.contains("/stream/movie/")));
+}
+
+#[test]
+fn streams_need_a_linked_account() {
+    let fake = Fake::new();
+    let dir = tempfile::tempdir().unwrap();
+    let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+    let endpoints = Endpoints::default();
+    assert!(playback::streams_with(&fake, &endpoints, &app, "movie", "tt26657236").is_err());
 }
 
 #[test]

@@ -416,7 +416,7 @@ impl CollectionView {
             (Zone::Cards, Pad::Up) => nav.zone = Zone::Actions,
             (Zone::Cards, Pad::A) => {
                 if let Some(k) = game {
-                    self.open_game_page(k);
+                    self.open_game_page(k, cx);
                 }
             }
             (Zone::Actions | Zone::Cards, Pad::B) => nav.zone = Zone::Row,
@@ -445,7 +445,7 @@ impl CollectionView {
                 }
                 self.toggle_favourite(cx);
             }
-            SpotAct::More => self.open_game_page(key.clone()),
+            SpotAct::More => self.open_game_page(key.clone(), cx),
         }
     }
 
