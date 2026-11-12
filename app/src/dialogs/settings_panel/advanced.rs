@@ -156,7 +156,10 @@ impl SettingsPanel {
         let mut col = column();
         if heronite_launch::steam_extras::supported() {
             col = col.child(self.scripts_section(false, cx)).child(self.companions_section(cx)).child(
-                help(tr!("Steam starts the game itself, as from its library. Hearthdeck Hero runs these when you play from Hearthdeck Hero.")).px(px(6.)),
+                help(tr!(
+                    "Steam starts the game itself, as from its library. Hearthdeck Hero runs these when you play from Hearthdeck Hero."
+                ))
+                .px(px(6.)),
             );
         }
         if self.steam_line_only() {

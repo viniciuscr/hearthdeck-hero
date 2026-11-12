@@ -268,7 +268,8 @@ mod tests {
 
     #[test]
     fn the_popover_lists_the_first_notes() {
-        let md = "**Download:** x\n\n## Highlights\n\n- One\n- Two\n\n## Fixes\n\n- Three\n- Four\n- Five\n\n**Enjoying Hearthdeck Hero?** y";
+        let md =
+            "**Download:** x\n\n## Highlights\n\n- One\n- Two\n\n## Fixes\n\n- Three\n- Four\n- Five\n\n**Enjoying Hearthdeck Hero?** y";
         let (list, more) = highlights(md);
         assert_eq!(list, ["One", "Two", "Three", "Four"]);
         assert_eq!(more, 1);

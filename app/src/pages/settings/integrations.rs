@@ -70,7 +70,11 @@ fn status_parts(status: &Status, enabled: bool) -> (SharedString, Rgba, Option<(
             tr!("Connected").into(),
             theme::status_color("playing"),
             Some((
-                trn!(*entries, "Up to date: {n} entry of Hearthdeck Hero's in Sunshine.", "Up to date: {n} entries of Hearthdeck Hero's in Sunshine."),
+                trn!(
+                    *entries,
+                    "Up to date: {n} entry of Hearthdeck Hero's in Sunshine.",
+                    "Up to date: {n} entries of Hearthdeck Hero's in Sunshine."
+                ),
                 false,
             )),
         ),

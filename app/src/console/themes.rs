@@ -106,16 +106,17 @@ pub fn remember_tab(app: &AppPaths, tab: usize) {
 /// Keeps the filters console mode starts with next time (like
 /// [`remember_tab`], the theme in use is left alone).
 pub fn remember_filters(app: &AppPaths, filters: KeptFilters) {
+    let space = current_space();
     let next = {
         let mut cur = PREFS.lock().unwrap_or_else(|e| e.into_inner());
-        let p = cur.get_or_insert_with(|| ConsolePrefs::load(app));
+        let p = cur[index(space)].get_or_insert_with(|| load(app, space));
         if p.kept_filters == filters {
             return;
         }
         p.kept_filters = filters;
         p.clone()
     };
-    save(app, next);
+    save(app, next, space);
 }
 
 /// Changes the prefs, installs the theme while console mode is on and saves.

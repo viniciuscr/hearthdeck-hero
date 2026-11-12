@@ -33,7 +33,10 @@ fn cancelled() -> String {
 
 /// Without the game's folder the mod's files cannot be matched to its folders.
 pub(super) fn no_game_folder(game: &str) -> String {
-    tr!("Hearthdeck Hero can't find {game}'s folder, so it can't tell where the mod's files go. Install or locate the game first.", game = game)
+    tr!(
+        "Hearthdeck Hero can't find {game}'s folder, so it can't tell where the mod's files go. Install or locate the game first.",
+        game = game
+    )
 }
 
 /// What a finished install tells the job.

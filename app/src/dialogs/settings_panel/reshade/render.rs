@@ -113,8 +113,10 @@ impl SettingsPanel {
             State::NoExecutable => {
                 let picked = self.reshade_settings().target;
                 let text = match picked.is_empty() {
-                    true => tr!("Hearthdeck Hero did not find the program that draws the game in its folder. Choose it: ReShade goes next to it.")
-                        .to_string(),
+                    true => tr!(
+                        "Hearthdeck Hero did not find the program that draws the game in its folder. Choose it: ReShade goes next to it."
+                    )
+                    .to_string(),
                     false => tr!(
                         "{file} is not a Windows program Hearthdeck Hero can read. Choose the game's .exe.",
                         file = file_name(std::path::Path::new(&picked))
@@ -144,12 +146,15 @@ impl SettingsPanel {
                 r = r.field(self.reshade_exe_select(o, cx));
             }
             State::Unsupported(_) => {
-                let text =
-                    tr!("{exe} uses Direct3D 8, which needs the d3d8to9 wrapper before ReShade. Hearthdeck Hero does not install it yet.", exe);
+                let text = tr!(
+                    "{exe} uses Direct3D 8, which needs the d3d8to9 wrapper before ReShade. Hearthdeck Hero does not install it yet.",
+                    exe
+                );
                 r = r.child(row("ReShade", Some(&text), div()));
             }
             State::Banned => {
-                let text = tr!("ReShade's own compatibility list says {exe} bans or blocks ReShade, so Hearthdeck Hero does not install it.", exe);
+                let text =
+                    tr!("ReShade's own compatibility list says {exe} bans or blocks ReShade, so Hearthdeck Hero does not install it.", exe);
                 r = r.child(row("ReShade", None, div())).child(div().py(px(12.)).child(warn_line(&text)));
             }
             State::Conflict { path, product } => {

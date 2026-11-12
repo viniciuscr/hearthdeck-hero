@@ -75,9 +75,11 @@ pub(super) fn render_where(d: &mut SettingsPage, p: &SyncPrefs, cx: &mut Context
     );
     let body = match p.provider {
         Provider::Folder => render_folder(d, cx),
-        Provider::Custom => div().flex().flex_col().gap(px(6.)).child(text_field(tr!("rclone remote"), &d.cloud.custom_remote)).child(
-            meta_text(tr!("A remote of your own rclone settings and a folder in it, like mydrive:Hearthdeck Hero. Set it up with rclone config.")),
-        ),
+        Provider::Custom => {
+            div().flex().flex_col().gap(px(6.)).child(text_field(tr!("rclone remote"), &d.cloud.custom_remote)).child(meta_text(tr!(
+                "A remote of your own rclone settings and a folder in it, like mydrive:Hearthdeck Hero. Set it up with rclone config."
+            )))
+        }
         provider => render_account(d, p, provider, cx),
     };
     div().flex().flex_col().gap(px(12.)).child(select).child(body)

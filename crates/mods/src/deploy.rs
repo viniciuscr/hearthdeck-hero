@@ -65,8 +65,8 @@ impl Drop for Mount {
 /// bottom layer: `fuse-overlayfs` opens its layers before it mounts, so they
 /// stay reachable and the folder is never written.
 pub fn mount(overlay_bin: &Path, dirs: &GameDirs, game_dir: &Path, layers: &[PathBuf]) -> Result<Mount, String> {
-    let fusermount =
-        tool::fusermount().ok_or_else(|| tr!("Hearthdeck Hero needs FUSE (fusermount3) to apply mods. Install the fuse3 package.").to_string())?;
+    let fusermount = tool::fusermount()
+        .ok_or_else(|| tr!("Hearthdeck Hero needs FUSE (fusermount3) to apply mods. Install the fuse3 package.").to_string())?;
     let mods_root = dirs.root().parent().map(Path::to_path_buf).unwrap_or_else(|| dirs.root().to_path_buf());
 
     // A mount left by a crash makes the folder unreadable until it is removed.

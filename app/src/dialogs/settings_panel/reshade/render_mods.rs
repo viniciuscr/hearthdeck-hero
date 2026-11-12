@@ -127,7 +127,9 @@ impl SettingsPanel {
         let Some(found) = found else {
             return section.child(
                 inner
-                    .child(help(tr!("Hearthdeck Hero's catalog has no RenoDX mod for this game. RenoDX's list may have one to install by hand.")))
+                    .child(help(tr!(
+                        "Hearthdeck Hero's catalog has no RenoDX mod for this game. RenoDX's list may have one to install by hand."
+                    )))
                     .child(renodx_list(cx)),
             );
         };

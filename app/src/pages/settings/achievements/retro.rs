@@ -555,7 +555,11 @@ fn signed_out_split(d: &mut SettingsPage, account: Option<&RetroAccount>, cx: &m
                     tr!("Emulators signed in for you:"),
                     tr!("RetroArch, DuckStation, PCSX2, PPSSPP, Dolphin and Flycast."),
                 ))
-                .child(benefit(Icon::Star, tr!("Points and hardcore mode,"), tr!("kept by Hearthdeck Hero even if the account goes away."))),
+                .child(benefit(
+                    Icon::Star,
+                    tr!("Points and hardcore mode,"),
+                    tr!("kept by Hearthdeck Hero even if the account goes away."),
+                )),
         );
     div().flex().w_full().child(brand).child(div().flex_1().min_w_0().p(px(18.)).child(login_form(d, account, cx)))
 }

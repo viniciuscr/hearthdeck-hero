@@ -716,7 +716,7 @@ mod tests {
     /// start from "any"; a value out of range reads as the first.
     #[test]
     fn kept_filters_round_trip() {
-        let f = Filters { show: 1, sort: 2, favourites: true, status: 3, category: 2, group: 0 };
+        let f = Filters { show: 1, sort: 2, favourites: true, status: 3, category: 2, group: 0, kind: 0, genre: 0, provider: 0 };
         // The carousel's part stays as it was.
         let mut k = KeptFilters { carousel: 2, ..KeptFilters::default() };
         f.keep_in(&mut k);

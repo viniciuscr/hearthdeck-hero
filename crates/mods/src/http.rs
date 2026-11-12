@@ -75,7 +75,10 @@ impl HttpError {
     }
 
     fn unexpected(url: &str, error: impl fmt::Display) -> Self {
-        Self { status: None, message: tr!("{host} sent an answer Hearthdeck Hero does not understand: {error}", host = host_of(url), error) }
+        Self {
+            status: None,
+            message: tr!("{host} sent an answer Hearthdeck Hero does not understand: {error}", host = host_of(url), error),
+        }
     }
 }
 

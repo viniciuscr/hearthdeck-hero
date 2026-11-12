@@ -197,7 +197,8 @@ pub(super) fn restore(d: &mut SettingsPage, path: PathBuf, parts: Vec<Part>, cx:
                 Ok(_) => {
                     if let Some(why) = crate::system::restart_blocker(cx) {
                         heronite_backup::restore::cancel(&d.ctx.app);
-                        d.backup.restore.notice = Some((tr!("Hearthdeck Hero has to restart to restore, and cannot now: {why}.", why), true));
+                        d.backup.restore.notice =
+                            Some((tr!("Hearthdeck Hero has to restart to restore, and cannot now: {why}.", why), true));
                     } else {
                         d.backup.restore.notice = Some((tr!("Restarting…").into(), false));
                         crate::system::restart_into(exe, cx);
