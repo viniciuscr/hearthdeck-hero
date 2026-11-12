@@ -17,7 +17,14 @@ pub fn locked_in(space: Space, card: Card) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use heronite_data::console_theme::presets;
+    use heronite_data::console_theme::{presets, ConsolePrefs};
+
+    #[test]
+    fn selecting_a_preset_in_watch_is_not_edited() {
+        let mut prefs = ConsolePrefs { theme: presets::classic(), based_on: "classic".into(), ..Default::default() };
+        prefs.theme = crate::fork::watch::space_theme::project(prefs.theme, Space::Watch);
+        assert!(!crate::console::theme_rows::is_edited_for(Space::Watch, &prefs, &[]));
+    }
 
     #[test]
     fn watch_hides_game_only_cards_but_keeps_visuals() {
@@ -37,5 +44,7 @@ mod tests {
         for id in ["minimal", "classic", "cinema", "pulse", "arcade", "hub", "living-room"] {
             assert!(all.iter().any(|theme| theme.id == id), "{id} is missing from the presets");
         }
+        let list = crate::console::theme_rows::theme_list(&[]);
+        assert!(list.len() >= 7, "the Theme picker lost the built-in themes");
     }
 }

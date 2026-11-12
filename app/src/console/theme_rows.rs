@@ -38,6 +38,7 @@ use heronite_i18n::{n_, tr, trc};
 
 use super::list::{Row, Value};
 use super::look::ACCENTS;
+use crate::collection::Space;
 use crate::icons::Icon;
 pub use labels::layout_name;
 use labels::*;
@@ -258,7 +259,17 @@ pub fn uses_shelves(theme: &ConsoleTheme) -> bool {
 
 /// The theme in use differs from the preset or saved theme it started from.
 pub fn is_edited(prefs: &ConsolePrefs, saved: &[ConsoleTheme]) -> bool {
-    base_theme(prefs, saved).is_none_or(|b| b != prefs.theme)
+    is_edited_for(crate::console::themes::active_space(), prefs, saved)
+}
+
+/// [`is_edited`] against the projection of a space: selecting a built-in in
+/// Watch changes its tabs and shelves, but it is still that built-in.
+pub fn is_edited_for(space: Space, prefs: &ConsolePrefs, saved: &[ConsoleTheme]) -> bool {
+    base_theme(prefs, saved).is_none_or(|base| {
+        let base = crate::fork::watch::space_theme::project(base, space);
+        let current = crate::fork::watch::space_theme::project(prefs.theme.clone(), space);
+        base != current
+    })
 }
 
 /// The preset or saved theme the prefs started from (`None` once it was deleted).
