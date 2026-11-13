@@ -109,6 +109,13 @@ fn sections(group: usize) -> Vec<CSec> {
     GROUPS[group].1.iter().copied().filter(|s| s.available()).collect()
 }
 
+/// The group indices that have at least one section available here. A group
+/// whose only section does not ship on this system (Watch away from Linux) is
+/// skipped, as the desktop navigation already does.
+fn visible_groups() -> Vec<usize> {
+    (0..GROUPS.len()).filter(|group| !sections(*group).is_empty()).collect()
+}
+
 /// Console focus of the Settings page.
 #[derive(Default)]
 pub struct ConsoleState {
@@ -121,8 +128,17 @@ pub struct ConsoleState {
 }
 
 impl SettingsPage {
+    /// The group the console page shows: the selected one, or the first that
+    /// has a section available.
+    fn console_group(&self) -> usize {
+        if !sections(self.console.group).is_empty() {
+            return self.console.group;
+        }
+        visible_groups().first().copied().unwrap_or(0)
+    }
+
     fn console_sec(&self) -> CSec {
-        let secs = sections(self.console.group);
+        let secs = sections(self.console_group());
         secs[self.console.nav.min(secs.len() - 1)]
     }
 
@@ -213,9 +229,12 @@ impl SettingsPage {
     }
 
     pub(super) fn render_console(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let group = self.console_group();
         let sec = self.console_sec();
-        let secs = sections(self.console.group);
-        let groups: Vec<SharedString> = GROUPS.iter().map(|(g, _)| SharedString::from(tr(g))).collect();
+        let secs = sections(group);
+        let visible = visible_groups();
+        let active = visible.iter().position(|g| *g == group).unwrap_or(0);
+        let groups: Vec<SharedString> = visible.iter().map(|g| SharedString::from(tr(GROUPS[*g].0))).collect();
         let content_focus = self.console.content && !self.console.layer.is_open();
         let mut nav = div().flex().flex_col().gap(u(4.)).w(u(320.)).flex_none();
         let layer_open = self.console.layer.is_open();
@@ -274,7 +293,7 @@ impl SettingsPage {
                     .h(u(76.))
                     .px(u(46.))
                     .child(kit::wordmark(tr!("SETTINGS")))
-                    .child(kit::tabs(&groups, self.console.group))
+                    .child(kit::tabs(&groups, active))
                     .child(div().flex_1())
                     .child(kit::clock()),
             )
@@ -304,11 +323,18 @@ impl PadTarget for SettingsPage {
             cx.notify();
             return true;
         }
-        let n_groups = GROUPS.len();
         match pad {
             Pad::LB | Pad::RB => {
-                let g = self.console.group;
-                self.console.group = if pad == Pad::RB { (g + 1) % n_groups } else { (g + n_groups - 1) % n_groups };
+                // Follows the tabs, which skip a group with nothing available
+                // here, so the cycle never lands on an empty group.
+                let visible = visible_groups();
+                if visible.is_empty() {
+                    return false;
+                }
+                let g = self.console_group();
+                let pos = visible.iter().position(|group| *group == g).unwrap_or(0);
+                let next = if pad == Pad::RB { (pos + 1) % visible.len() } else { (pos + visible.len() - 1) % visible.len() };
+                self.console.group = visible[next];
                 self.console.nav = 0;
                 self.console.content = false;
                 self.console_shown(window, cx);
@@ -442,14 +468,16 @@ impl SettingsPage {
 
 #[cfg(test)]
 mod tests {
-    use super::{sections, CSec, Section, GROUPS};
+    use super::{sections, visible_groups, CSec, Section};
 
     #[test]
     fn console_navigation_hides_unavailable_features() {
-        let sections: Vec<_> = (0..GROUPS.len()).flat_map(sections).collect();
-        assert_eq!(sections.contains(&CSec::Rows(Section::Overlay)), Section::Overlay.available());
-        assert_eq!(sections.contains(&CSec::Rows(Section::Replay)), Section::Replay.available());
-        assert!(sections.iter().all(|s| s.available()));
-        assert!((0..GROUPS.len()).all(|group| !super::sections(group).is_empty()));
+        let visible = visible_groups();
+        assert!(!visible.is_empty(), "the console page always has a group to show");
+        let shown: Vec<_> = visible.iter().flat_map(|group| sections(*group)).collect();
+        assert_eq!(shown.contains(&CSec::Rows(Section::Overlay)), Section::Overlay.available());
+        assert_eq!(shown.contains(&CSec::Rows(Section::Replay)), Section::Replay.available());
+        assert!(shown.iter().all(|s| s.available()));
+        assert!(visible.iter().all(|group| !sections(*group).is_empty()));
     }
 }
