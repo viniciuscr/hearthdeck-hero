@@ -37,7 +37,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # Restore only. Caches are scoped to the ref: a tag run reads the
+      # default branch's (main) entries, never another tag's, so anything
+      # saved here could not be restored by any later run and would only take
+      # space from the repository's 10 GB. `check` is ci.yml's Linux job id,
+      # so this run reuses what main's gate saved instead of a `verify` key
+      # nothing has ever written.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: check
+          save-if: "false"
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -54,7 +63,13 @@ jobs:
       - name: System packages
         run: scripts/ci-deps.sh
       - uses: dtolnay/rust-toolchain@stable
+      # Restore only. A tag cannot read the caches it saves (see the verify
+      # job), and the release profile shares no artifacts with the debug
+      # gate, so this key has nothing to hit today: saving would only fill
+      # the repository's cache quota.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: "false"
       - name: Use the tag version
         run: |
           version="${GITHUB_REF_NAME#v}"

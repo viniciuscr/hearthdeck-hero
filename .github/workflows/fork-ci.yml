@@ -1,12 +1,15 @@
 name: Fork CI
 
-# The fork's own gate for pushes to the integration baseline. Pull requests
-# into fork/main also run upstream's ci.yml (including its Windows jobs).
+# The fork's gate on fork/main, and the only ref that writes Rust caches.
+# A pull request into fork/main restores what a push here saved (GitHub lets a
+# pull request read its base branch's caches), so a push here is what makes
+# every pull request fast. Pull requests do not run this file: upstream ci.yml
+# runs the same gate on Linux and on Windows there, and restores the same
+# entries, because the job ids and the CARGO_* environment below are identical
+# to ci.yml's (the cache key is built from the job id and from those
+# variables).
 on:
   push:
-    branches: [fork/main]
-    paths-ignore: ["**.md", "assets/screenshots/**", "docs/**", "licenses/**"]
-  pull_request:
     branches: [fork/main]
     paths-ignore: ["**.md", "assets/screenshots/**", "docs/**", "licenses/**"]
   workflow_dispatch:
@@ -20,6 +23,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # No debug info in CI: faster builds and a much smaller cache. Backtraces
+  # still name the functions. ci.yml sets the same values; they are part of
+  # the cache key.
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
 
@@ -34,12 +40,61 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # Only fork/main writes a cache: its entries are the ones pull requests
+      # restore, and an entry saved by any other ref would be unreadable to
+      # them (and to every other ref) while still counting against the
+      # repository's 10 GB.
+      # `cache-workspace-crates` keeps the workspace's own artifacts (the app
+      # crates' rlibs and their unit-test binaries, ~2 GB uncompressed at
+      # debug=0). Without it rust-cache prunes them and every run recompiles
+      # all 36 crates and relinks their tests.
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/fork/main' }}
+          cache-workspace-crates: true
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
+
+  # The Windows port has no cache unless it is written here: ci.yml only saves
+  # on main, which the fork changes only when it reconciles upstream. These
+  # two jobs warm the entries ci.yml's own windows-clippy and windows-tests
+  # jobs read on a pull request.
+  windows-clippy:
+    name: Clippy (Windows)
+    runs-on: windows-latest
+    env:
+      # lld links several times faster than link.exe (build scripts and
+      # proc macros here). .cargo/config.toml does the same on Linux.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/fork/main' }}
+          cache-workspace-crates: true
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  windows-tests:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    env:
+      # With link.exe, linking the ~55 test programs took about half of the
+      # test build. Releases still link with link.exe (scripts/windows/package.ps1).
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/fork/main' }}
+          cache-workspace-crates: true
+      - name: Tests
+        run: cargo test --workspace --no-fail-fast

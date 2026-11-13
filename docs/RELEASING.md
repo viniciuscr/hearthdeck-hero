@@ -14,7 +14,9 @@ that differs from `origin/fork/main`. It creates `v<version>` and pushes it.
 
 The tag starts `.github/workflows/fork-release.yml`:
 
-1. verify the tag commit is on `origin/fork/main` and run the full gate;
+1. verify the tag commit is on `origin/fork/main` and run the full gate
+   (restoring `main`'s Rust cache; a tag never saves one, because caches are
+   scoped to the ref and no later run could read it);
 2. build with Ubuntu 22.04 (the glibc floor), package with nfpm 2.47.0;
 3. `repo-add` the Arch package **without signatures** in an `archlinux:base` container;
 4. publish `arch/x86_64/` to the `gh-pages` branch;

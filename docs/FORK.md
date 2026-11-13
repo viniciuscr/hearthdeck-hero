@@ -65,9 +65,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-`.github/workflows/fork-ci.yml` runs the gate on pushes and pull requests to
-`fork/main`. Upstream `ci.yml` also runs on pull requests, including its Windows
-jobs. `fork/main` is never tagged for release with a red gate.
+`.github/workflows/fork-ci.yml` runs the gate (Linux and Windows) on pushes to
+`fork/main`, and is the only ref that writes Rust caches. Upstream `ci.yml`
+runs the same gate on pull requests and restores those entries, because a pull
+request can read its base branch's caches. Making `fork/main` the repository's
+default branch would extend that to every other ref — a tag, which can read
+only the default branch, included. `fork/main` is never tagged for release
+with a red gate.
 
 ## Change containment
 
