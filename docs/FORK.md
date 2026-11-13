@@ -73,6 +73,9 @@ jobs. `fork/main` is never tagged for release with a red gate.
 
 - A new capability lives in a new crate (`crates/<name>`, no GPUI) plus a thin
   adapter in `app/src`. Edit upstream code only at registered seams.
+- Fork-owned code is not registered: `crates/watch*`, `app/src/fork/**`,
+  `app/src/collection/watch_playback.rs` and `docs/WATCH*.md` are additions, not
+  deviations. The register lists only upstream files a fork commit edits.
 - No repo-wide formatting, renames, moves, or refactors of upstream code.
 - Extend through fork-owned traits and adapters; do not edit upstream enums,
   structs, or service signatures when a wrapper can do the job.
@@ -104,9 +107,10 @@ implementation rules live in `docs/WATCH.md`.
 | F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" (app and i18n done; README/docs pending) | active |
 | F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection `Space::Watch`, console space item and Watch Play action | active |
 | F-007 | `crates/data/src/library.rs` | `stremio` source label | active |
-| F-008 | `app/src/fork/watch/{watch_theme,space_theme,prefs,theme_rows,sources,filters,settings}`, `app/src/collection/console/watch_panel.rs`, `app/src/console/{themes,theme_rows}.rs`, `app/src/collection/console/{sources,layouts/grid,filters}.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings, QR, per-space prefs, editor lock, source/grid-filter helpers, filter panel and one-time migration of game-shaped Watch files | active |
+| F-008 | `app/src/console/{themes,theme_rows}.rs`, `app/src/collection/console/{sources,layouts/grid,filters}.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings registration, per-space prefs, editor lock, source/grid-filter helpers, filter panel and one-time migration of game-shaped Watch files | active |
 | F-009 | `.github/workflows/{release,flatpak,windows-packages}.yml` | upstream release workflows guarded to the upstream repository | active |
-| F-010 | `crates/watch/src/{playback,player,types,lib}.rs`, `app/src/collection/watch_playback.rs`, `app/src/collection/{actions,game_actions,render_focus,grid_drawer}.rs`, `app/src/collection/focus/mod.rs`, `app/src/collection/console/{mod.rs,game/mod.rs,layouts/spotlight/mod.rs}` | Native Watch playback: the linked account's stream addons feed a Stremio Service + mpv path, and both detail surfaces list the streams inline | active |
+| F-010 | `app/src/collection/{actions,game_actions,render_focus,grid_drawer}.rs`, `app/src/collection/focus/mod.rs`, `app/src/collection/console/{mod.rs,game/mod.rs,layouts/spotlight/mod.rs}` | Native Watch playback: the stream list and Play action on both detail surfaces | active |
+| F-011 | `docs/ARCHITECTURE.md` | the watch crate map (the fork-owned watch crates are absent upstream) | active |
 
 ### Conflict log
 

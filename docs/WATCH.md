@@ -55,9 +55,17 @@ string or a crash report. No write may delete or un-watch an account record.
 
 | Unit | Responsibility | May depend on | Must not |
 |---|---|---|---|
-| `crates/watch` | Stremio account, datastore, addon protocol, streaming-server client, mpv supervisor, local watch store | `heronite-data`, `heronite-images`, `heronite-platform`, `heronite-launch`, `ureq` | GPUI, `app`, or any upstream crate edited in place |
+| `crates/watch` (`heronite-watch`) | composition root: provider registry, browse → proxy `Library`, playback orchestration, the app's import surface | `crates/watch-{core,state,player,stremio}`, `heronite-data` | GPUI, provider protocol code |
+| `crates/watch-core` | domain types, `WatchProvider`, the `Transport` and `Credentials` ports | serde, url, chrono, ureq | `heronite-*`, files, processes |
+| `crates/watch-addon` | the Stremio addon protocol: manifest, catalog, meta, stream | `crates/watch-core` | accounts, datastore, Cinemeta |
+| `crates/watch-player` | mpv discovery, arguments, IPC supervision | `crates/watch-core`, `heronite-data` | protocol and provider types |
+| `crates/watch-state` | local files and the Heroic-format projection | `crates/watch-core`, `heronite-data` | network, providers |
+| `crates/watch-stremio` | the Stremio provider | `crates/watch-{core,addon}` | files, processes, `heronite-data` |
 | `app/src/collection/` (`Space::Watch`) | The same Collection/console screens, loading the proxy `Library` | `crates/watch`, `heronite-data` | A second grid, Focus panel or shelves implementation |
 | `app/src/collection/nav.rs`, `collection/console/*`, `collection/palette/*` | Navigation and shell route entries | — | Feature logic |
+
+`docs/WATCH-CRATES.md` owns the crate map, the provider contract and the rules
+for adding a provider.
 
 **Composition rule.** New behavior lives in the new crate and is imported by
 the app. Extend upstream types with extension traits; wrap them in newtypes
@@ -290,8 +298,9 @@ Envelope, source `stremio-core`:
 
 ## Rules
 
-1. **Compose, don't patch.** New behavior in `crates/watch`; no edits to
-   upstream crates; only the registered `app` seams.
+1. **Compose, don't patch.** New behavior in the watch crates
+   (`docs/WATCH-CRATES.md`); no edits to upstream crates; only the registered
+   `app` seams.
 2. **One arm per seam.** Every upstream enum match gains exactly one arm;
    `Fork-Seam: F-006` on the commit; update the register in the same change.
 3. **No new `Feature` variants.** Availability comes from
@@ -329,7 +338,12 @@ Envelope, source `stremio-core`:
 | ID | Files | Deviation | Status |
 |---|---|---|---|
 | F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection `Space::Watch`, console space item, Watch Play action | active |
-| F-010 | `crates/watch/src/{playback,player,types,lib}.rs`, `app/src/collection/watch_playback.rs`, `app/src/collection/{actions,game_actions,render_focus,grid_drawer}.rs`, `app/src/collection/focus/mod.rs`, `app/src/collection/console/{mod.rs,game/mod.rs,layouts/spotlight/mod.rs}` | Native Watch playback: account addon streams, Stremio Service, mpv, inline stream lists on both detail surfaces | active |
+| F-010 | `app/src/collection/{actions,game_actions,render_focus,grid_drawer}.rs`, `app/src/collection/focus/mod.rs`, `app/src/collection/console/{mod.rs,game/mod.rs,layouts/spotlight/mod.rs}` | Native Watch playback: the stream list and Play action on both detail surfaces | active |
+| F-011 | `docs/ARCHITECTURE.md` | the watch crate map (the fork-owned watch crates are absent upstream) | active |
+
+Fork-owned code (`crates/watch*`, `app/src/collection/watch_playback.rs`,
+`app/src/fork/watch/**`, this document) is not a deviation and is not listed
+here; only upstream files are.
 
 ## Phase 0 probe checklist
 
@@ -349,7 +363,7 @@ Envelope, source `stremio-core`:
 ## Phase exit criteria
 
 - **P0:** every probe above recorded in this file; unknowns have a decision.
-- **P1:** `crates/watch` compiles on Linux and Windows; fixture tests pass; no UI.
+- **P1:** the watch crates compile on Linux and Windows; fixture tests pass; no UI.
 - **P2:** link + datastore + merge/write with mock-server tests; real-account
   test ignored.
 - **P3:** `Space::Watch` in the Collection (desktop), proxy Library, locales; gate green.
@@ -358,6 +372,9 @@ Envelope, source `stremio-core`:
   checklist green.
 
 ## Probe log
+
+Paths in older entries name the pre-split layout; `docs/WATCH-CRATES.md` has the
+current crate map.
 
 - **2026-11-10, CachyOS (the TV machine).** `mpv` and Stremio are not
   installed; `/opt`, `PATH` and the Flatpak list have neither. Phase 0 probes

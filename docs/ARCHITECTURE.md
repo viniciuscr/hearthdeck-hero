@@ -84,8 +84,25 @@ app (bin heronite-rs) ── GPUI UI, desktop integration
  ├─ heronite-sunshine   the games in Sunshine's application
  │                      list through its web API, for
  │                      Moonlight; only entries marked as Heronite's  → data, platform
- └─ heronite-update     app updates: release check, signed download,
-                        AppImage swap / package install, relaunch   → data
+ ├─ heronite-update     app updates: release check, signed download,
+ │                      AppImage swap / package install, relaunch   → data
+ ├─ heronite-watch      Watch: provider registry, the Watch space's
+ │                      Library projection and playback orchestration
+ │                      (fork-owned; docs/WATCH-CRATES.md)
+ │                                        → data, watch-core, watch-state,
+ │                                          watch-player, watch-stremio
+ ├─ heronite-watch-core Watch's domain: item and stream types, the
+ │                      provider contract, transport, credentials,
+ │                      progress policy                 (no heronite-*)
+ ├─ heronite-watch-addon Stremio addon protocol: manifest, catalog,
+ │                      meta, stream                            → watch-core
+ ├─ heronite-watch-player mpv discovery, arguments, IPC supervision
+ │                                                              → data
+ ├─ heronite-watch-state local watch files and the Heroic-format
+ │                      Collection projection        → data, watch-core
+ └─ heronite-watch-stremio the Stremio provider: account, datastore,
+                        Cinemeta, the local streaming service
+                                              → watch-core, watch-addon
 epic-login (bin)        WebKit window for the Epic, GOG (`--store gog`) and Amazon
                         (`--store amazon --url ..`) logins (keeps a web engine out of the app)
 ```
@@ -950,6 +967,21 @@ text size) and applies it.
   set (a new setup) or it was removed, the newest Proton found becomes the
   default, a few seconds after start, after a Wine Manager install, and when
   a Windows game cannot start for lack of one.
+
+- **heronite-watch:** the Watch space's back end (fork-owned; `docs/WATCH-CRATES.md`
+  is the reference). `heronite-watch-core` holds the domain types and the provider
+  contract (`WatchProvider`: catalogs, browse, streams, resolve, progress), with
+  `Transport` and `Credentials` as injected ports and no file or process access.
+  `heronite-watch-addon` speaks the Stremio addon protocol for every provider that
+  is an addon (Stremio, YouTube, OpenTV). `heronite-watch-stremio` is the first
+  provider: link-code account, `libraryItem` datastore with read-merge-write
+  progress, Cinemeta catalogs, and the local Stremio Service that turns a torrent
+  into an HTTP stream. `heronite-watch-state` owns `movies.json`,
+  `<provider>-auth.json` (0600) and the regenerable Heroic-format projection under
+  the cache that `Library::load_with` reads. `heronite-watch-player` supervises
+  mpv over IPC. The facade `heronite-watch` builds the provider registry, assembles
+  the space's `Library` (last good on a provider failure) and performs the single
+  progress write after a session.
 
 ## App (`app/src`)
 
