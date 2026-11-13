@@ -16,6 +16,14 @@ pub struct PlayRequest {
     pub title: Option<String>,
 }
 
+/// Where a session ended, in milliseconds. Target-independent, so a build
+/// without a Unix player can still name its result type.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PlaybackOutcome {
+    pub position_ms: u64,
+    pub duration_ms: u64,
+}
+
 /// `--` ends option parsing; only http(s) streams are accepted.
 pub fn mpv_arguments(request: &PlayRequest, ipc_socket: &Path) -> Result<Vec<String>> {
     if !matches!(request.url.scheme(), "http" | "https") {
@@ -50,7 +58,7 @@ mod unix {
     use anyhow::{Context, Result};
     use serde_json::Value;
 
-    use super::{mpv_arguments, PlayRequest};
+    use super::{mpv_arguments, PlayRequest, PlaybackOutcome};
 
     /// `mpv` on `PATH`.
     pub fn find_mpv() -> Option<PathBuf> {
@@ -68,12 +76,6 @@ mod unix {
                 .map(|output| String::from_utf8_lossy(&output.stdout).contains("input-gamepad"))
                 .unwrap_or(false)
         })
-    }
-
-    #[derive(Clone, Debug, Default, PartialEq, Eq)]
-    pub struct PlaybackOutcome {
-        pub position_ms: u64,
-        pub duration_ms: u64,
     }
 
     /// One mpv run. Dropping it stops the player and removes the IPC folder.
@@ -218,7 +220,7 @@ mod unix {
 }
 
 #[cfg(unix)]
-pub use unix::{find_mpv, gamepad_supported, MpvSession, PlaybackOutcome};
+pub use unix::{find_mpv, gamepad_supported, MpvSession};
 
 #[cfg(test)]
 mod tests {
