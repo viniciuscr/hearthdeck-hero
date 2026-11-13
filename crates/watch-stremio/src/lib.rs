@@ -8,4 +8,10 @@ pub mod account;
 pub mod catalog;
 pub mod datastore;
 pub mod endpoints;
+pub mod provider;
 pub mod streaming;
+
+pub use provider::Stremio;
+
+/// The value `GameInfo.runner` carries for this provider.
+pub const ID: &str = "stremio";

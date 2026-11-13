@@ -7,15 +7,31 @@
 
 pub mod collection;
 pub mod playback;
+pub mod registry;
 
-pub use heronite_watch_addon::addon;
 pub use heronite_watch_core::auth::AuthKey;
 pub use heronite_watch_core::http::{Transport, UreqTransport};
-pub use heronite_watch_core::types;
-pub use heronite_watch_player::player;
-pub use heronite_watch_state::store;
 pub use heronite_watch_stremio::endpoints::Endpoints;
-pub use heronite_watch_stremio::{account, datastore, endpoints, streaming};
+
+/// The account link flow of the Stremio provider.
+pub mod account {
+    pub use heronite_watch_stremio::account::{create_link, read_link, LinkOffer, LinkPoll};
+}
+
+/// What a finished session reports to the app.
+pub mod player {
+    pub use heronite_watch_player::player::PlaybackOutcome;
+}
+
+/// The local watch state the settings screen reads and writes.
+pub mod store {
+    pub use heronite_watch_state::store::{clear_auth, read_auth, write_auth};
+}
+
+/// The item types the screens show.
+pub mod types {
+    pub use heronite_watch_core::types::StreamChoice;
+}
 
 /// Whether this system ships the Watch space. Linux is the only target in v1.
 pub fn available() -> bool {

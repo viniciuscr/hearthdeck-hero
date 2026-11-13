@@ -7,15 +7,19 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use url::Url;
 
-use heronite_watch::account::{addon_collection, create_link, read_link, LinkPoll};
-use heronite_watch::addon::AddonClient;
-use heronite_watch::datastore::{continue_watching, probe_put, write_progress, DatastoreClient, Probe};
-use heronite_watch::endpoints::Endpoints;
 use heronite_watch::playback;
-use heronite_watch::store;
-use heronite_watch::streaming::StreamingServer;
-use heronite_watch::types::MovieProgress;
-use heronite_watch::{AuthKey, Transport};
+use heronite_watch_addon::addon::AddonClient;
+use heronite_watch_core::auth::AuthKey;
+use heronite_watch_core::http::Transport;
+use heronite_watch_core::provider::{Ctx, WatchProvider};
+use heronite_watch_core::types::MovieProgress;
+use heronite_watch_state::store;
+use heronite_watch_state::store::StoreCredentials;
+use heronite_watch_stremio::account::{addon_collection, create_link, read_link, LinkPoll};
+use heronite_watch_stremio::datastore::{continue_watching, probe_put, write_progress, DatastoreClient, Probe};
+use heronite_watch_stremio::endpoints::Endpoints;
+use heronite_watch_stremio::streaming::StreamingServer;
+use heronite_watch_stremio::Stremio;
 
 const HASH: &str = "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c";
 
@@ -47,6 +51,7 @@ impl Transport for Fake {
             "/api/read" => include_str!("fixtures/link_linked.json"),
             path if path.ends_with("/manifest.json") => include_str!("fixtures/manifest.json"),
             path if path.ends_with("/settings") => include_str!("fixtures/settings.json"),
+            path if path.contains("/catalog/") => include_str!("fixtures/catalog_top.json"),
             path if path.contains("/stream/") => include_str!("fixtures/streams.json"),
             other => return Err(anyhow!("unexpected GET path {other}")),
         };
@@ -141,8 +146,7 @@ fn streams_come_from_the_accounts_installed_addons() {
     let dir = tempfile::tempdir().unwrap();
     let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
     store::write_auth(&app, &AuthKey::new("test-session-key")).unwrap();
-    let endpoints = Endpoints::default();
-    let streams = playback::streams_with(&fake, &endpoints, &app, "movie", "tt26657236").unwrap();
+    let streams = playback::streams_with(&fake, &app, "stremio", "movie", "tt26657236").unwrap();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0].info_hash.as_deref(), Some(HASH));
     assert_eq!(streams[0].addon, "Torrentio");
@@ -154,8 +158,7 @@ fn streams_need_a_linked_account() {
     let fake = Fake::new();
     let dir = tempfile::tempdir().unwrap();
     let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
-    let endpoints = Endpoints::default();
-    assert!(playback::streams_with(&fake, &endpoints, &app, "movie", "tt26657236").is_err());
+    assert!(playback::streams_with(&fake, &app, "stremio", "movie", "tt26657236").is_err());
 }
 
 #[test]
@@ -178,4 +181,24 @@ fn progress_writes_the_full_record_and_the_probe_is_a_no_op() {
     assert_eq!(body["changes"][0]["futureTop"], true);
     assert_eq!(body["changes"][0]["state"]["timeOffset"], 100);
     assert_eq!(probe_put(&client).unwrap(), Probe::Verified { items: 1 });
+}
+
+#[test]
+fn stremio_puts_continue_watching_first_and_marks_only_the_catalog_top() {
+    let fake = Fake::new();
+    let dir = tempfile::tempdir().unwrap();
+    let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+    store::write_auth(&app, &AuthKey::new("test-session-key")).unwrap();
+    let credentials = StoreCredentials::new(&app);
+    let ctx = Ctx { http: &fake, credentials: &credentials };
+    let rails = Stremio.browse(&ctx).unwrap();
+
+    assert_eq!(rails.len(), 3);
+    assert_eq!(rails[0].catalog.id, "continue-watching");
+    let ids: Vec<&str> = rails[0].items.iter().map(|item| item.id.as_str()).collect();
+    assert_eq!(ids, ["tt26657236"]);
+    assert!(!rails[0].items[0].top, "a library record is not a top catalog item");
+    assert_eq!(rails[1].catalog.kind, "movie");
+    assert!(rails[1].items.iter().all(|item| item.top));
+    assert_eq!(rails[2].catalog.kind, "series");
 }
