@@ -18,7 +18,9 @@ use url::Url;
 use heronite_watch_addon::addon::AddonClient;
 use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::types::{MovieProgress, StreamChoice};
-use heronite_watch_player::player::{MpvSession, PlayRequest, PlaybackOutcome};
+use heronite_watch_player::player::PlaybackOutcome;
+#[cfg(unix)]
+use heronite_watch_player::player::{MpvSession, PlayRequest};
 use heronite_watch_state::store;
 use heronite_watch_stremio::account::addon_collection;
 use heronite_watch_stremio::datastore::{write_progress, DatastoreClient};
