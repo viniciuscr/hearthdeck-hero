@@ -142,12 +142,15 @@ These are behaviour, not style; the move must keep all of them.
 2. The feed is built continue-watching first, then the provider's top catalogs,
    deduplicated by kind and id keeping the first copy, so a title in both rails
    is not marked top. An unlinked account shows the catalogues only.
-3. The projection's JSON stays byte-identical, including its deliberate key
-   asymmetry (raw id for the local and timestamp maps, `<provider>:<id>` for
-   metadata and art), the explicit `null`s and the insertion order.
+3. The projection's JSON keeps its shape: `app_name` is `<provider>:<id>` (the
+   raw id stays in `extra.watchId`), the local and timestamp maps are keyed by
+   `app_name`, metadata and art by `runner:appName` (so
+   `<provider>:<provider>:<id>`), and the explicit `null`s, the bare timestamps
+   object and the insertion order stay.
 4. `finished` has one definition. Error messages, including
    "Playback is only available on Linux.", keep their text.
-5. Progress keys stay raw ids until the provider that needs namespacing lands.
+5. Progress is keyed by `(provider, id)`; a record written before the provider
+   was recorded is Stremio's.
 
 ## Change requests
 

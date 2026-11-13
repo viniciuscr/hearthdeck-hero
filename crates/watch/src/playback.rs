@@ -57,9 +57,10 @@ pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Res
     let ctx = Ctx { http: &http, credentials: &credentials };
     let provider = registry::find(&request.provider).ok_or_else(|| anyhow!("Unknown Watch provider: {}", request.provider))?;
     let resolved = provider.resolve(&ctx, &request.stream)?;
-    let start_ms = resume_position(app, provider, &ctx, &request.id);
+    let previous = progress_record(app, provider, &ctx, &request.id);
+    let start_ms = previous.as_ref().and_then(resume_at);
     let outcome = play_url(request, resolved, start_ms, stop)?;
-    record(app, provider, &ctx, &request.id, &outcome);
+    record(app, provider, &ctx, &request.id, previous.as_ref(), &outcome);
     Ok(outcome)
 }
 
@@ -77,15 +78,15 @@ fn play_url(_request: &PlaybackRequest, _resolved: ResolvedStream, _start_ms: Op
     anyhow::bail!("Playback is only available on Linux.")
 }
 
-/// Where to resume: the local record first, else the provider's own (another
-/// device may have watched further).
-fn resume_position(app: &AppPaths, provider: &dyn WatchProvider, ctx: &Ctx<'_>, id: &str) -> Option<u64> {
+/// The stored progress of a title: the local record first, else the provider's
+/// own (another device may have watched further).
+fn progress_record(app: &AppPaths, provider: &dyn WatchProvider, ctx: &Ctx<'_>, id: &str) -> Option<MovieProgress> {
     let movies = store::read_movies(app);
     if let Some(progress) = store::progress_for(&movies, provider.id(), id) {
-        return resume_at(progress);
+        return Some(progress.clone());
     }
     match provider.read_progress(ctx, id) {
-        Ok(progress) => progress.as_ref().and_then(resume_at),
+        Ok(progress) => progress,
         Err(error) => {
             log::warn!("reading watch progress from {}: {error:#}", provider.name());
             None
@@ -98,7 +99,7 @@ fn resume_at(progress: &MovieProgress) -> Option<u64> {
     if progress.finished || progress.position_ms == 0 {
         return None;
     }
-    if progress.duration_ms > 0 && progress.position_ms * 100 >= progress.duration_ms * 95 {
+    if progress.duration_ms > 0 && u128::from(progress.position_ms) * 100 >= u128::from(progress.duration_ms) * 95 {
         return None;
     }
     Some(progress.position_ms)
@@ -106,12 +107,19 @@ fn resume_at(progress: &MovieProgress) -> Option<u64> {
 
 /// Stremio's finished threshold (`WATCHED_THRESHOLD_COEF`).
 fn finished(position_ms: u64, duration_ms: u64) -> bool {
-    duration_ms > 0 && position_ms * 100 >= duration_ms * 70
+    duration_ms > 0 && u128::from(position_ms) * 100 >= u128::from(duration_ms) * 70
 }
 
 /// Local progress first, then the provider's. A failed remote write keeps the
 /// local record for the next attempt; it never deletes anything.
-fn record(app: &AppPaths, provider: &dyn WatchProvider, ctx: &Ctx<'_>, id: &str, outcome: &PlaybackOutcome) {
+fn record(
+    app: &AppPaths,
+    provider: &dyn WatchProvider,
+    ctx: &Ctx<'_>,
+    id: &str,
+    previous: Option<&MovieProgress>,
+    outcome: &PlaybackOutcome,
+) {
     // mpv exited before reporting anything: keep the position we had instead
     // of resetting it.
     if outcome.position_ms == 0 && outcome.duration_ms == 0 {
@@ -124,7 +132,9 @@ fn record(app: &AppPaths, provider: &dyn WatchProvider, ctx: &Ctx<'_>, id: &str,
         duration_ms: outcome.duration_ms,
         updated_at: Utc::now(),
         finished: finished(outcome.position_ms, outcome.duration_ms),
-        video_id: Some(id.to_owned()),
+        // A series' episode pointer comes from the stored record; a film's is
+        // its own id.
+        video_id: previous.and_then(|progress| progress.video_id.clone()).or_else(|| Some(id.to_owned())),
     };
     let mut movies = store::read_movies(app);
     store::upsert_progress(&mut movies, progress.clone());
@@ -215,5 +225,63 @@ mod tests {
         let http = UreqTransport::new();
         let err = streams_with(&http, &app, "nowhere", "movie", "tt1").unwrap_err().to_string();
         assert!(err.contains("Unknown Watch provider"), "{err}");
+    }
+
+    struct NoopProvider;
+
+    impl WatchProvider for NoopProvider {
+        fn id(&self) -> &'static str {
+            "stremio"
+        }
+        fn name(&self) -> &'static str {
+            "Stremio"
+        }
+        fn browse(&self, _: &Ctx<'_>) -> Result<Vec<heronite_watch_core::provider::Rail>> {
+            Ok(Vec::new())
+        }
+        fn streams(&self, _: &Ctx<'_>, _: &str, _: &str) -> Result<Vec<StreamChoice>> {
+            Ok(Vec::new())
+        }
+        fn resolve(&self, _: &Ctx<'_>, _: &StreamChoice) -> Result<ResolvedStream> {
+            anyhow::bail!("not used")
+        }
+    }
+
+    #[test]
+    fn recording_keeps_the_episode_pointer_it_had() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let credentials = StoreCredentials::new(&app);
+        let http = UreqTransport::new();
+        let ctx = Ctx { http: &http, credentials: &credentials };
+        let previous = MovieProgress {
+            provider: "stremio".into(),
+            id: "tt1".into(),
+            position_ms: 1,
+            duration_ms: 2,
+            updated_at: Utc::now(),
+            finished: false,
+            video_id: Some("tt1:1:2".into()),
+        };
+        record(&app, &NoopProvider, &ctx, "tt1", Some(&previous), &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+
+        let stored = store::read_movies(&app);
+        assert_eq!(store::progress_for(&stored, "stremio", "tt1").unwrap().video_id.as_deref(), Some("tt1:1:2"));
+    }
+
+    #[test]
+    fn absurd_durations_do_not_overflow() {
+        let huge = MovieProgress {
+            provider: "stremio".into(),
+            id: "tt1".into(),
+            position_ms: u64::MAX,
+            duration_ms: u64::MAX,
+            updated_at: Utc::now(),
+            finished: false,
+            video_id: None,
+        };
+        assert_eq!(resume_at(&huge), None);
+        assert!(finished(u64::MAX, u64::MAX));
+        assert!(!finished(1, u64::MAX));
     }
 }

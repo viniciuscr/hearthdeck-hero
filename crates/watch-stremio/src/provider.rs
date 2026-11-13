@@ -139,7 +139,12 @@ impl WatchProvider for Stremio {
         let endpoints = Endpoints::default();
         endpoints.validate()?;
         if let Some(url) = &stream.url {
-            return Ok(ResolvedStream { url: Url::parse(url).context("stream URL")?, origin: StreamOrigin::Remote });
+            let url = Url::parse(url).context("stream URL")?;
+            // The picker only offers what the player would accept.
+            if !StreamOrigin::Remote.allows(&url) {
+                bail!("refusing a stream that is not https: {}://{}", url.scheme(), url.host_str().unwrap_or("?"));
+            }
+            return Ok(ResolvedStream { url, origin: StreamOrigin::Remote });
         }
         let hash = stream.info_hash.as_deref().ok_or_else(|| anyhow!("This stream has nothing to play."))?;
         let server = StreamingServer::new(ctx.http, endpoints.streaming_server.clone())?;

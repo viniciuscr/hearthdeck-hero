@@ -35,6 +35,12 @@ impl<'a> StreamingServer<'a> {
         }
         let body = self.http.get(&self.base.join("settings")?)?;
         let envelope: Envelope = serde_json::from_slice(&body).context("streaming server settings")?;
+        // The answer is not trusted any more than the configured host: a
+        // compromised service must not point the player off loopback.
+        let host = envelope.base_url.host_str().unwrap_or_default();
+        if !matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]") {
+            bail!("streaming server must be on loopback");
+        }
         Ok(envelope.base_url)
     }
 

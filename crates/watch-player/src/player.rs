@@ -54,9 +54,7 @@ pub fn mpv_arguments(request: &PlayRequest, ipc_socket: &Path) -> Result<Vec<Str
 
 #[cfg(unix)]
 mod unix {
-    use std::fs;
     use std::io::{self, BufRead, BufReader, Write};
-    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command};
@@ -90,17 +88,18 @@ mod unix {
     pub struct MpvSession {
         child: Child,
         ipc: Option<MpvIpc>,
-        dir: PathBuf,
+        /// Held for its drop: a `TempDir` removes the IPC folder.
+        _dir: tempfile::TempDir,
         position_ms: u64,
         duration_ms: u64,
     }
 
     impl MpvSession {
         pub fn start(mpv: &Path, request: &PlayRequest, gamepad: bool) -> Result<Self> {
-            let dir = std::env::temp_dir().join(format!("hearthdeck-mpv-{}", std::process::id()));
-            fs::create_dir_all(&dir)?;
-            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
-            let socket = dir.join("mpv.sock");
+            // `TempDir` creates the folder `0700` atomically under a random
+            // name, so a same-user process cannot pre-plant it as a symlink.
+            let dir = tempfile::Builder::new().prefix("hearthdeck-mpv-").tempdir()?;
+            let socket = dir.path().join("mpv.sock");
             let mut args = mpv_arguments(request, &socket)?;
             if gamepad {
                 let at = args.len().saturating_sub(2);
@@ -111,7 +110,7 @@ mod unix {
             heronite_data::proc::guard(&mut cmd);
             let child = heronite_data::proc::spawn(&mut cmd).with_context(|| format!("starting {}", mpv.display()))?;
             let ipc = MpvIpc::connect_retry(&socket).ok();
-            Ok(Self { child, ipc, dir, position_ms: request.start_ms.unwrap_or(0), duration_ms: 0 })
+            Ok(Self { child, ipc, _dir: dir, position_ms: request.start_ms.unwrap_or(0), duration_ms: 0 })
         }
 
         /// Waits for mpv to exit, keeping the last position and duration.
@@ -159,7 +158,7 @@ mod unix {
         fn drop(&mut self) {
             let _ = self.child.kill();
             let _ = self.child.wait();
-            let _ = fs::remove_dir_all(&self.dir);
+            // `_dir` (a `TempDir`) removes the IPC folder here.
         }
     }
 
