@@ -1,15 +1,17 @@
 {
-  "result": [
-    {
-      "transportUrl": "https://torrentio.strem.fun/manifest.json",
-      "manifest": {
-        "id": "community.torrentio",
-        "name": "Torrentio",
-        "resources": ["stream"],
-        "types": ["movie"],
-        "idPrefixes": ["tt"],
-        "catalogs": []
+  "result": {
+    "addons": [
+      {
+        "transportUrl": "https://torrentio.strem.fun/manifest.json",
+        "manifest": {
+          "id": "community.torrentio",
+          "name": "Torrentio",
+          "resources": ["stream"],
+          "types": ["movie"],
+          "idPrefixes": ["tt"],
+          "catalogs": []
+        }
       }
-    }
-  ]
+    ]
+  }
 }

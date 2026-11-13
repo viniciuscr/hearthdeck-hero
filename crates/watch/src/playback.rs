@@ -51,7 +51,15 @@ pub fn streams_with(http: &dyn Transport, endpoints: &Endpoints, app: &AppPaths,
     let mut choices = Vec::new();
     let mut sources = 0;
     for addon in addons {
-        if !addon.serves("stream") || !addon.manifest.types.iter().any(|t| t == kind) {
+        let Some(manifest) = &addon.manifest else {
+            log::warn!("watch addon: no manifest, skipped");
+            continue;
+        };
+        if !addon.serves("stream") || !manifest.types.iter().any(|t| t == kind) {
+            continue;
+        }
+        // A protected or half-configured addon has no transport to ask.
+        if addon.transport_url.is_empty() {
             continue;
         }
         sources += 1;
@@ -60,18 +68,18 @@ pub fn streams_with(http: &dyn Transport, endpoints: &Endpoints, app: &AppPaths,
         let client = match AddonClient::new(http, &addon.transport_url) {
             Ok(client) => client,
             Err(error) => {
-                log::warn!("watch addon {}: {error:#}", addon.manifest.name);
+                log::warn!("watch addon {}: {error:#}", manifest.name);
                 continue;
             }
         };
         match client.stream(kind, id) {
             Ok(mut streams) => {
                 for stream in &mut streams {
-                    stream.addon.clone_from(&addon.manifest.name);
+                    stream.addon.clone_from(&manifest.name);
                 }
                 choices.append(&mut streams);
             }
-            Err(error) => log::warn!("watch addon {}: {error:#}", addon.manifest.name),
+            Err(error) => log::warn!("watch addon {}: {error:#}", manifest.name),
         }
     }
 

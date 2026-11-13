@@ -12,18 +12,30 @@ use url::Url;
 use crate::http::Transport;
 use crate::types::{MovieItem, StreamChoice};
 
+/// Addons serialize optional lists as `null`, and `serde(default)` only
+/// covers a missing field; make `null` mean the same.
+pub(crate) fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
+    #[serde(default, deserialize_with = "null_as_default")]
     pub id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub resources: Vec<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub types: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub catalogs: Vec<Catalog>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub id_prefixes: Vec<String>,
 }
 
@@ -36,8 +48,9 @@ impl Manifest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Catalog {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default, deserialize_with = "null_as_default")]
     pub kind: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
@@ -265,5 +278,16 @@ mod tests {
         assert!(manifest.has_resource("catalog"));
         assert!(manifest.has_resource("stream"));
         assert!(!manifest.has_resource("meta"));
+    }
+
+    #[test]
+    fn a_manifest_reads_null_lists_as_empty() {
+        let manifest: Manifest =
+            serde_json::from_str(r#"{"id":null,"name":null,"resources":null,"types":null,"catalogs":null,"idPrefixes":null}"#).unwrap();
+        assert!(manifest.resources.is_empty());
+        assert!(manifest.types.is_empty());
+        assert!(manifest.catalogs.is_empty());
+        assert!(manifest.id_prefixes.is_empty());
+        assert!(!manifest.has_resource("stream"));
     }
 }

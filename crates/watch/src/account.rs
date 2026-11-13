@@ -63,14 +63,25 @@ pub fn read_link(http: &dyn Transport, link_base: &Url, code: &str) -> Result<Li
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddonDescriptor {
+    #[serde(default, deserialize_with = "crate::addon::null_as_default")]
     pub transport_url: String,
-    pub manifest: Manifest,
+    /// Missing or `null` for a descriptor the account cannot use.
+    #[serde(default)]
+    pub manifest: Option<Manifest>,
 }
 
 impl AddonDescriptor {
     pub fn serves(&self, resource: &str) -> bool {
-        self.manifest.has_resource(resource)
+        self.manifest.as_ref().is_some_and(|manifest| manifest.has_resource(resource))
     }
+}
+
+/// The `addonCollectionGet` result: `{"addons":[…]}` in the API, with the
+/// bare array kept for older answers.
+#[derive(Deserialize)]
+struct AddonCollection {
+    #[serde(default, deserialize_with = "crate::addon::null_as_default")]
+    addons: Vec<AddonDescriptor>,
 }
 
 /// The addons installed on the linked account. The stream resource is what
@@ -83,8 +94,13 @@ pub fn addon_collection(http: &dyn Transport, api: &Url, key: &AuthKey) -> Resul
     if let Some(error) = value.get("error") {
         bail!("Stremio addonCollectionGet: {}", error_text(error));
     }
-    let result = value.get("result").ok_or_else(|| anyhow!("addonCollectionGet answered without a result"))?;
-    serde_json::from_value(result.clone()).context("addon collection")
+    let result =
+        value.get("result").filter(|result| !result.is_null()).ok_or_else(|| anyhow!("addonCollectionGet answered without a result"))?;
+    if result.is_array() {
+        return serde_json::from_value(result.clone()).context("addon collection");
+    }
+    let collection: AddonCollection = serde_json::from_value(result.clone()).context("addon collection")?;
+    Ok(collection.addons)
 }
 
 fn error_text(error: &Value) -> String {
@@ -152,5 +168,45 @@ mod tests {
         let base = Url::parse("https://link.stremio.com").unwrap();
         let _ = read_link(&fake, &base, "GYWV");
         assert!(fake.seen.lock().unwrap()[0].contains("code=GYWV"));
+    }
+
+    struct Post(String);
+
+    impl Transport for Post {
+        fn get(&self, _: &Url) -> Result<Vec<u8>> {
+            unreachable!()
+        }
+        fn post_json(&self, _: &Url, _: &Value) -> Result<Vec<u8>> {
+            Ok(self.0.as_bytes().to_vec())
+        }
+    }
+
+    const ADDON: &str = r#"{"transportUrl":"https://torrentio.strem.fun/manifest.json","manifest":{"id":"community.torrentio","name":"Torrentio","resources":["stream"],"types":["movie"]}}"#;
+
+    #[test]
+    fn the_addon_collection_reads_the_api_envelope_and_a_bare_array() {
+        let api = Url::parse("https://api.strem.io/api/").unwrap();
+        for result in [format!(r#"{{"result":{{"addons":[{ADDON}]}}}}"#), format!(r#"{{"result":[{ADDON}]}}"#)] {
+            let addons = addon_collection(&Post(result), &api, &AuthKey::new("key")).unwrap();
+            assert_eq!(addons.len(), 1);
+            assert_eq!(addons[0].transport_url, "https://torrentio.strem.fun/manifest.json");
+            assert!(addons[0].serves("stream"));
+        }
+    }
+
+    #[test]
+    fn a_null_addon_list_is_empty() {
+        let api = Url::parse("https://api.strem.io/api/").unwrap();
+        let addons = addon_collection(&Post(r#"{"result":{"addons":null}}"#.into()), &api, &AuthKey::new("key")).unwrap();
+        assert!(addons.is_empty());
+    }
+
+    #[test]
+    fn an_addon_with_null_manifest_lists_still_parses() {
+        let api = Url::parse("https://api.strem.io/api/").unwrap();
+        let body = r#"{"result":{"addons":[{"transportUrl":"https://addon.example/manifest.json","manifest":{"id":"x","name":"X","resources":null,"types":null,"catalogs":null,"idPrefixes":null}}]}}"#;
+        let addons = addon_collection(&Post(body.into()), &api, &AuthKey::new("key")).unwrap();
+        assert_eq!(addons.len(), 1);
+        assert!(!addons[0].serves("stream"));
     }
 }

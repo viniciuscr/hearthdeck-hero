@@ -236,6 +236,8 @@ Envelope, source `stremio-core`:
 - Both live at `https://api.strem.io/api/`: the path is part of the base URL,
   not something `Url::join` adds (`https://api.strem.io/addonCollectionGet` is
   a 404).
+- `addonCollectionGet` answers `{"result":{"addons":[…]}}`; the decoder also
+  accepts a bare `result` array for older answers.
 - Ask each addon once (`stream/{type}/{id}.json`), name it by manifest id, and
   keep only entries with a `url` or an `infoHash`.
 - Order by seeders, then size; the first entry is what Play starts when the
@@ -382,5 +384,13 @@ Envelope, source `stremio-core`:
   Stremio's JSON envelope (an invalid key gives `Session does not exist`).
   `Endpoints::default().api` now ends in `/api/`, which also fixes the library
   sync that had been logging 404 and keeping the last good library.
+- **2026-11-13, addon collection shape.** A real account answers
+  `{"result":{"addons":[…]}}`; the first decoder expected `result` itself to be
+  the array and failed with "invalid type: map, expected a sequence". The
+  decoder now reads the `addons` key and keeps the bare-array fallback.
+- **2026-11-13, null manifest lists.** Some installed addons serialize
+  `resources`, `types`, `catalogs` or `idPrefixes` as `null`; `serde(default)`
+  does not cover that. Manifests now read `null` as an empty list (and a
+  `null` addon list as no addons); an addon with no `transportUrl` is skipped.
 
 
