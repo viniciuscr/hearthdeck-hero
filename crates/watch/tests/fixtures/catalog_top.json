@@ -1,0 +1,16 @@
+{
+  "metas": [
+    {
+      "id": "tt26657236",
+      "type": "movie",
+      "name": "The Same Film",
+      "poster": "https://images.metahub.space/poster/tt26657236/medium/img"
+    },
+    {
+      "id": "tt9",
+      "type": "movie",
+      "name": "Another Film",
+      "poster": "https://images.metahub.space/poster/tt9/medium/img"
+    }
+  ]
+}

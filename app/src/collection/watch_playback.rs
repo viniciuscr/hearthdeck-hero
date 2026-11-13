@@ -72,9 +72,10 @@ impl CollectionView {
 
         let app = self.app_paths.clone();
         let id = game.app_name.clone();
+        let provider = game.runner.clone();
         let kind = crate::fork::watch::sources::kind(game).to_owned();
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { heronite_watch::playback::streams(&app, &kind, &id) }).await;
+            let result = cx.background_spawn(async move { heronite_watch::playback::streams(&app, &provider, &kind, &id) }).await;
             this.update(cx, |this, cx| {
                 // Another title took the selection while this one loaded.
                 if this.watch.item.as_deref() != Some(key.as_str()) {
@@ -139,6 +140,7 @@ impl CollectionView {
 
         let app = self.app_paths.clone();
         let request = heronite_watch::playback::PlaybackRequest {
+            provider: game.runner.clone(),
             id: game.app_name.clone(),
             kind: crate::fork::watch::sources::kind(game).to_owned(),
             title: game.title.clone(),

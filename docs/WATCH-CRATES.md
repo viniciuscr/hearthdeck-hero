@@ -40,21 +40,20 @@ app
 A provider crate takes everything it needs from `Ctx`; it never opens a file or
 spawns a process. That is what keeps a provider testable on fixtures alone.
 
-CR-1 keeps the present type names (`MovieItem`, `MovieProgress`) so the move
-changes no code; they become `WatchItem` and `WatchProgress` with the provider
-contract in CR-2.
+The item and progress types keep their present names (`MovieItem`,
+`MovieProgress`); they become `WatchItem` and `WatchProgress` when a second
+provider needs to tell films from live channels.
 
 ## Contracts
 
 ```rust
 pub trait WatchProvider: Send + Sync {
     fn id(&self) -> &'static str;                  // "stremio"; also GameInfo.runner/source
-    fn catalogs(&self) -> Vec<CatalogDescriptor>;  // the rails it contributes, in order
-    fn browse(&self, ctx: &Ctx<'_>, catalog: &CatalogDescriptor) -> Result<Vec<WatchItem>>;
-    fn streams(&self, ctx: &Ctx<'_>, item: &WatchItem) -> Result<Vec<StreamChoice>>;
-    fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<ResolvedStream>;
-    fn read_progress(&self, _: &Ctx<'_>, _: &str) -> Result<Option<WatchProgress>> { Ok(None) }
-    fn write_progress(&self, _: &Ctx<'_>, _: &WatchProgress) -> Result<()> { Ok(()) }
+    fn name(&self) -> &'static str;                // what an error or a log line calls it
+    fn browse(&self, ctx: &Ctx<'_>) -> Result<Vec<Rail>>;  // every rail, in display order
+    fn streams(&self, ctx: &Ctx<'_>, kind: &str, id: &str) -> Result<Vec<StreamChoice>>;
+    fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<Url>; // the URL the player opens
+    fn write_progress(&self, _: &Ctx<'_>, _: &MovieProgress) -> Result<()> { Ok(()) }
 }
 
 pub struct Ctx<'a> { pub http: &'a dyn Transport, pub credentials: &'a dyn Credentials }
@@ -65,26 +64,27 @@ pub trait Credentials: Send + Sync {
     fn set(&self, provider: &str, secret: &Secret) -> Result<()>;
     fn clear(&self, provider: &str) -> Result<()>;
 }
-
-pub struct ResolvedStream { pub url: Url, pub origin: StreamOrigin }
-
-pub enum StreamOrigin { LocalService, Remote }
 ```
 
-- `browse` is asked per catalog, not once per provider: a provider's rails differ
-  in kind and order, and a live provider (OpenTV) has no catalogues at all.
-- `read_progress` exists beside `write_progress` because a provider that keeps
-  progress remotely must be able to resume from it; a live provider defaults both.
-- `resolve` returns the final URL and its origin. Torrent work (the local Stremio
-  service) stays inside the Stremio crate; the player accepts `Remote` only over
-  https and http only for `LocalService` on loopback.
+- `browse` returns every rail in one call, each with its kind and items: a
+  provider's rails differ in kind and order, and a live provider (OpenTV) has no
+  catalogue of its own. The facade assembles them in order and keeps the first
+  copy of a title, so Continue Watching keeps its placement and a title in two
+  rails is not marked Top.
+- `resolve` keeps the provider's own work (the torrent → local Stremio service)
+  inside its crate and returns the URL the player opens. Requiring https for a
+  remote URL and loopback for the local service is CR-3's origin policy.
+- Reading remote progress lands in CR-3 with the provider-scoped keys; until
+  then the local `movies.json` is the resume source and `write_progress` is the
+  only remote call.
 - Credentials are per provider and opaque, so YouTube's OAuth tokens and a
   provider's endpoint list do not have to become `AuthKey`.
 
 ### App-facing surface
 
 The app imports these paths and no others; the facade keeps them stable. The
-integration test also uses the root re-exports `AuthKey` and `Transport`.
+integration test imports the crates directly, so the facade publishes only what
+the app uses.
 
 | Path | Items |
 |---|---|
@@ -94,7 +94,7 @@ integration test also uses the root re-exports `AuthKey` and `Transport`.
 | `heronite_watch::collection` | `ROOT`, `library` |
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` |
 | `heronite_watch::player` | `PlaybackOutcome` |
-| `heronite_watch::types` | `StreamChoice` and the item types the UI shows |
+| `heronite_watch::types` | `StreamChoice` |
 
 The facade re-exports items, never whole crates: a `pub use … as module` would
 publish `MpvSession`, `DatastoreClient` and the file stores as app API, and a

@@ -1,34 +1,35 @@
-//! Playback: the linked account's stream addons, the local Stremio service
-//! and mpv.
+//! Playback: a provider's streams, its resolved URL and the player.
 //!
-//! `streams` resolves a title through the addons the account already has
-//! installed (Torrentio and friends) and sorts the result for the picker.
-//! `play` fetches the torrent into the local service, hands the resulting
-//! HTTP stream to mpv and records the position. Everything here is blocking:
-//! the app calls `streams` on a background task and `play` on its own thread,
-//! and flips `stop` to end a session.
+//! `streams` resolves a title through the provider that owns it and sorts the
+//! result for the picker. `play` asks the provider for the URL, hands it to mpv
+//! and records the position. Everything here is blocking: the app calls
+//! `streams` on a background task and `play` on its own thread, and flips
+//! `stop` to end a session.
 
 use std::sync::atomic::AtomicBool;
 
-use anyhow::{anyhow, bail, Context, Result};
+#[cfg(not(unix))]
+use anyhow::bail;
+use anyhow::{anyhow, Result};
 use chrono::Utc;
 use heronite_data::paths::AppPaths;
 use url::Url;
 
-use heronite_watch_addon::addon::AddonClient;
 use heronite_watch_core::http::{Transport, UreqTransport};
+use heronite_watch_core::provider::{Ctx, WatchProvider};
 use heronite_watch_core::types::{MovieProgress, StreamChoice};
 use heronite_watch_player::player::{MpvSession, PlayRequest, PlaybackOutcome};
 use heronite_watch_state::store;
-use heronite_watch_stremio::account::addon_collection;
-use heronite_watch_stremio::datastore::{write_progress, DatastoreClient};
-use heronite_watch_stremio::endpoints::Endpoints;
-use heronite_watch_stremio::streaming::StreamingServer;
+use heronite_watch_state::store::StoreCredentials;
+
+use crate::registry;
 
 /// What to play: one normalized stream of a title.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaybackRequest {
-    /// The Stremio id (`tt…`), also the local progress key.
+    /// The provider that owns the title, as `GameInfo.runner` names it.
+    pub provider: String,
+    /// The provider's id for the title, also the local progress key.
     pub id: String,
     /// `movie` in v1.
     pub kind: String,
@@ -37,88 +38,30 @@ pub struct PlaybackRequest {
 }
 
 /// The playable streams of a title, best first.
-pub fn streams(app: &AppPaths, kind: &str, id: &str) -> Result<Vec<StreamChoice>> {
+pub fn streams(app: &AppPaths, provider: &str, kind: &str, id: &str) -> Result<Vec<StreamChoice>> {
     let http = UreqTransport::new();
-    streams_with(&http, &Endpoints::default(), app, kind, id)
+    streams_with(&http, app, provider, kind, id)
 }
 
-/// [`streams`] with an injected transport and endpoints, for tests.
-pub fn streams_with(http: &dyn Transport, endpoints: &Endpoints, app: &AppPaths, kind: &str, id: &str) -> Result<Vec<StreamChoice>> {
-    endpoints.validate()?;
-    let key = store::read_auth(app)?.ok_or_else(|| anyhow!("Link your Stremio account in Settings → Watch to play."))?;
-    let addons = addon_collection(http, &endpoints.api, &key).context("reading the addons of the linked account")?;
-
-    let mut choices = Vec::new();
-    let mut sources = 0;
-    for addon in addons {
-        let Some(manifest) = &addon.manifest else {
-            log::warn!("watch addon: no manifest, skipped");
-            continue;
-        };
-        if !addon.serves("stream") || !manifest.types.iter().any(|t| t == kind) {
-            continue;
-        }
-        // A protected or half-configured addon has no transport to ask.
-        if addon.transport_url.is_empty() {
-            continue;
-        }
-        sources += 1;
-        // The addon's transport URL may carry the person's configuration; the
-        // error names the addon, never the URL.
-        let client = match AddonClient::new(http, &addon.transport_url) {
-            Ok(client) => client,
-            Err(error) => {
-                log::warn!("watch addon {}: {error:#}", manifest.name);
-                continue;
-            }
-        };
-        match client.stream(kind, id) {
-            Ok(mut streams) => {
-                for stream in &mut streams {
-                    stream.addon.clone_from(&manifest.name);
-                }
-                choices.append(&mut streams);
-            }
-            Err(error) => log::warn!("watch addon {}: {error:#}", manifest.name),
-        }
-    }
-
-    if sources == 0 {
-        bail!("The linked Stremio account has no addon that provides streams. Install Torrentio in Stremio.");
-    }
-    choices.retain(StreamChoice::is_playable);
-    choices.sort_by(|a, b| {
-        b.seeders
-            .unwrap_or(0)
-            .cmp(&a.seeders.unwrap_or(0))
-            .then_with(|| b.size_bytes.unwrap_or(0).cmp(&a.size_bytes.unwrap_or(0)))
-            .then_with(|| a.addon.cmp(&b.addon))
-    });
-    Ok(choices)
+/// [`streams`] with an injected transport, for tests.
+pub fn streams_with(http: &dyn Transport, app: &AppPaths, provider: &str, kind: &str, id: &str) -> Result<Vec<StreamChoice>> {
+    let credentials = StoreCredentials::new(app);
+    let ctx = Ctx { http, credentials: &credentials };
+    registry::find(provider).ok_or_else(|| anyhow!("Unknown Watch provider: {provider}"))?.streams(&ctx, kind, id)
 }
 
 /// Plays `request` to the end (or until `stop`), then records the position.
 /// Blocking: the caller owns a thread.
 pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Result<PlaybackOutcome> {
     let http = UreqTransport::new();
-    let endpoints = Endpoints::default();
-    endpoints.validate()?;
-    let url = stream_url(&http, &endpoints, &request.stream)?;
+    let credentials = StoreCredentials::new(app);
+    let ctx = Ctx { http: &http, credentials: &credentials };
+    let provider = registry::find(&request.provider).ok_or_else(|| anyhow!("Unknown Watch provider: {}", request.provider))?;
+    let url = provider.resolve(&ctx, &request.stream)?;
     let start_ms = resume_position(app, &request.id);
     let outcome = play_url(request, url, start_ms, stop)?;
-    record(app, &request.id, &outcome);
+    record(app, provider, &ctx, &request.id, &outcome);
     Ok(outcome)
-}
-
-fn stream_url(http: &dyn Transport, endpoints: &Endpoints, stream: &StreamChoice) -> Result<Url> {
-    if let Some(url) = &stream.url {
-        return Url::parse(url).context("stream URL");
-    }
-    let hash = stream.info_hash.as_deref().ok_or_else(|| anyhow!("This stream has nothing to play."))?;
-    let server = StreamingServer::new(http, endpoints.streaming_server.clone())?;
-    let base = server.base_url().context("The Stremio service is not running")?;
-    server.create(hash, &[]).context("The Stremio service refused the torrent")?;
-    StreamingServer::stream_url(&base, hash, stream.file_idx)
 }
 
 #[cfg(unix)]
@@ -153,9 +96,9 @@ fn finished(position_ms: u64, duration_ms: u64) -> bool {
     duration_ms > 0 && position_ms * 100 >= duration_ms * 70
 }
 
-/// Local progress first, then Stremio. A failed remote write keeps the local
-/// record for the next attempt; it never deletes anything.
-fn record(app: &AppPaths, id: &str, outcome: &PlaybackOutcome) {
+/// Local progress first, then the provider's. A failed remote write keeps the
+/// local record for the next attempt; it never deletes anything.
+fn record(app: &AppPaths, provider: &dyn WatchProvider, ctx: &Ctx<'_>, id: &str, outcome: &PlaybackOutcome) {
     // mpv exited before reporting anything: keep the position we had instead
     // of resetting it.
     if outcome.position_ms == 0 && outcome.duration_ms == 0 {
@@ -175,12 +118,8 @@ fn record(app: &AppPaths, id: &str, outcome: &PlaybackOutcome) {
         log::warn!("saving watch progress: {error:#}");
         return;
     }
-    let Ok(Some(key)) = store::read_auth(app) else { return };
-    let http = UreqTransport::new();
-    let endpoints = Endpoints::default();
-    let client = DatastoreClient::new(&http, &endpoints, key);
-    if let Err(error) = write_progress(&client, &progress) {
-        log::warn!("writing watch progress to Stremio: {error:#}");
+    if let Err(error) = provider.write_progress(ctx, &progress) {
+        log::warn!("writing watch progress to {}: {error:#}", provider.name());
     }
 }
 
@@ -192,10 +131,14 @@ mod tests {
         MovieProgress { id: "tt1".into(), position_ms, duration_ms, updated_at: Utc::now(), finished, video_id: None }
     }
 
+    fn app(dir: &std::path::Path) -> AppPaths {
+        AppPaths { config: dir.join("config"), cache: dir.join("cache") }
+    }
+
     #[test]
     fn a_started_film_resumes_and_a_finished_one_does_not() {
         let dir = tempfile::tempdir().unwrap();
-        let app = AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+        let app = app(dir.path());
         let mut movies = store::MoviesFile::default();
         store::upsert_progress(&mut movies, progress(60_000, 600_000, false));
         store::write_movies(&app, &movies).unwrap();
@@ -220,19 +163,32 @@ mod tests {
 
     #[test]
     fn a_stream_without_a_url_or_hash_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let credentials = StoreCredentials::new(&app);
+        let http = UreqTransport::new();
+        let ctx = Ctx { http: &http, credentials: &credentials };
         let stream = StreamChoice::default();
         assert!(!stream.is_playable());
-        let http = UreqTransport::new();
-        let err = stream_url(&http, &Endpoints::default(), &stream).unwrap_err().to_string();
+        let err = registry::find("stremio").unwrap().resolve(&ctx, &stream).unwrap_err().to_string();
         assert!(err.contains("nothing to play"), "{err}");
     }
 
     #[test]
     fn an_unlinked_account_is_told_where_to_link() {
         let dir = tempfile::tempdir().unwrap();
-        let app = AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+        let app = app(dir.path());
         let http = UreqTransport::new();
-        let err = streams_with(&http, &Endpoints::default(), &app, "movie", "tt1").unwrap_err().to_string();
+        let err = streams_with(&http, &app, "stremio", "movie", "tt1").unwrap_err().to_string();
         assert!(err.contains("Settings → Watch"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_provider_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let http = UreqTransport::new();
+        let err = streams_with(&http, &app, "nowhere", "movie", "tt1").unwrap_err().to_string();
+        assert!(err.contains("Unknown Watch provider"), "{err}");
     }
 }

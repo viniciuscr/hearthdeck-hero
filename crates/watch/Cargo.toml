@@ -7,7 +7,6 @@ description = "Watch: Stremio account, addon protocol, local streaming server an
 
 [dependencies]
 heronite-watch-core = { path = "../watch-core" }
-heronite-watch-addon = { path = "../watch-addon" }
 heronite-watch-player = { path = "../watch-player" }
 heronite-watch-stremio = { path = "../watch-stremio" }
 heronite-watch-state = { path = "../watch-state" }
@@ -18,6 +17,7 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 url = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
+heronite-watch-addon = { path = "../watch-addon" }
 serde_json.workspace = true
 tempfile = "3"
 
