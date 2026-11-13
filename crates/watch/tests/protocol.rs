@@ -11,8 +11,8 @@ use heronite_watch::playback;
 use heronite_watch_addon::addon::AddonClient;
 use heronite_watch_core::auth::AuthKey;
 use heronite_watch_core::http::Transport;
-use heronite_watch_core::provider::{Ctx, WatchProvider};
-use heronite_watch_core::types::MovieProgress;
+use heronite_watch_core::provider::{Ctx, StreamOrigin, WatchProvider};
+use heronite_watch_core::types::{MovieProgress, StreamChoice};
 use heronite_watch_state::store;
 use heronite_watch_state::store::StoreCredentials;
 use heronite_watch_stremio::account::{addon_collection, create_link, read_link, LinkPoll};
@@ -182,6 +182,25 @@ fn progress_writes_the_full_record_and_the_probe_is_a_no_op() {
     assert_eq!(body["changes"][0]["futureTop"], true);
     assert_eq!(body["changes"][0]["state"]["timeOffset"], 100);
     assert_eq!(probe_put(&client).unwrap(), Probe::Verified { items: 1 });
+}
+
+#[test]
+fn stremio_resolves_a_direct_url_as_remote_and_a_torrent_through_the_service() {
+    let fake = Fake::new();
+    let dir = tempfile::tempdir().unwrap();
+    let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+    let credentials = StoreCredentials::new(&app);
+    let ctx = Ctx { http: &fake, credentials: &credentials };
+
+    let direct = StreamChoice { url: Some("https://debrid.example/film".into()), ..StreamChoice::default() };
+    let resolved = Stremio.resolve(&ctx, &direct).unwrap();
+    assert_eq!(resolved.origin, StreamOrigin::Remote);
+    assert_eq!(resolved.url.as_str(), "https://debrid.example/film");
+
+    let torrent = StreamChoice { info_hash: Some(HASH.into()), file_idx: Some(1), ..StreamChoice::default() };
+    let resolved = Stremio.resolve(&ctx, &torrent).unwrap();
+    assert_eq!(resolved.origin, StreamOrigin::LocalService);
+    assert!(resolved.origin.allows(&resolved.url), "{}", resolved.url);
 }
 
 #[test]

@@ -7,11 +7,14 @@
 use std::path::Path;
 
 use anyhow::{bail, Result};
+use heronite_watch_core::provider::StreamOrigin;
 use url::Url;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlayRequest {
     pub url: Url,
+    /// Where the URL points; the scheme and host it may use follow from it.
+    pub origin: StreamOrigin,
     pub start_ms: Option<u64>,
     pub title: Option<String>,
 }
@@ -24,10 +27,15 @@ pub struct PlaybackOutcome {
     pub duration_ms: u64,
 }
 
-/// `--` ends option parsing; only http(s) streams are accepted.
+/// `--` ends option parsing; the URL must fit its origin (https remotely, a
+/// loopback service locally).
 pub fn mpv_arguments(request: &PlayRequest, ipc_socket: &Path) -> Result<Vec<String>> {
-    if !matches!(request.url.scheme(), "http" | "https") {
-        bail!("unsupported stream scheme: {}", request.url.scheme());
+    if !request.origin.allows(&request.url) {
+        let expected = match request.origin {
+            StreamOrigin::Remote => "an https URL",
+            StreamOrigin::LocalService => "a loopback service URL",
+        };
+        bail!("refusing a stream that is not {expected}: {}://{}", request.url.scheme(), request.url.host_str().unwrap_or("?"));
     }
     if request.url.as_str().starts_with('-') {
         bail!("refusing a stream URL that looks like an option");
@@ -228,8 +236,12 @@ mod tests {
 
     #[test]
     fn the_url_comes_after_the_option_terminator() {
-        let request =
-            PlayRequest { url: Url::parse("http://127.0.0.1:11470/hash/0").unwrap(), start_ms: Some(65_500), title: Some("A Film".into()) };
+        let request = PlayRequest {
+            url: Url::parse("http://127.0.0.1:11470/hash/0").unwrap(),
+            origin: StreamOrigin::LocalService,
+            start_ms: Some(65_500),
+            title: Some("A Film".into()),
+        };
         let args = mpv_arguments(&request, Path::new("/tmp/ipc")).unwrap();
         let dash = args.iter().position(|arg| arg == "--").unwrap();
         assert_eq!(dash, args.len() - 2);
@@ -239,7 +251,29 @@ mod tests {
 
     #[test]
     fn a_non_http_stream_is_refused() {
-        let request = PlayRequest { url: Url::parse("file:///etc/passwd").unwrap(), start_ms: None, title: None };
+        let request =
+            PlayRequest { url: Url::parse("file:///etc/passwd").unwrap(), origin: StreamOrigin::Remote, start_ms: None, title: None };
         assert!(mpv_arguments(&request, Path::new("/tmp/ipc")).is_err());
+    }
+
+    #[test]
+    fn a_remote_stream_must_be_https() {
+        let args = |url: &str| {
+            let request = PlayRequest { url: Url::parse(url).unwrap(), origin: StreamOrigin::Remote, start_ms: None, title: None };
+            mpv_arguments(&request, Path::new("/tmp/ipc"))
+        };
+        assert!(args("https://debrid.example/film").is_ok());
+        assert!(args("http://debrid.example/film").is_err());
+    }
+
+    #[test]
+    fn the_local_service_must_stay_on_loopback() {
+        let args = |url: &str| {
+            let request = PlayRequest { url: Url::parse(url).unwrap(), origin: StreamOrigin::LocalService, start_ms: None, title: None };
+            mpv_arguments(&request, Path::new("/tmp/ipc"))
+        };
+        assert!(args("http://127.0.0.1:11470/hash/0").is_ok());
+        assert!(args("http://localhost:11470/hash/0").is_ok());
+        assert!(args("http://192.0.2.10:11470/hash/0").is_err());
     }
 }

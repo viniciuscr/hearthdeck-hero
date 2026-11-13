@@ -8,18 +8,27 @@ description = "Watch: Stremio account, addon protocol, local streaming server an
 [dependencies]
 heronite-watch-core = { path = "../watch-core" }
 heronite-watch-player = { path = "../watch-player" }
-heronite-watch-stremio = { path = "../watch-stremio" }
+heronite-watch-stremio = { path = "../watch-stremio", optional = true }
 heronite-watch-state = { path = "../watch-state" }
 heronite-data = { path = "../data" }
 anyhow.workspace = true
 log.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
-url = { version = "2", features = ["serde"] }
+
+[features]
+default = ["stremio"]
+stremio = ["dep:heronite-watch-stremio"]
 
 [dev-dependencies]
 heronite-watch-addon = { path = "../watch-addon" }
 serde_json.workspace = true
 tempfile = "3"
+url = "2"
+
+# The end-to-end protocol test drives the Stremio provider.
+[[test]]
+name = "protocol"
+required-features = ["stremio"]
 
 [lints]
 workspace = true

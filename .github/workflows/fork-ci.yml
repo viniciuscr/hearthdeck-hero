@@ -58,6 +58,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
+      # Providers are cargo features, so the default build alone never proves
+      # the facade's wiring: check both ends of the matrix.
+      - name: Watch provider features
+        run: |
+          cargo check -p heronite-watch --all-features
+          cargo check -p heronite-watch --no-default-features
 
   # The Windows port has no cache unless it is written here: ci.yml only saves
   # on main, which the fork changes only when it reconciles upstream. These

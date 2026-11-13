@@ -9,6 +9,6 @@ pub mod http;
 pub mod provider;
 pub mod types;
 
-pub use provider::{CatalogDescriptor, Credentials, Ctx, Rail, Secret, WatchProvider};
+pub use provider::{CatalogDescriptor, Credentials, Ctx, Rail, ResolvedStream, Secret, StreamOrigin, WatchProvider};
 
 pub type Result<T> = anyhow::Result<T>;

@@ -52,7 +52,7 @@ pub trait WatchProvider: Send + Sync {
     fn name(&self) -> &'static str;                // what an error or a log line calls it
     fn browse(&self, ctx: &Ctx<'_>) -> Result<Vec<Rail>>;  // every rail, in display order
     fn streams(&self, ctx: &Ctx<'_>, kind: &str, id: &str) -> Result<Vec<StreamChoice>>;
-    fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<Url>; // the URL the player opens
+    fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<ResolvedStream>; // URL + origin
     fn write_progress(&self, _: &Ctx<'_>, _: &MovieProgress) -> Result<()> { Ok(()) }
 }
 
@@ -72,8 +72,8 @@ pub trait Credentials: Send + Sync {
   copy of a title, so Continue Watching keeps its placement and a title in two
   rails is not marked Top.
 - `resolve` keeps the provider's own work (the torrent → local Stremio service)
-  inside its crate and returns the URL the player opens. Requiring https for a
-  remote URL and loopback for the local service is CR-3b's origin policy.
+  inside its crate and returns the URL with its origin. The player refuses a URL
+  that does not fit: `Remote` must be https, `LocalService` must be loopback.
 - `read_progress` is how another device's position resumes here: `play` asks the
   provider when the local `movies.json` has no record for the title.
 - Credentials are per provider and opaque, so YouTube's OAuth tokens and a
@@ -153,10 +153,10 @@ These are behaviour, not style; the move must keep all of them.
 
 One branch per change request, cut from `fork/main`, squash-merged. The gate is
 `scripts/fork/sync-upstream.sh --verify` plus a pull request into `fork/main`,
-which runs `fork-ci.yml` and upstream `ci.yml` (Windows included). CR-3b adds the
-two missing CI matrix entries, `--all-features` and `--no-default-features`, once
-providers sit behind features: the default build alone never proves the façade's
-wiring.
+which runs `fork-ci.yml` and upstream `ci.yml` (Windows included). Providers are
+cargo features, so `fork-ci.yml` also checks `-p heronite-watch` with
+`--all-features` and with `--no-default-features`: the default build alone never
+proves the façade's wiring.
 
 | CR | Type | Content |
 |---|---|---|
@@ -164,6 +164,11 @@ wiring.
 | CR-2 | `feat(watch)` | provider registry, provider routing in `streams`/`PlaybackRequest`, removal of dead code, curated facade. |
 | CR-3a | `feat(watch)` | provider-scoped projection keys, `(provider, id)` progress records with a legacy fallback, and `read_progress` from the Stremio datastore. |
 | CR-3b | `feat(watch)` | resolved-stream origin policy, per-catalog rails when a provider needs them, and provider cargo features with the CI `--all-features` / `--no-default-features` matrix. |
+
+CR-1, CR-2, CR-3a and CR-3b have landed. The next provider needs a crate, a
+feature entry and a line in the registry; nothing else in the layout changes.
+Per-catalog rails stay unbuilt until a provider needs them (the current
+`browse` returns every rail in one call).
 
 Dead code is removed in its own commit: `deep_link` (no caller since the
 Stremio-app handoff was dropped), `progress::{Throttle, record}` (no production
@@ -185,8 +190,8 @@ the bytes of the next `movies.json` write and that delta is recorded).
 
 1. A crate `crates/watch-<provider>` implementing `WatchProvider`; it receives
    `Ctx` and never touches files or processes.
-2. Its credential type and save path, registered in the facade behind a cargo
-   feature (`default = ["stremio"]`).
+2. Its credential type and save path, a `static` in `registry`, and a cargo
+   feature added to the facade's `default` set.
 3. `read_progress`/`write_progress`, or the defaults for a provider without
    history.
 4. Its catalogs, and the item fields the screens filter on.

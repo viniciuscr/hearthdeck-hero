@@ -6,6 +6,7 @@ license.workspace = true
 description = "Watch's player: mpv discovery, arguments and IPC supervision"
 
 [dependencies]
+heronite-watch-core = { path = "../watch-core" }
 heronite-data = { path = "../data" }
 anyhow.workspace = true
 serde_json.workspace = true

@@ -33,6 +33,34 @@ pub struct Ctx<'a> {
     pub credentials: &'a dyn Credentials,
 }
 
+/// Where a provider's URL points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamOrigin {
+    /// The provider's own service on loopback (the Stremio Service).
+    LocalService,
+    /// Anywhere else: https only.
+    Remote,
+}
+
+impl StreamOrigin {
+    /// The scheme and host a resolved URL may use for this origin.
+    pub fn allows(self, url: &Url) -> bool {
+        match self {
+            Self::Remote => url.scheme() == "https",
+            Self::LocalService => {
+                matches!(url.scheme(), "http" | "https") && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1" | "[::1]"))
+            }
+        }
+    }
+}
+
+/// A stream turned into the URL the player opens, and where that URL points.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedStream {
+    pub url: Url,
+    pub origin: StreamOrigin,
+}
+
 /// A media source the Watch space can show.
 ///
 /// The facade asks every provider for its rails, assembles one library, and
@@ -51,8 +79,8 @@ pub trait WatchProvider: Send + Sync {
     /// The playable streams of one title, best first.
     fn streams(&self, ctx: &Ctx<'_>, kind: &str, id: &str) -> Result<Vec<StreamChoice>>;
 
-    /// The URL the player opens for a picked stream.
-    fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<Url>;
+    /// The URL the player opens for a picked stream, and where it points.
+    fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<ResolvedStream>;
 
     /// The provider's own record of where the title stopped. A provider
     /// without history returns `None`.

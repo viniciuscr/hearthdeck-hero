@@ -8,15 +8,12 @@
 
 use std::sync::atomic::AtomicBool;
 
-#[cfg(not(unix))]
-use anyhow::bail;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use heronite_data::paths::AppPaths;
-use url::Url;
 
 use heronite_watch_core::http::{Transport, UreqTransport};
-use heronite_watch_core::provider::{Ctx, WatchProvider};
+use heronite_watch_core::provider::{Ctx, ResolvedStream, WatchProvider};
 use heronite_watch_core::types::{MovieProgress, StreamChoice};
 use heronite_watch_player::player::PlaybackOutcome;
 #[cfg(unix)]
@@ -59,25 +56,25 @@ pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Res
     let credentials = StoreCredentials::new(app);
     let ctx = Ctx { http: &http, credentials: &credentials };
     let provider = registry::find(&request.provider).ok_or_else(|| anyhow!("Unknown Watch provider: {}", request.provider))?;
-    let url = provider.resolve(&ctx, &request.stream)?;
+    let resolved = provider.resolve(&ctx, &request.stream)?;
     let start_ms = resume_position(app, provider, &ctx, &request.id);
-    let outcome = play_url(request, url, start_ms, stop)?;
+    let outcome = play_url(request, resolved, start_ms, stop)?;
     record(app, provider, &ctx, &request.id, &outcome);
     Ok(outcome)
 }
 
 #[cfg(unix)]
-fn play_url(request: &PlaybackRequest, url: Url, start_ms: Option<u64>, stop: &AtomicBool) -> Result<PlaybackOutcome> {
+fn play_url(request: &PlaybackRequest, resolved: ResolvedStream, start_ms: Option<u64>, stop: &AtomicBool) -> Result<PlaybackOutcome> {
     let mpv = heronite_watch_player::player::find_mpv().ok_or_else(|| anyhow!("mpv is not installed."))?;
     let gamepad = heronite_watch_player::player::gamepad_supported(&mpv);
-    let play = PlayRequest { url, start_ms, title: Some(request.title.clone()) };
+    let play = PlayRequest { url: resolved.url, origin: resolved.origin, start_ms, title: Some(request.title.clone()) };
     let mut session = MpvSession::start(&mpv, &play, gamepad)?;
     session.wait_until(stop)
 }
 
 #[cfg(not(unix))]
-fn play_url(_request: &PlaybackRequest, _url: Url, _start_ms: Option<u64>, _stop: &AtomicBool) -> Result<PlaybackOutcome> {
-    bail!("Playback is only available on Linux.")
+fn play_url(_request: &PlaybackRequest, _resolved: ResolvedStream, _start_ms: Option<u64>, _stop: &AtomicBool) -> Result<PlaybackOutcome> {
+    anyhow::bail!("Playback is only available on Linux.")
 }
 
 /// Where to resume: the local record first, else the provider's own (another

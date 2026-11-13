@@ -8,7 +8,7 @@ use url::Url;
 
 use heronite_watch_addon::addon::AddonClient;
 use heronite_watch_core::auth::AuthKey;
-use heronite_watch_core::provider::{CatalogDescriptor, Ctx, Rail, WatchProvider};
+use heronite_watch_core::provider::{CatalogDescriptor, Ctx, Rail, ResolvedStream, StreamOrigin, WatchProvider};
 use heronite_watch_core::types::{MovieItem, MovieProgress, StreamChoice};
 
 use crate::account::addon_collection;
@@ -135,17 +135,18 @@ impl WatchProvider for Stremio {
         Ok(choices)
     }
 
-    fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<Url> {
+    fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<ResolvedStream> {
         let endpoints = Endpoints::default();
         endpoints.validate()?;
         if let Some(url) = &stream.url {
-            return Url::parse(url).context("stream URL");
+            return Ok(ResolvedStream { url: Url::parse(url).context("stream URL")?, origin: StreamOrigin::Remote });
         }
         let hash = stream.info_hash.as_deref().ok_or_else(|| anyhow!("This stream has nothing to play."))?;
         let server = StreamingServer::new(ctx.http, endpoints.streaming_server.clone())?;
         let base = server.base_url().context("The Stremio service is not running")?;
         server.create(hash, &[]).context("The Stremio service refused the torrent")?;
-        StreamingServer::stream_url(&base, hash, stream.file_idx)
+        let url = StreamingServer::stream_url(&base, hash, stream.file_idx)?;
+        Ok(ResolvedStream { url, origin: StreamOrigin::LocalService })
     }
 
     /// Read-merge-write of the full record; a failed write is the caller's to

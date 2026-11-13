@@ -2,10 +2,16 @@
 
 use heronite_watch_core::provider::WatchProvider;
 
+#[cfg(feature = "stremio")]
 static STREMIO: heronite_watch_stremio::Stremio = heronite_watch_stremio::Stremio;
+
+#[cfg(feature = "stremio")]
 static PROVIDERS: [&dyn WatchProvider; 1] = [&STREMIO];
 
-/// Every provider, in display order.
+#[cfg(not(feature = "stremio"))]
+static PROVIDERS: [&dyn WatchProvider; 0] = [];
+
+/// Every provider, in display order. A build without `stremio` ships none.
 pub fn providers() -> &'static [&'static dyn WatchProvider] {
     &PROVIDERS
 }

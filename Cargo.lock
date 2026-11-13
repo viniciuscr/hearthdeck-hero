@@ -4126,6 +4126,7 @@ version = "1.6.1"
 dependencies = [
  "anyhow",
  "heronite-data",
+ "heronite-watch-core",
  "serde_json",
  "url",
 ]
