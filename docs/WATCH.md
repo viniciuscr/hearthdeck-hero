@@ -84,7 +84,7 @@ These are the types Phase 1 creates, with the wire shapes they map to.
 ```rust
 /// Injected everywhere; tests never reach a real host.
 pub struct Endpoints {
-    pub api: Url,                 // https://api.strem.io
+    pub api: Url,                 // https://api.strem.io/api/
     pub link: Url,                // https://link.stremio.com
     pub cinemeta: Url,            // https://v3-cinemeta.strem.io
     pub streaming_server: Url,    // http://127.0.0.1:11470
@@ -233,6 +233,9 @@ Envelope, source `stremio-core`:
 
 - Read the session key, then `addonCollectionGet`; keep the addons whose
   manifest serves `stream` and whose `types` include the title's kind.
+- Both live at `https://api.strem.io/api/`: the path is part of the base URL,
+  not something `Url::join` adds (`https://api.strem.io/addonCollectionGet` is
+  a 404).
 - Ask each addon once (`stream/{type}/{id}.json`), name it by manifest id, and
   keep only entries with a `url` or an `infoHash`.
 - Order by seeders, then size; the first entry is what Play starts when the
@@ -374,5 +377,10 @@ Envelope, source `stremio-core`:
   shows the list and owns the session. The Stremio-app handoff is gone from
   the Play action. Tests use fixtures and a fake transport; the service, mpv
   and real Torrentio fields still need the probe checklist on the TV machine.
+- **2026-11-13, API base probe.** `POST https://api.strem.io/addonCollectionGet`
+  answers 404; `POST https://api.strem.io/api/addonCollectionGet` answers with
+  Stremio's JSON envelope (an invalid key gives `Session does not exist`).
+  `Endpoints::default().api` now ends in `/api/`, which also fixes the library
+  sync that had been logging 404 and keeping the last good library.
 
 

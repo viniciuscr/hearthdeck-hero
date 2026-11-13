@@ -84,7 +84,7 @@ impl CollectionView {
                     Ok(streams) => StreamsState::Ready(streams),
                     Err(error) => {
                         log::warn!("watch streams: {error:#}");
-                        StreamsState::Error(format!("{error:#}"))
+                        StreamsState::Error(tr!("Could not load streams: {error}", error = format!("{error:#}")).to_string())
                     }
                 };
                 cx.notify();

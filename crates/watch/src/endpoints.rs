@@ -6,7 +6,7 @@ use url::Url;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Endpoints {
-    /// `api.strem.io`: datastore and addon collection.
+    /// `https://api.strem.io/api/`: datastore and addon collection.
     pub api: Url,
     /// `link.stremio.com`: the QR/link-code flow.
     pub link: Url,
@@ -19,7 +19,7 @@ pub struct Endpoints {
 impl Default for Endpoints {
     fn default() -> Self {
         Self {
-            api: Url::parse("https://api.strem.io").expect("valid API url"),
+            api: Url::parse("https://api.strem.io/api/").expect("valid API url"),
             link: Url::parse("https://link.stremio.com").expect("valid link url"),
             cinemeta: Url::parse("https://v3-cinemeta.strem.io").expect("valid Cinemeta url"),
             streaming_server: Url::parse("http://127.0.0.1:11470").expect("valid streaming server url"),
@@ -55,6 +55,13 @@ mod tests {
     #[test]
     fn defaults_validate() {
         Endpoints::default().validate().unwrap();
+    }
+
+    #[test]
+    fn the_api_root_keeps_its_path() {
+        let api = Endpoints::default().api;
+        assert_eq!(api.as_str(), "https://api.strem.io/api/");
+        assert_eq!(api.join("addonCollectionGet").unwrap().as_str(), "https://api.strem.io/api/addonCollectionGet");
     }
 
     #[test]

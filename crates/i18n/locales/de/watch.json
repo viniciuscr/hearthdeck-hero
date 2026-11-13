@@ -6,6 +6,7 @@
   "Choose what the Watch home shows. The console uses this theme; ☰ → Customize edits it in detail.": "Wähle, was die Watch-Startseite zeigt. Die Konsole verwendet dieses Theme; ☰ → Anpassen bearbeitet die Details.",
   "Code {code}": "Code {code}",
   "Continue watching": "Weiterschauen",
+  "Could not load streams: {error}": "Quellen konnten nicht geladen werden: {error}",
   "Could not play: {error}": "Wiedergabe fehlgeschlagen: {error}",
   "Films and series you have started.": "Filme und Serien, die du begonnen hast.",
   "Films and series: Continue watching, Top movies and Top series.": "Filme und Serien: Weiterschauen, Top-Filme und Top-Serien.",
