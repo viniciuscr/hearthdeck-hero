@@ -73,12 +73,22 @@ pub trait Credentials: Send + Sync {
   rails is not marked Top.
 - `resolve` keeps the provider's own work (the torrent → local Stremio service)
   inside its crate and returns the URL the player opens. Requiring https for a
-  remote URL and loopback for the local service is CR-3's origin policy.
-- Reading remote progress lands in CR-3 with the provider-scoped keys; until
-  then the local `movies.json` is the resume source and `write_progress` is the
-  only remote call.
+  remote URL and loopback for the local service is CR-3b's origin policy.
+- `read_progress` is how another device's position resumes here: `play` asks the
+  provider when the local `movies.json` has no record for the title.
 - Credentials are per provider and opaque, so YouTube's OAuth tokens and a
   provider's endpoint list do not have to become `AuthKey`.
+
+### Keys
+
+- `movies.json` progress records carry `provider` and `id`, and `progress_for` /
+  `upsert_progress` match both. A record written before providers existed has an
+  empty provider and is read as Stremio's.
+- The projection names an item `provider:id` (`app_name`) and keeps the
+  provider's raw id in `extra.watchId`. `local_library/local.json` and
+  `store/timestamp.json` are keyed by `app_name`, and `metadata.json` /
+  `art.json` by `runner:appName` — the keys `Library` looks up. Two providers may
+  therefore share an id without sharing a record.
 
 ### App-facing surface
 
@@ -143,7 +153,7 @@ These are behaviour, not style; the move must keep all of them.
 
 One branch per change request, cut from `fork/main`, squash-merged. The gate is
 `scripts/fork/sync-upstream.sh --verify` plus a pull request into `fork/main`,
-which runs `fork-ci.yml` and upstream `ci.yml` (Windows included). CR-2 adds the
+which runs `fork-ci.yml` and upstream `ci.yml` (Windows included). CR-3b adds the
 two missing CI matrix entries, `--all-features` and `--no-default-features`, once
 providers sit behind features: the default build alone never proves the façade's
 wiring.
@@ -152,7 +162,8 @@ wiring.
 |---|---|---|
 | CR-1 | `refactor(watch)` | pure moves: crate skeletons, then core + state, addon, player, projection, Stremio provider. No public API change. |
 | CR-2 | `feat(watch)` | provider registry, provider routing in `streams`/`PlaybackRequest`, removal of dead code, curated facade. |
-| CR-3 | `feat(watch)` | prerequisites for provider #2: provider-scoped projection keys, `(provider, id)` progress keys with a read fallback, typed credentials, per-catalog rails, stream-origin policy. |
+| CR-3a | `feat(watch)` | provider-scoped projection keys, `(provider, id)` progress records with a legacy fallback, and `read_progress` from the Stremio datastore. |
+| CR-3b | `feat(watch)` | resolved-stream origin policy, per-catalog rails when a provider needs them, and provider cargo features with the CI `--all-features` / `--no-default-features` matrix. |
 
 Dead code is removed in its own commit: `deep_link` (no caller since the
 Stremio-app handoff was dropped), `progress::{Throttle, record}` (no production
@@ -179,8 +190,8 @@ the bytes of the next `movies.json` write and that delta is recorded).
 3. `read_progress`/`write_progress`, or the defaults for a provider without
    history.
 4. Its catalogs, and the item fields the screens filter on.
-5. A `provider:id` projection key and the progress migration (CR-3) before the
-   provider ships.
+5. Provider-scoped keys already come from the projection (`provider:id`) and
+   from `MovieProgress.provider`; nothing else is needed.
 6. Fixtures and a fake transport; no test reaches the network.
 
 `docs/WATCH.md` and the crate map in `docs/ARCHITECTURE.md` change in the same

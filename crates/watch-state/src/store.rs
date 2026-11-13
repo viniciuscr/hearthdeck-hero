@@ -40,12 +40,23 @@ pub fn auth_path(app: &AppPaths) -> PathBuf {
     auth_path_for(app, "stremio")
 }
 
+/// The owner of records written before the provider was part of the file.
+const LEGACY_PROVIDER: &str = "stremio";
+
 pub fn read_movies(app: &AppPaths) -> MoviesFile {
     let path = movies_path(app);
-    json_store::read(&path).unwrap_or_else(|error| {
+    let mut movies = json_store::read(&path).unwrap_or_else(|error| {
         log::warn!("{}: {error:#}", path.display());
         MoviesFile::default()
-    })
+    });
+    // A record from before providers were recorded is Stremio's; the next
+    // write makes it explicit.
+    for progress in &mut movies.progress {
+        if progress.provider.is_empty() {
+            progress.provider = LEGACY_PROVIDER.into();
+        }
+    }
+    movies
 }
 
 pub fn write_movies(app: &AppPaths, movies: &MoviesFile) -> Result<()> {
@@ -53,12 +64,13 @@ pub fn write_movies(app: &AppPaths, movies: &MoviesFile) -> Result<()> {
     json_store::write(&path, movies).with_context(|| format!("writing {}", path.display()))
 }
 
-pub fn progress_for<'a>(movies: &'a MoviesFile, id: &str) -> Option<&'a MovieProgress> {
-    movies.progress.iter().find(|progress| progress.id == id)
+pub fn progress_for<'a>(movies: &'a MoviesFile, provider: &str, id: &str) -> Option<&'a MovieProgress> {
+    movies.progress.iter().find(|progress| progress.provider == provider && progress.id == id)
 }
 
 pub fn upsert_progress(movies: &mut MoviesFile, progress: MovieProgress) {
-    match movies.progress.iter_mut().find(|entry| entry.id == progress.id) {
+    let same = |entry: &MovieProgress| entry.provider == progress.provider && entry.id == progress.id;
+    match movies.progress.iter_mut().find(|entry| same(entry)) {
         Some(entry) => *entry = progress,
         None => movies.progress.push(progress),
     }
@@ -146,6 +158,7 @@ mod tests {
         upsert_progress(
             &mut movies,
             MovieProgress {
+                provider: "stremio".into(),
                 id: "tt1".into(),
                 position_ms: 1000,
                 duration_ms: 2000,
@@ -157,7 +170,7 @@ mod tests {
         write_movies(&app, &movies).unwrap();
         let read = read_movies(&app);
         assert_eq!(read.progress.len(), 1);
-        assert_eq!(progress_for(&read, "tt1").unwrap().position_ms, 1000);
+        assert_eq!(progress_for(&read, "stremio", "tt1").unwrap().position_ms, 1000);
     }
 
     #[test]
@@ -179,5 +192,52 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         clear_auth(&paths(dir.path())).unwrap();
         assert!(read_auth(&paths(dir.path())).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_record_without_a_provider_is_stremios() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = paths(dir.path());
+        fs::create_dir_all(&app.config).unwrap();
+        fs::write(
+            movies_path(&app),
+            r#"{"progress":[{"id":"tt1","position_ms":1000,"duration_ms":2000,"updated_at":"2026-01-01T00:00:00Z","finished":false}]}"#,
+        )
+        .unwrap();
+
+        let movies = read_movies(&app);
+        assert!(progress_for(&movies, "stremio", "tt1").is_some());
+        assert!(progress_for(&movies, "youtube", "tt1").is_none());
+    }
+
+    #[test]
+    fn progress_is_per_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = paths(dir.path());
+        let mut movies = MoviesFile::default();
+        let mut stremio = progress_with(1000);
+        stremio.provider = "stremio".into();
+        let mut youtube = progress_with(2000);
+        youtube.provider = "youtube".into();
+        upsert_progress(&mut movies, stremio);
+        upsert_progress(&mut movies, youtube);
+        write_movies(&app, &movies).unwrap();
+
+        let read = read_movies(&app);
+        assert_eq!(read.progress.len(), 2);
+        assert_eq!(progress_for(&read, "stremio", "tt1").unwrap().position_ms, 1000);
+        assert_eq!(progress_for(&read, "youtube", "tt1").unwrap().position_ms, 2000);
+    }
+
+    fn progress_with(position_ms: u64) -> MovieProgress {
+        MovieProgress {
+            provider: String::new(),
+            id: "tt1".into(),
+            position_ms,
+            duration_ms: 2000,
+            updated_at: Utc::now(),
+            finished: false,
+            video_id: None,
+        }
     }
 }

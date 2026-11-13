@@ -60,7 +60,7 @@ pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Res
     let ctx = Ctx { http: &http, credentials: &credentials };
     let provider = registry::find(&request.provider).ok_or_else(|| anyhow!("Unknown Watch provider: {}", request.provider))?;
     let url = provider.resolve(&ctx, &request.stream)?;
-    let start_ms = resume_position(app, &request.id);
+    let start_ms = resume_position(app, provider, &ctx, &request.id);
     let outcome = play_url(request, url, start_ms, stop)?;
     record(app, provider, &ctx, &request.id, &outcome);
     Ok(outcome)
@@ -80,10 +80,24 @@ fn play_url(_request: &PlaybackRequest, _url: Url, _start_ms: Option<u64>, _stop
     bail!("Playback is only available on Linux.")
 }
 
-/// Resumes a title that was started and is not near its end.
-fn resume_position(app: &AppPaths, id: &str) -> Option<u64> {
+/// Where to resume: the local record first, else the provider's own (another
+/// device may have watched further).
+fn resume_position(app: &AppPaths, provider: &dyn WatchProvider, ctx: &Ctx<'_>, id: &str) -> Option<u64> {
     let movies = store::read_movies(app);
-    let progress = store::progress_for(&movies, id)?;
+    if let Some(progress) = store::progress_for(&movies, provider.id(), id) {
+        return resume_at(progress);
+    }
+    match provider.read_progress(ctx, id) {
+        Ok(progress) => progress.as_ref().and_then(resume_at),
+        Err(error) => {
+            log::warn!("reading watch progress from {}: {error:#}", provider.name());
+            None
+        }
+    }
+}
+
+/// A position worth resuming: started, and not near its end.
+fn resume_at(progress: &MovieProgress) -> Option<u64> {
     if progress.finished || progress.position_ms == 0 {
         return None;
     }
@@ -107,6 +121,7 @@ fn record(app: &AppPaths, provider: &dyn WatchProvider, ctx: &Ctx<'_>, id: &str,
         return;
     }
     let progress = MovieProgress {
+        provider: provider.id().to_owned(),
         id: id.to_owned(),
         position_ms: outcome.position_ms,
         duration_ms: outcome.duration_ms,
@@ -130,7 +145,15 @@ mod tests {
     use super::*;
 
     fn progress(position_ms: u64, duration_ms: u64, finished: bool) -> MovieProgress {
-        MovieProgress { id: "tt1".into(), position_ms, duration_ms, updated_at: Utc::now(), finished, video_id: None }
+        MovieProgress {
+            provider: "stremio".into(),
+            id: "tt1".into(),
+            position_ms,
+            duration_ms,
+            updated_at: Utc::now(),
+            finished,
+            video_id: None,
+        }
     }
 
     fn app(dir: &std::path::Path) -> AppPaths {
@@ -144,15 +167,18 @@ mod tests {
         let mut movies = store::MoviesFile::default();
         store::upsert_progress(&mut movies, progress(60_000, 600_000, false));
         store::write_movies(&app, &movies).unwrap();
-        assert_eq!(resume_position(&app, "tt1"), Some(60_000));
+        let stored = store::read_movies(&app);
+        assert_eq!(store::progress_for(&stored, "stremio", "tt1").and_then(resume_at), Some(60_000));
 
         store::upsert_progress(&mut movies, progress(0, 600_000, false));
         store::write_movies(&app, &movies).unwrap();
-        assert_eq!(resume_position(&app, "tt1"), None);
+        let stored = store::read_movies(&app);
+        assert_eq!(store::progress_for(&stored, "stremio", "tt1").and_then(resume_at), None);
 
         store::upsert_progress(&mut movies, progress(590_000, 600_000, false));
         store::write_movies(&app, &movies).unwrap();
-        assert_eq!(resume_position(&app, "tt1"), None);
+        let stored = store::read_movies(&app);
+        assert_eq!(store::progress_for(&stored, "stremio", "tt1").and_then(resume_at), None);
     }
 
     #[test]

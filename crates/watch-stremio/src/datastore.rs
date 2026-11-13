@@ -238,6 +238,7 @@ mod tests {
                 "state":{"timeOffset":10,"duration":20,"timesWatched":3,"flaggedWatched":1,"futureState":7}}"#,
         );
         let progress = MovieProgress {
+            provider: "stremio".into(),
             id: "tt1".into(),
             position_ms: 5000,
             duration_ms: 10_000,

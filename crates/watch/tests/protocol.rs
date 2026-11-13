@@ -167,6 +167,7 @@ fn progress_writes_the_full_record_and_the_probe_is_a_no_op() {
     let endpoints = Endpoints::default();
     let client = DatastoreClient::new(&fake, &endpoints, AuthKey::new("test-session-key"));
     let progress = MovieProgress {
+        provider: "stremio".into(),
         id: "tt26657236".into(),
         position_ms: 100,
         duration_ms: 200,
@@ -181,6 +182,25 @@ fn progress_writes_the_full_record_and_the_probe_is_a_no_op() {
     assert_eq!(body["changes"][0]["futureTop"], true);
     assert_eq!(body["changes"][0]["state"]["timeOffset"], 100);
     assert_eq!(probe_put(&client).unwrap(), Probe::Verified { items: 1 });
+}
+
+#[test]
+fn stremio_reads_the_progress_of_a_title_from_the_datastore() {
+    let fake = Fake::new();
+    let dir = tempfile::tempdir().unwrap();
+    let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+    store::write_auth(&app, &AuthKey::new("test-session-key")).unwrap();
+    let credentials = StoreCredentials::new(&app);
+    let ctx = Ctx { http: &fake, credentials: &credentials };
+
+    let progress = Stremio.read_progress(&ctx, "tt26657236").unwrap().expect("the record exists");
+    assert_eq!(progress.provider, "stremio");
+    assert_eq!(progress.id, "tt26657236");
+    assert_eq!(progress.position_ms, 2_271_644);
+    assert_eq!(progress.duration_ms, 6_628_768);
+    assert_eq!(progress.video_id.as_deref(), Some("tt26657236"));
+    assert!(!progress.finished);
+    assert!(Stremio.read_progress(&ctx, "tt_nope").unwrap().is_none());
 }
 
 #[test]

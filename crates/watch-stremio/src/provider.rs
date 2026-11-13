@@ -150,6 +150,26 @@ impl WatchProvider for Stremio {
 
     /// Read-merge-write of the full record; a failed write is the caller's to
     /// keep locally and retry. Without a linked account there is nothing to do.
+    fn read_progress(&self, ctx: &Ctx<'_>, id: &str) -> Result<Option<MovieProgress>> {
+        let Some(key) = key(ctx)? else {
+            return Ok(None);
+        };
+        let endpoints = Endpoints::default();
+        let client = DatastoreClient::new(ctx.http, &endpoints, key);
+        let Some(item) = client.get_all()?.into_iter().find(|item| item.id == id) else {
+            return Ok(None);
+        };
+        Ok(Some(MovieProgress {
+            provider: ID.into(),
+            id: item.id.clone(),
+            position_ms: item.state.time_offset,
+            duration_ms: item.state.duration,
+            updated_at: item.state.last_watched.unwrap_or_else(chrono::Utc::now),
+            finished: false,
+            video_id: item.state.video_id.clone(),
+        }))
+    }
+
     fn write_progress(&self, ctx: &Ctx<'_>, progress: &MovieProgress) -> Result<()> {
         let Some(key) = key(ctx)? else {
             return Ok(());

@@ -7,6 +7,12 @@ use std::sync::Arc;
 
 use heronite_data::CollectionGame;
 
+/// The provider's own id for the title: what its API and its progress take.
+/// `extra.watchId` keeps the raw id while `app_name` is provider-prefixed.
+pub fn id(game: &CollectionGame) -> &str {
+    game.game.extra.as_ref().and_then(|extra| extra.get("watchId")).and_then(serde_json::Value::as_str).unwrap_or(&game.app_name)
+}
+
 /// `movie` or `series`; items without a Stremio type are movies.
 pub fn kind(game: &CollectionGame) -> &str {
     game.game.extra.as_ref().and_then(|extra| extra.get("stremioType")).and_then(serde_json::Value::as_str).unwrap_or("movie")

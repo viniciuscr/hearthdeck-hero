@@ -71,7 +71,7 @@ impl CollectionView {
         cx.notify();
 
         let app = self.app_paths.clone();
-        let id = game.app_name.clone();
+        let id = crate::fork::watch::sources::id(game).to_owned();
         let provider = game.runner.clone();
         let kind = crate::fork::watch::sources::kind(game).to_owned();
         cx.spawn(async move |this, cx| {
@@ -141,7 +141,7 @@ impl CollectionView {
         let app = self.app_paths.clone();
         let request = heronite_watch::playback::PlaybackRequest {
             provider: game.runner.clone(),
-            id: game.app_name.clone(),
+            id: crate::fork::watch::sources::id(game).to_owned(),
             kind: crate::fork::watch::sources::kind(game).to_owned(),
             title: game.title.clone(),
             stream,

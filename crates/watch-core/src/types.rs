@@ -83,6 +83,10 @@ impl StreamChoice {
 /// Local, non-secret progress. Stremio remains the cross-device source.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MovieProgress {
+    /// The provider that owns the title. Records written before providers were
+    /// recorded have an empty value and belong to Stremio.
+    #[serde(default)]
+    pub provider: String,
     pub id: String,
     pub position_ms: u64,
     pub duration_ms: u64,

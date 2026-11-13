@@ -54,6 +54,12 @@ pub trait WatchProvider: Send + Sync {
     /// The URL the player opens for a picked stream.
     fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<Url>;
 
+    /// The provider's own record of where the title stopped. A provider
+    /// without history returns `None`.
+    fn read_progress(&self, _ctx: &Ctx<'_>, _id: &str) -> Result<Option<MovieProgress>> {
+        Ok(None)
+    }
+
     /// Writes cross-device progress. A provider without history does nothing.
     fn write_progress(&self, _ctx: &Ctx<'_>, _progress: &MovieProgress) -> Result<()> {
         Ok(())
