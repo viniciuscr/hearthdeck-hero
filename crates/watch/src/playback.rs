@@ -15,15 +15,15 @@ use chrono::Utc;
 use heronite_data::paths::AppPaths;
 use url::Url;
 
-use crate::account::addon_collection;
-use crate::addon::AddonClient;
-use crate::datastore::{write_progress, DatastoreClient};
-use crate::endpoints::Endpoints;
-use crate::http::{Transport, UreqTransport};
-use crate::player::{MpvSession, PlayRequest, PlaybackOutcome};
-use crate::store;
-use crate::streaming::StreamingServer;
-use crate::types::{MovieProgress, StreamChoice};
+use heronite_watch_addon::addon::AddonClient;
+use heronite_watch_core::http::{Transport, UreqTransport};
+use heronite_watch_core::types::{MovieProgress, StreamChoice};
+use heronite_watch_player::player::{MpvSession, PlayRequest, PlaybackOutcome};
+use heronite_watch_state::store;
+use heronite_watch_stremio::account::addon_collection;
+use heronite_watch_stremio::datastore::{write_progress, DatastoreClient};
+use heronite_watch_stremio::endpoints::Endpoints;
+use heronite_watch_stremio::streaming::StreamingServer;
 
 /// What to play: one normalized stream of a title.
 #[derive(Clone, Debug, PartialEq)]
@@ -123,8 +123,8 @@ fn stream_url(http: &dyn Transport, endpoints: &Endpoints, stream: &StreamChoice
 
 #[cfg(unix)]
 fn play_url(request: &PlaybackRequest, url: Url, start_ms: Option<u64>, stop: &AtomicBool) -> Result<PlaybackOutcome> {
-    let mpv = crate::player::find_mpv().ok_or_else(|| anyhow!("mpv is not installed."))?;
-    let gamepad = crate::player::gamepad_supported(&mpv);
+    let mpv = heronite_watch_player::player::find_mpv().ok_or_else(|| anyhow!("mpv is not installed."))?;
+    let gamepad = heronite_watch_player::player::gamepad_supported(&mpv);
     let play = PlayRequest { url, start_ms, title: Some(request.title.clone()) };
     let mut session = MpvSession::start(&mpv, &play, gamepad)?;
     session.wait_until(stop)

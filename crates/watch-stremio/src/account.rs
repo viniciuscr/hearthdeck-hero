@@ -8,9 +8,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use url::Url;
 
-use crate::addon::Manifest;
-use crate::auth::AuthKey;
-use crate::http::Transport;
+use heronite_watch_addon::addon::Manifest;
+use heronite_watch_core::auth::AuthKey;
+use heronite_watch_core::http::Transport;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkOffer {
@@ -63,7 +63,7 @@ pub fn read_link(http: &dyn Transport, link_base: &Url, code: &str) -> Result<Li
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddonDescriptor {
-    #[serde(default, deserialize_with = "crate::addon::null_as_default")]
+    #[serde(default, deserialize_with = "heronite_watch_addon::addon::null_as_default")]
     pub transport_url: String,
     /// Missing or `null` for a descriptor the account cannot use.
     #[serde(default)]
@@ -80,7 +80,7 @@ impl AddonDescriptor {
 /// bare array kept for older answers.
 #[derive(Deserialize)]
 struct AddonCollection {
-    #[serde(default, deserialize_with = "crate::addon::null_as_default")]
+    #[serde(default, deserialize_with = "heronite_watch_addon::addon::null_as_default")]
     addons: Vec<AddonDescriptor>,
 }
 

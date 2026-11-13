@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use url::Url;
 
-use crate::http::Transport;
+use heronite_watch_core::http::Transport;
 
 pub struct StreamingServer<'a> {
     http: &'a dyn Transport,

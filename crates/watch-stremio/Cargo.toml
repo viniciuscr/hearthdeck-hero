@@ -1,0 +1,19 @@
+[package]
+name = "heronite-watch-stremio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Stremio provider: account, datastore, Cinemeta and the local streaming service"
+
+[dependencies]
+heronite-watch-core = { path = "../watch-core" }
+heronite-watch-addon = { path = "../watch-addon" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+log.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+url = { version = "2", features = ["serde"] }
+
+[lints]
+workspace = true

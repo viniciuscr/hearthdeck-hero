@@ -9,12 +9,12 @@ use serde::Deserialize;
 use serde_json::Value;
 use url::Url;
 
-use crate::http::Transport;
-use crate::types::{MovieItem, StreamChoice};
+use heronite_watch_core::http::Transport;
+use heronite_watch_core::types::{MovieItem, StreamChoice};
 
 /// Addons serialize optional lists as `null`, and `serde(default)` only
 /// covers a missing field; make `null` mean the same.
-pub(crate) fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+pub fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de> + Default,

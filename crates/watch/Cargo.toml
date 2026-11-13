@@ -6,18 +6,19 @@ license.workspace = true
 description = "Watch: Stremio account, addon protocol, local streaming server and playback"
 
 [dependencies]
+heronite-watch-core = { path = "../watch-core" }
+heronite-watch-addon = { path = "../watch-addon" }
+heronite-watch-player = { path = "../watch-player" }
+heronite-watch-stremio = { path = "../watch-stremio" }
+heronite-watch-state = { path = "../watch-state" }
 heronite-data = { path = "../data" }
-serde.workspace = true
-serde_json.workspace = true
 anyhow.workspace = true
 log.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
-ureq = "3"
 url = { version = "2", features = ["serde"] }
-flate2 = "1"
-base64 = "0.22"
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile = "3"
 
 [lints]

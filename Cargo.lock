@@ -4083,15 +4083,78 @@ name = "heronite-watch"
 version = "1.6.1"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "chrono",
- "flate2",
  "heronite-data",
+ "heronite-watch-addon",
+ "heronite-watch-core",
+ "heronite-watch-player",
+ "heronite-watch-state",
+ "heronite-watch-stremio",
+ "log",
+ "serde_json",
+ "tempfile",
+ "url",
+]
+
+[[package]]
+name = "heronite-watch-addon"
+version = "1.6.1"
+dependencies = [
+ "anyhow",
+ "heronite-watch-core",
+ "log",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
+name = "heronite-watch-core"
+version = "1.6.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "ureq",
+ "url",
+]
+
+[[package]]
+name = "heronite-watch-player"
+version = "1.6.1"
+dependencies = [
+ "anyhow",
+ "heronite-data",
+ "serde_json",
+ "url",
+]
+
+[[package]]
+name = "heronite-watch-state"
+version = "1.6.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "heronite-data",
+ "heronite-watch-core",
  "log",
  "serde",
  "serde_json",
  "tempfile",
- "ureq",
+]
+
+[[package]]
+name = "heronite-watch-stremio"
+version = "1.6.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "heronite-watch-addon",
+ "heronite-watch-core",
+ "log",
+ "serde",
+ "serde_json",
  "url",
 ]
 

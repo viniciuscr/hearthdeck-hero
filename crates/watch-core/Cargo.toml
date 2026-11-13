@@ -1,0 +1,17 @@
+[package]
+name = "heronite-watch-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Watch's domain types and ports: item and stream types, transport, credentials, provider contract"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+url = { version = "2", features = ["serde"] }
+ureq = "3"
+
+[lints]
+workspace = true

@@ -9,10 +9,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::auth::AuthKey;
+use heronite_watch_core::auth::AuthKey;
+use heronite_watch_core::http::Transport;
+use heronite_watch_core::types::{MovieProgress, PosterShape};
+
 use crate::endpoints::Endpoints;
-use crate::http::Transport;
-use crate::types::{MovieProgress, PosterShape};
 
 pub const COLLECTION: &str = "libraryItem";
 

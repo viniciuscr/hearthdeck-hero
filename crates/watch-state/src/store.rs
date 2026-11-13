@@ -12,8 +12,8 @@ use heronite_data::json_store;
 use heronite_data::paths::AppPaths;
 use heronite_data::temps;
 
-use crate::auth::AuthKey;
-use crate::types::MovieProgress;
+use heronite_watch_core::auth::AuthKey;
+use heronite_watch_core::types::MovieProgress;
 
 pub const MOVIES_FILE: &str = "movies.json";
 pub const AUTH_FILE: &str = "stremio-auth.json";
@@ -22,11 +22,6 @@ pub const AUTH_FILE: &str = "stremio-auth.json";
 pub struct MoviesFile {
     #[serde(default)]
     pub progress: Vec<MovieProgress>,
-    /// Addon manifest URLs, in display order.
-    #[serde(default)]
-    pub addons: Vec<String>,
-    #[serde(default)]
-    pub cinemeta: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
