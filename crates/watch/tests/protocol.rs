@@ -1,6 +1,7 @@
 //! End-to-end protocol tests against fixtures and a fake transport. No test
 //! here reaches the network.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
@@ -8,9 +9,9 @@ use serde_json::Value;
 use url::Url;
 
 use heronite_watch::playback;
-use heronite_watch_addon::addon::AddonClient;
+use heronite_watch_addon::addon::{AddonClient, StreamAnswer};
 use heronite_watch_core::auth::AuthKey;
-use heronite_watch_core::http::Transport;
+use heronite_watch_core::http::{HttpStatus, Transport};
 use heronite_watch_core::provider::{Ctx, StreamOrigin, WatchProvider};
 use heronite_watch_core::types::{MovieProgress, StreamChoice};
 use heronite_watch_state::store;
@@ -22,14 +23,19 @@ use heronite_watch_stremio::streaming::StreamingServer;
 use heronite_watch_stremio::Stremio;
 
 const HASH: &str = "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c";
+/// The collection's second addon: the deployment is gone and answers 404
+/// to everything.
+const GONE: &str = "gone.example";
 
 struct Fake {
     calls: Mutex<Vec<(String, Option<Value>)>>,
+    /// How often the gone addon's stream endpoint was asked.
+    gone_streams: AtomicUsize,
 }
 
 impl Fake {
     fn new() -> Self {
-        Self { calls: Mutex::new(Vec::new()) }
+        Self { calls: Mutex::new(Vec::new()), gone_streams: AtomicUsize::new(0) }
     }
 
     fn body(&self, suffix: &str) -> Value {
@@ -46,6 +52,10 @@ impl Fake {
 impl Transport for Fake {
     fn get(&self, url: &Url) -> Result<Vec<u8>> {
         self.calls.lock().unwrap().push((url.path().to_owned(), None));
+        if url.host_str() == Some(GONE) {
+            self.gone_streams.fetch_add(1, Ordering::Relaxed);
+            return Err(HttpStatus::new(url, 404).into());
+        }
         let body = match url.path() {
             "/api/create" => include_str!("fixtures/link_create.json"),
             "/api/read" => include_str!("fixtures/link_linked.json"),
@@ -109,7 +119,9 @@ fn an_addon_keeps_its_configured_path_and_parses_streams() {
     assert_eq!(manifest.id, "community.torrentio");
     assert!(manifest.has_resource("stream"));
 
-    let streams = client.stream("movie", "tt26657236").unwrap();
+    let StreamAnswer::Streams(streams) = client.stream("movie", "tt26657236").unwrap() else {
+        panic!("the fixture serves streams");
+    };
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0].addon, "community.torrentio");
     assert_eq!(streams[0].info_hash.as_deref(), Some(HASH));
@@ -135,9 +147,10 @@ fn the_account_addon_collection_keeps_stream_addons() {
     let fake = Fake::new();
     let endpoints = Endpoints::default();
     let addons = addon_collection(&fake, &endpoints.api, &AuthKey::new("test-session-key")).unwrap();
-    assert_eq!(addons.len(), 1);
-    assert!(addons[0].serves("stream"));
+    assert_eq!(addons.len(), 2);
+    assert!(addons.iter().all(|addon| addon.serves("stream")));
     assert_eq!(addons[0].transport_url, "https://torrentio.strem.fun/manifest.json");
+    assert_eq!(addons[1].transport_url, "https://gone.example/manifest.json");
 }
 
 #[test]
@@ -151,6 +164,22 @@ fn streams_come_from_the_accounts_installed_addons() {
     assert_eq!(streams[0].info_hash.as_deref(), Some(HASH));
     assert_eq!(streams[0].addon, "Torrentio");
     assert!(fake.calls.lock().unwrap().iter().any(|(path, _)| path.contains("/stream/movie/")));
+}
+
+#[test]
+fn an_addon_that_404s_has_no_streams_and_is_not_a_fault() {
+    let fake = Fake::new();
+    let dir = tempfile::tempdir().unwrap();
+    let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+    store::write_auth(&app, &AuthKey::new("test-session-key")).unwrap();
+
+    // The collection holds Torrentio and an addon whose deployment is gone:
+    // the gone addon's 404 must not cost the person Torrentio's stream.
+    let streams = playback::streams_with(&fake, &app, "stremio", "movie", "tt26657236").unwrap();
+    assert_eq!(fake.gone_streams.load(Ordering::Relaxed), 1, "the gone addon was asked");
+    assert_eq!(streams.len(), 1);
+    assert_eq!(streams[0].info_hash.as_deref(), Some(HASH));
+    assert_eq!(streams[0].addon, "Torrentio");
 }
 
 #[test]

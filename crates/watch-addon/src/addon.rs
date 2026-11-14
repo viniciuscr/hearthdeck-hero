@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use url::Url;
 
-use heronite_watch_core::http::Transport;
+use heronite_watch_core::http::{http_status, redacted, Transport};
 use heronite_watch_core::types::{MovieItem, StreamChoice};
 
 /// Addons serialize optional lists as `null`, and `serde(default)` only
@@ -137,6 +137,16 @@ impl Stream {
     }
 }
 
+/// What an addon answered for a stream request.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StreamAnswer {
+    /// The addon serves this title; the list may be empty.
+    Streams(Vec<StreamChoice>),
+    /// The addon answered 404: it does not serve this title. That is not a
+    /// fault, and it must not hide the streams of the other addons.
+    NotServed,
+}
+
 pub struct AddonClient<'a> {
     http: &'a dyn Transport,
     base: Url,
@@ -183,12 +193,23 @@ impl<'a> AddonClient<'a> {
     }
 
     /// A missing `streams` list is an error; an empty list is a valid answer.
-    pub fn stream(&self, kind: &str, id: &str) -> Result<Vec<StreamChoice>> {
-        let body = self.http.get(&self.base.join(&format!("stream/{kind}/{id}.json"))?)?;
+    /// A 404 is neither: it means the addon does not serve this title.
+    pub fn stream(&self, kind: &str, id: &str) -> Result<StreamAnswer> {
+        let body = match self.http.get(&self.base.join(&format!("stream/{kind}/{id}.json"))?) {
+            Ok(body) => body,
+            Err(error) if http_status(&error) == Some(404) => return Ok(StreamAnswer::NotServed),
+            Err(error) => return Err(error),
+        };
         let value: Value = serde_json::from_slice(&body).context("addon stream")?;
         let streams = value.get("streams").ok_or_else(|| anyhow!("addon stream answered without a streams list"))?;
         let streams: Vec<Stream> = serde_json::from_value(streams.clone()).context("addon streams")?;
-        Ok(streams.into_iter().map(|stream| stream.into_choice(&self.id)).collect())
+        Ok(StreamAnswer::Streams(streams.into_iter().map(|stream| stream.into_choice(&self.id)).collect()))
+    }
+
+    /// `scheme://host/…`: what a log line may name. The path is where the
+    /// person's configuration, and possibly a debrid key, waits.
+    pub fn host(&self) -> String {
+        redacted(&self.base)
     }
 }
 
@@ -250,6 +271,7 @@ fn parse_seeders(text: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use heronite_watch_core::http::HttpStatus;
 
     #[test]
     fn a_configured_transport_keeps_its_path() {
@@ -289,5 +311,74 @@ mod tests {
         assert!(manifest.catalogs.is_empty());
         assert!(manifest.id_prefixes.is_empty());
         assert!(!manifest.has_resource("stream"));
+    }
+
+    /// One fixed outcome for every GET, so a test names what the addon
+    /// answered rather than which URL it asked.
+    enum Answer {
+        Body(&'static str),
+        Status(u16),
+        Fault,
+    }
+
+    struct Stub(Answer);
+
+    impl Transport for Stub {
+        fn get(&self, url: &Url) -> Result<Vec<u8>> {
+            match self.0 {
+                Answer::Body(body) => Ok(body.as_bytes().to_vec()),
+                Answer::Status(status) => Err(HttpStatus::new(url, status).into()),
+                Answer::Fault => Err(anyhow!("connection reset by peer")),
+            }
+        }
+
+        fn post_json(&self, _: &Url, _: &Value) -> Result<Vec<u8>> {
+            Err(anyhow!("unexpected POST"))
+        }
+    }
+
+    fn client(transport: &Stub) -> AddonClient<'_> {
+        let mut client = AddonClient::new(transport, "https://addon.example/debrid=key/manifest.json").unwrap();
+        client.id = "addon".into();
+        client
+    }
+
+    #[test]
+    fn a_404_means_the_addon_does_not_serve_the_title() {
+        let transport = Stub(Answer::Status(404));
+        assert_eq!(client(&transport).stream("movie", "tt0133093").unwrap(), StreamAnswer::NotServed);
+    }
+
+    #[test]
+    fn a_500_is_still_a_fault_with_its_status() {
+        let transport = Stub(Answer::Status(500));
+        let error = client(&transport).stream("movie", "tt0133093").unwrap_err();
+        assert_eq!(http_status(&error), Some(500));
+        assert!(!format!("{error:#}").contains("debrid=key"), "{error:#}");
+    }
+
+    #[test]
+    fn a_connection_failure_is_a_fault() {
+        let transport = Stub(Answer::Fault);
+        assert!(client(&transport).stream("movie", "tt0133093").is_err());
+    }
+
+    #[test]
+    fn a_body_without_a_streams_list_is_a_fault() {
+        let transport = Stub(Answer::Body(r#"{"metas":[]}"#));
+        let error = client(&transport).stream("movie", "tt0133093").unwrap_err();
+        assert!(format!("{error:#}").contains("without a streams list"), "{error:#}");
+    }
+
+    #[test]
+    fn a_body_with_streams_is_an_answer() {
+        let transport =
+            Stub(Answer::Body(r#"{"streams":[{"title":"1080p","infoHash":"dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c","fileIdx":0}]}"#));
+        let StreamAnswer::Streams(streams) = client(&transport).stream("movie", "tt0133093").unwrap() else {
+            panic!("a body with streams is a stream answer");
+        };
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].addon, "addon");
+        assert_eq!(streams[0].file_idx, Some(0));
     }
 }

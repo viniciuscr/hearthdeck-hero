@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use serde_json::Value;
 use url::Url;
 
@@ -12,6 +12,41 @@ use url::Url;
 pub trait Transport: Send + Sync {
     fn get(&self, url: &Url) -> Result<Vec<u8>>;
     fn post_json(&self, url: &Url, body: &Value) -> Result<Vec<u8>>;
+}
+
+/// The status a server answered with, as an error. It carries the redacted
+/// endpoint so a caller can tell "the addon has no answer for this title"
+/// (a 404) from a fault without matching on error text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HttpStatus {
+    endpoint: String,
+    status: u16,
+}
+
+impl HttpStatus {
+    pub fn new(url: &Url, status: u16) -> Self {
+        Self { endpoint: redacted(url), status }
+    }
+
+    /// The numeric status: `404`, `503`, …
+    pub fn status(&self) -> u16 {
+        self.status
+    }
+}
+
+impl std::fmt::Display for HttpStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: HTTP {}", self.endpoint, self.status)
+    }
+}
+
+impl std::error::Error for HttpStatus {}
+
+/// The status an error answered with, when the failure was an HTTP status at
+/// all (possibly wrapped in `context`); `None` for a timeout, a connection
+/// failure or anything else.
+pub fn http_status(error: &anyhow::Error) -> Option<u16> {
+    error.chain().find_map(|cause| cause.downcast_ref::<HttpStatus>()).map(HttpStatus::status)
 }
 
 pub struct UreqTransport {
@@ -39,14 +74,8 @@ impl Default for UreqTransport {
 
 impl Transport for UreqTransport {
     fn get(&self, url: &Url) -> Result<Vec<u8>> {
-        let mut response = self
-            .agent
-            .get(url.as_str())
-            .config()
-            .timeout_global(Some(self.timeout))
-            .build()
-            .call()
-            .map_err(|e| anyhow!("{}", failure(url, e)))?;
+        let mut response =
+            self.agent.get(url.as_str()).config().timeout_global(Some(self.timeout)).build().call().map_err(|e| transport_error(url, e))?;
         read(url, &mut response, self.max_bytes)
     }
 
@@ -60,8 +89,18 @@ impl Transport for UreqTransport {
             .build()
             .header("content-type", "application/json")
             .send(text.as_str())
-            .map_err(|e| anyhow!("{}", failure(url, e)))?;
+            .map_err(|e| transport_error(url, e))?;
         read(url, &mut response, self.max_bytes)
+    }
+}
+
+/// A ureq failure, with a status kept as a type and everything else reduced
+/// to text: a transport error may quote the request URI, which can carry an
+/// addon's debrid key.
+fn transport_error(url: &Url, error: ureq::Error) -> anyhow::Error {
+    match error {
+        ureq::Error::StatusCode(status) => HttpStatus::new(url, status).into(),
+        other => anyhow!("{}", failure(url, other)),
     }
 }
 
@@ -69,7 +108,7 @@ fn read(url: &Url, response: &mut ureq::http::Response<ureq::Body>, max_bytes: u
     let status = response.status().as_u16();
     let body = response.body_mut().with_config().limit(max_bytes).read_to_vec().map_err(|e| anyhow!("{}", failure(url, e)))?;
     if !(200..300).contains(&status) {
-        bail!("{}: HTTP {status}", redacted(url));
+        return Err(HttpStatus::new(url, status).into());
     }
     Ok(body)
 }
@@ -92,7 +131,7 @@ fn failure(url: &Url, error: impl std::fmt::Display) -> String {
 
 /// `scheme://host/…`: the path and query stay out of every message because
 /// they may carry an addon's configuration.
-fn redacted(url: &Url) -> String {
+pub fn redacted(url: &Url) -> String {
     format!("{}://{}/…", url.scheme(), url.host_str().unwrap_or("?"))
 }
 
@@ -107,5 +146,22 @@ mod tests {
         assert!(!text.contains("secret-debrid-key"), "{text}");
         assert!(!text.contains("token=x"), "{text}");
         assert!(text.starts_with("https://addon.example/…"), "{text}");
+    }
+
+    #[test]
+    fn a_status_error_names_the_status_and_the_host_only() {
+        let url = Url::parse("https://addon.example/secret-debrid-key/stream/movie/tt0133093.json").unwrap();
+        let status = HttpStatus::new(&url, 404);
+        assert_eq!(status.status(), 404);
+        assert_eq!(status.to_string(), "https://addon.example/…: HTTP 404");
+        assert!(!status.to_string().contains("secret-debrid-key"));
+    }
+
+    #[test]
+    fn the_status_survives_context_and_absent_statuses_are_none() {
+        let url = Url::parse("https://addon.example/manifest.json").unwrap();
+        let error = anyhow::Error::from(HttpStatus::new(&url, 503)).context("addon manifest");
+        assert_eq!(http_status(&error), Some(503));
+        assert_eq!(http_status(&anyhow!("connection reset")), None);
     }
 }

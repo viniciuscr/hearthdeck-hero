@@ -6,7 +6,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use url::Url;
 
-use heronite_watch_addon::addon::AddonClient;
+use heronite_watch_addon::addon::{AddonClient, StreamAnswer};
 use heronite_watch_core::auth::AuthKey;
 use heronite_watch_core::provider::{CatalogDescriptor, Ctx, Rail, ResolvedStream, StreamOrigin, WatchProvider};
 use heronite_watch_core::types::{MovieItem, MovieProgress, StreamChoice};
@@ -111,11 +111,14 @@ impl WatchProvider for Stremio {
                 }
             };
             match client.stream(kind, id) {
-                Ok(mut streams) => {
+                Ok(StreamAnswer::Streams(mut streams)) => {
                     for stream in &mut streams {
                         stream.addon.clone_from(&manifest.name);
                     }
                     choices.append(&mut streams);
+                }
+                Ok(StreamAnswer::NotServed) => {
+                    log::debug!("watch addon {} ({}): does not serve {kind} {id}", manifest.name, client.host());
                 }
                 Err(error) => log::warn!("watch addon {}: {error:#}", manifest.name),
             }

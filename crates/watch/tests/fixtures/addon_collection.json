@@ -11,6 +11,17 @@
           "idPrefixes": ["tt"],
           "catalogs": []
         }
+      },
+      {
+        "transportUrl": "https://gone.example/manifest.json",
+        "manifest": {
+          "id": "community.gone",
+          "name": "Gone",
+          "resources": ["stream"],
+          "types": ["movie"],
+          "idPrefixes": ["tt"],
+          "catalogs": []
+        }
       }
     ]
   }
