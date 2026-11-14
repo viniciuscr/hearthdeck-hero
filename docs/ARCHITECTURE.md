@@ -24,7 +24,7 @@ the UI.
 
 ```
 app (bin heronite-rs) ── GPUI UI, desktop integration
- ├─ heronite-i18n       interface language: tr!/trn! and the pt-BR, es and de strings (no GPUI)
+ ├─ heronite-i18n       interface language: tr!/trn! and the pt-BR, es, de and fr strings (no GPUI)
  ├─ heronite-data       data folder files, paths, Heroic migration, safe writes, processes
  ├─ heronite-backup     backups of the data folder and app state:
  │                      incremental snapshots, retention, restore    → data
@@ -174,7 +174,7 @@ text size) and applies it.
   version wrote are kept as read, and a condition on a value the game lacks never matches).
 - **heronite-i18n:** English text is the key (`tr!("Play")`); Portuguese
   lives in `locales/pt-BR/*.json`, Spanish (neutral, `tú`) in
-  `locales/es/*.json` and German (`du`) in `locales/de/*.json`, embedded at build time (one folder per language) and
+  `locales/es/*.json`, German (`du`) in `locales/de/*.json` and French (`vous`) in `locales/fr/*.json`, embedded at build time (one folder per language) and
   loaded the first time it is needed. The language follows the system unless one is
   picked in Settings → General (`language` in `appearance.json`); switching
   redraws the windows. `tests/coverage.rs` scans the workspace: every key
@@ -228,7 +228,7 @@ text size) and applies it.
   DXVK / VKD3D-Proton or gamescope; Heroic's separate limiters are read as
   a fallback). `live_fps` makes that limit changeable while the game runs when MangoHud or gamescope applies it
   (MangoHud reads it from a config file of ours in `$XDG_RUNTIME_DIR/heronite/mangohud`, rewritten by the in-game
-  overlay; gamescope's is its `GAMESCOPE_FPS_LIMIT` atom, set by `heronite_overlay::gamescope`). `gpu` holds a game's graphics card settings (the card that draws it,
+  overlay, which also holds whether its HUD shows (`no_display`) so the overlay can hide it; `running.json` keeps it with the session, so a game picked up again by the next run of the app still has it; gamescope's is its `GAMESCOPE_FPS_LIMIT` atom, set by `heronite_overlay::gamescope`). `gpu` holds a game's graphics card settings (the card that draws it,
   NVIDIA Smooth Motion and Reflex, the DLSS / FSR 4 / XeSS upgrades of GE-Proton and
   Proton-CachyOS, Mesa's Anti-Lag and glthread, vsync and what DXVK tells DirectX games)
   as variables, and `gpu::detect` finds the cards (sysfs, `vulkaninfo`, `pci.ids`) and the

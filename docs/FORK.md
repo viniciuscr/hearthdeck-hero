@@ -122,6 +122,23 @@ implementation rules live in `docs/WATCH.md`.
 Append one entry per reconciliation that required a manual conflict resolution:
 date, upstream commit, files, and resolution.
 
+- **2026-11-14, upstream `bffbe5bc`** (27 commits; the French locale and the
+  "Back to game" overlay work among them). Three files and three locale files
+  conflicted, all where the F-005 rename met new upstream copy:
+  - `app/src/collection/focus_left.rs`: upstream's "Back to game" arrow beside
+    Play, kept for games and disabled in the Watch space (which has no install
+    or launch of its own).
+  - `app/src/overlay/panel/rows.rs`: upstream's new "Back to game" row and its
+    `game_away` condition, with the fork's "Back to Hearthdeck Hero" row.
+  - `app/src/overlay/window/windows.rs`: upstream's notice/foreground fix, with
+    the fork's window titles.
+  - `crates/i18n/locales/{de,es,pt-BR}/overlay.json`: upstream's new keys, plus
+    the renamed "Back to Hearthdeck Hero" key.
+  - `crates/i18n/locales/fr/**`: French is new upstream, and the fork's English
+    strings are renamed. Every French key whose English text carried "Heronite"
+    was renamed with its text ("Hearthdeck Hero"), and `fr/watch.json` is new
+    for the Watch strings.
+
 ## Releases
 
 - Tag `fork/main` as `v<upstream>-hearthdeck.<n>` (for example
