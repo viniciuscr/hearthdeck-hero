@@ -289,7 +289,7 @@ impl CollectionView {
         let key = &self.acting_key(key);
         // Fork-Seam: F-012 — see `game_pad`.
         if self.space == super::super::Space::Watch {
-            return self.game_hints_classic(key);
+            return self.watch_page_hints(key);
         }
         match look::theme().game_page {
             GamePage::Classic => self.game_hints_classic(key),

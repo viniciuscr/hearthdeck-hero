@@ -12,11 +12,11 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use heronite_data::CollectionGame;
 use heronite_i18n::{tr, trn};
-use heronite_watch::metadata::{TitleDetails, TitleRef};
+use heronite_watch::metadata::{Episode, TitleDetails, TitleRef};
 use heronite_watch::types::StreamChoice;
 
 use super::CollectionView;
-use crate::console::list::Row;
+use crate::console::list::{ListNav, Row};
 use crate::icons::Icon;
 use crate::theme;
 use crate::ui::icon;
@@ -37,9 +37,14 @@ pub(super) struct WatchPlayback {
     info: TitleInfo,
     /// The season and episode the picker shows (`console/watch_page.rs`).
     pick: Pick,
-    /// Play the first stream as soon as this episode's list arrives (A on an
-    /// episode plays it at once).
-    pending: Option<String>,
+    /// Which card the page shows beside the list: the title's details or its
+    /// streams.
+    tab: DetailTab,
+    /// The focus of the card's stream list.
+    streams_nav: ListNav,
+    /// Play the first stream as soon as this title/episode's list arrives (A on
+    /// an episode, or Play, starts the best at once). `Some(None)` is a film.
+    pending: Option<Option<String>>,
 }
 
 /// The series picker's state: which season and episode the page shows.
@@ -49,6 +54,14 @@ pub(super) struct Selection {
     pub season: usize,
     /// Index into that season's episodes.
     pub episode: usize,
+}
+
+/// The two cards the film page shows beside the list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum DetailTab {
+    #[default]
+    Details,
+    Streams,
 }
 
 /// The selection and the title it belongs to.
@@ -182,6 +195,9 @@ impl CollectionView {
         if current && !matches!(self.watch.state, StreamsState::Idle) {
             return;
         }
+        if !current {
+            self.watch.streams_nav.reset();
+        }
         self.watch.item = Some(key.clone());
         self.watch.video = video.clone();
         self.watch.state = StreamsState::Loading;
@@ -206,13 +222,16 @@ impl CollectionView {
                         StreamsState::Error(tr!("Could not load streams: {error}", error = format!("{error:#}")).to_string())
                     }
                 };
-                // A on an episode: its best stream starts as soon as it is known.
-                let play_now = this.watch.pending.take().is_some_and(|pending| Some(pending) == this.watch.video);
+                // A on an episode, or Play: the best stream starts as soon as it
+                // is known.
+                let play_now = this.watch.pending.take() == Some(this.watch.video.clone());
                 let has_streams = matches!(&this.watch.state, StreamsState::Ready(streams) if !streams.is_empty());
                 cx.notify();
-                if play_now && has_streams {
-                    if let Some(game) = this.lib.as_ref().and_then(|lib| lib.get(&key)).cloned() {
-                        this.watch_play_stream(&game, 0, cx);
+                if play_now {
+                    match (has_streams, this.lib.as_ref().and_then(|lib| lib.get(&key)).cloned()) {
+                        (true, Some(game)) => this.watch_play_stream(&game, 0, cx),
+                        (false, _) => this.show_toast(tr!("No streams found for this title."), true, cx),
+                        (true, None) => {}
                     }
                 }
             })
@@ -233,25 +252,70 @@ impl CollectionView {
     /// A on an episode: it becomes the picked one, its streams are asked for and
     /// the best starts when they arrive.
     pub(super) fn watch_play_episode(&mut self, game: &CollectionGame, video: &str, cx: &mut Context<Self>) {
-        let same = self.watch.item.as_deref() == Some(game.key.as_str()) && self.watch.video.as_deref() == Some(video);
+        self.watch_play_picked(game, Some(video), cx);
+    }
+
+    /// The Play button (and X): the best stream of the picked episode, or of the
+    /// film, started as soon as the list is known. While the title plays it
+    /// stops it.
+    pub(super) fn watch_play_picked(&mut self, game: &CollectionGame, video: Option<&str>, cx: &mut Context<Self>) {
+        if self.watch.running.as_ref().is_some_and(|running| running.key == game.key) {
+            self.watch_stop(cx);
+            return;
+        }
+        let same = self.watch.item.as_deref() == Some(game.key.as_str()) && self.watch.video.as_deref() == video;
         match (same, &self.watch.state) {
             (true, StreamsState::Ready(streams)) if !streams.is_empty() => {
                 self.watch_play_stream(game, 0, cx);
                 return;
             }
+            (true, StreamsState::Ready(_)) => {
+                self.show_toast(tr!("No streams found for this title."), true, cx);
+                return;
+            }
             (true, StreamsState::Loading) => {
-                self.watch.pending = Some(video.to_owned());
+                self.watch.pending = Some(video.map(str::to_owned));
                 cx.notify();
                 return;
             }
             _ => {}
         }
-        // Idle, failed, empty or another episode: ask again and play the best.
+        // Idle, failed or another title/episode: ask again and play the best.
         self.watch.item = Some(game.key.clone());
-        self.watch.video = Some(video.to_owned());
+        self.watch.video = video.map(str::to_owned);
         self.watch.state = StreamsState::Idle;
-        self.watch.pending = Some(video.to_owned());
-        self.watch_ensure_streams(game, Some(video), cx);
+        self.watch.streams_nav.reset();
+        self.watch.pending = Some(video.map(str::to_owned));
+        self.watch_ensure_streams(game, video, cx);
+    }
+
+    /// Which card the page shows beside the list.
+    pub(super) fn watch_tab(&self) -> DetailTab {
+        self.watch.tab
+    }
+
+    /// LB / RB: the other card.
+    pub(super) fn watch_switch_tab(&mut self) -> DetailTab {
+        self.watch.tab = match self.watch.tab {
+            DetailTab::Details => DetailTab::Streams,
+            DetailTab::Streams => DetailTab::Details,
+        };
+        self.watch.tab
+    }
+
+    /// The card's stream list, to render it and to route its presses.
+    pub(super) fn watch_streams_nav(&mut self) -> &mut ListNav {
+        &mut self.watch.streams_nav
+    }
+
+    /// The episode the picker shows, when the title is a series with episodes.
+    pub(super) fn watch_picked_video(&mut self, game: &CollectionGame) -> Option<String> {
+        let details = self.watch_details(&game.key)?;
+        if details.episodes.is_empty() {
+            return None;
+        }
+        let selection = self.watch_ensure_selection(&game.key, &details);
+        picked_episode(&details, selection).map(|episode| episode.id.clone())
     }
 
     /// The picker's selection for `key`: the episode the stored progress points
@@ -295,26 +359,11 @@ impl CollectionView {
         self.watch.state = StreamsState::Idle;
     }
 
-    /// Play, Stop or "find the streams": what Play does for a film.
+    /// Play / Stop for a title: a film's own best stream, a series' picked
+    /// episode's. Also what the desktop card and the shell's Play call.
     pub(super) fn watch_primary(&mut self, game: &CollectionGame, cx: &mut Context<Self>) {
-        if self.watch.running.as_ref().is_some_and(|running| running.key == game.key) {
-            self.watch_stop(cx);
-            return;
-        }
-        if matches!(self.watch.state, StreamsState::Error(_) | StreamsState::Idle) {
-            let video = self.watch.video.clone();
-            self.watch.state = StreamsState::Idle;
-            self.watch_ensure_streams(game, video.as_deref(), cx);
-            return;
-        }
-        match &self.watch.state {
-            StreamsState::Ready(streams) if !streams.is_empty() => {
-                let index = self.watch.selected.min(streams.len() - 1);
-                self.watch_play_stream(game, index, cx);
-            }
-            StreamsState::Ready(_) => self.show_toast(tr!("No streams found for this title."), true, cx),
-            StreamsState::Loading | StreamsState::Error(_) | StreamsState::Idle => {}
-        }
+        let video = self.watch_picked_video(game);
+        self.watch_play_picked(game, video.as_deref(), cx);
     }
 
     /// Starts `streams[index]` through the Stremio service and mpv.
@@ -526,6 +575,12 @@ fn default_selection(details: &TitleDetails, resume: Option<&str>) -> Selection 
     Selection { season, episode }
 }
 
+/// The episode the picker shows: the chosen one of the chosen season.
+pub(super) fn picked_episode(details: &TitleDetails, selection: Selection) -> Option<&Episode> {
+    let season = details.seasons().get(selection.season).copied()?;
+    details.episodes_of(season).nth(selection.episode)
+}
+
 /// Keeps a selection inside the seasons and episodes the source lists.
 fn clamp_selection(details: &TitleDetails, selection: Selection) -> Selection {
     let seasons = details.seasons();
@@ -594,7 +649,6 @@ fn stream_detail(stream: &StreamChoice, label: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use heronite_watch::metadata::Episode;
     // `gpui_kit::*` brings gpui's `test` macro into scope.
     use core::prelude::v1::test;
 

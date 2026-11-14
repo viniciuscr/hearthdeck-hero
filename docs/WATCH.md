@@ -12,9 +12,12 @@ the rules that apply while building it.
 > and registry from the **media provider** (Stremio: titles, streams, progress);
 > a provider is never asked to describe a title, and `details()` is not on
 > `WatchProvider`. A series reports its status, seasons and episodes, and the
-> film page carries the picker: a season row moved with ◀ ▶, one row per episode,
-> that episode's streams under it, and A starts the best stream of the focused
-> episode at once. Watched marks follow the stored episode pointer (`video_id`);
+> film page carries the picker: a season row moved with ◀ ▶ and one row per
+> episode, with the card following the focused episode. The card has two tabs,
+> LB / RB: **Details** (what the film or the picked episode is) and **Streams**
+> (where it can be played from), for films and series alike — the streams are no
+> longer rows of the list. A on an episode, and the Play button, start the best
+> stream at once. Watched marks follow the stored episode pointer (`video_id`);
 > Stremio's per-episode `watched` bitfield is still out. HowLongToBeat is no
 > longer asked about titles in the Watch space.
 

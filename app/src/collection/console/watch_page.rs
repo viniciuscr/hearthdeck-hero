@@ -24,14 +24,14 @@ use heronite_i18n::tr;
 use heronite_images::{ImageRef, Variant};
 use heronite_watch::metadata::{Episode, TitleDetails};
 
-use super::super::watch_playback::Selection;
+use super::super::watch_playback::{picked_episode, DetailTab, Selection};
 use super::super::CollectionView;
 use super::game::facts_table;
 use super::hero::{card_surface, fitted_title};
 use crate::console::kit::{self, u};
 use crate::console::list::{Outcome, Row, Value};
 use crate::console::motion;
-use crate::console::Pad;
+use crate::console::{hint, Btn, Hint, Pad};
 use crate::icons::Icon;
 use crate::theme;
 
@@ -132,10 +132,10 @@ fn episode_row(episode: &Episode, index: usize, watched: bool, locale: DateLocal
     row.icon(if watched { Icon::Check } else { Icon::PlayArrow })
 }
 
-/// The episode the picker shows: the chosen one of the chosen season.
-fn picked_episode(details: &TitleDetails, selection: Selection) -> Option<&Episode> {
-    let season = details.seasons().get(selection.season).copied()?;
-    details.episodes_of(season).nth(selection.episode)
+/// The episode of the row the list is on, when that row is an episode: the
+/// card follows the focus.
+fn focused_episode(rows: &[Row], focus: usize) -> Option<usize> {
+    rows.get(focus)?.id.strip_prefix("episode:")?.parse().ok()
 }
 
 /// The picked episode above the title's own details: still, code, name, date,
@@ -187,10 +187,6 @@ impl CollectionView {
         // A series opens on the episode the stored progress points at.
         let selection =
             details.as_deref().filter(|details| !details.episodes.is_empty()).map(|details| self.watch_ensure_selection(key, details));
-        let picked = match (details.as_deref(), selection) {
-            (Some(details), Some(selection)) => picked_episode(details, selection).cloned(),
-            _ => None,
-        };
         let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
         let facts = facts_line(g.source_label, details.as_deref(), crate::fork::watch::sources::year(&g));
         let watched = watched_line(g.playtime_minutes, g.last_played.as_deref(), locale);
@@ -201,8 +197,19 @@ impl CollectionView {
             .map(str::to_owned)
             .filter(|text| !text.trim().is_empty());
 
-        let rows = self.watch_rows(&g, details.as_deref(), locale, cx);
+        let rows = self.watch_rows(&g, details.as_deref(), locale);
         let list = self.console.game.list.render("console-game-actions", &rows, true);
+        // The card follows the list: the row the pad is on decides the episode.
+        if let Some(selection) = selection {
+            if let Some(episode) = focused_episode(&rows, self.console.game.list.focus) {
+                self.watch_pick_episode(&g.key, Selection { season: selection.season, episode });
+            }
+        }
+        let selection = details.as_deref().filter(|details| !details.episodes.is_empty()).map(|d| self.watch_ensure_selection(key, d));
+        let picked = match (details.as_deref(), selection) {
+            (Some(details), Some(selection)) => picked_episode(details, selection).cloned(),
+            _ => None,
+        };
         let s = kit::scale();
         let still = picked.as_ref().and_then(|episode| episode.thumbnail.as_deref()).and_then(|url| self.episode_still(url, 420., 236., s));
         let (cw, ch) = (136., 136. * self.cover_aspect);
@@ -248,28 +255,44 @@ impl CollectionView {
                 10.,
             ));
 
-        let mut about = div()
-            .id("console-watch-about")
-            .flex()
-            .flex_col()
-            .gap(u(20.))
-            .overflow_y_scroll()
-            .track_scroll(self.console.game.about.handle());
-        if let Some(episode) = picked.as_ref() {
-            about = about.child(episode_card(episode, still, locale));
-        }
-        if let Some(overview) = overview {
-            about = about
-                .child(kit::body_text(overview).max_w(u(980.)).text_size(u(16.)).line_height(u(25.)).text_color(theme::text_primary()));
-        }
-        if !lines.is_empty() {
-            let table: Vec<(SharedString, String)> =
-                lines.iter().map(|line| (SharedString::from(line.label), line.value.clone())).collect();
-            about = about.child(div().h(px(1.)).flex_none().bg(kit::ink(0.08))).child(facts_table(&table, columns));
-        }
-        if failed {
-            about = about.child(div().text_size(u(14.)).text_color(theme::text_dim()).child(tr!("Details unavailable right now.")));
-        }
+        // The card's two sides: what the title or the picked episode is, and the
+        // streams it can be played from. One structure for films and series.
+        let tabs: Vec<SharedString> = [tr!("Details"), tr!("Streams")].into_iter().map(SharedString::from).collect();
+        let (active, body) = match self.watch_tab() {
+            DetailTab::Details => {
+                let mut about = div()
+                    .id("console-watch-about")
+                    .flex()
+                    .flex_col()
+                    .gap(u(20.))
+                    .overflow_y_scroll()
+                    .track_scroll(self.console.game.about.handle());
+                if let Some(episode) = picked.as_ref() {
+                    about = about.child(episode_card(episode, still, locale));
+                }
+                if let Some(overview) = overview {
+                    about = about.child(
+                        kit::body_text(overview).max_w(u(980.)).text_size(u(16.)).line_height(u(25.)).text_color(theme::text_primary()),
+                    );
+                }
+                if !lines.is_empty() {
+                    let table: Vec<(SharedString, String)> =
+                        lines.iter().map(|line| (SharedString::from(line.label), line.value.clone())).collect();
+                    about = about.child(div().h(px(1.)).flex_none().bg(kit::ink(0.08))).child(facts_table(&table, columns));
+                }
+                if failed {
+                    about = about.child(div().text_size(u(14.)).text_color(theme::text_dim()).child(tr!("Details unavailable right now.")));
+                }
+                (0, about.into_any_element())
+            }
+            DetailTab::Streams => {
+                let video = picked.as_ref().map(|episode| episode.id.clone());
+                self.watch_ensure_streams(&g, video.as_deref(), cx);
+                let rows = self.watch_stream_rows(&g, video.as_deref());
+                let list = self.watch_streams_nav().render("console-watch-streams", &rows, true);
+                (1, list.flex_1().min_h_0().into_any_element())
+            }
+        };
 
         div()
             .flex()
@@ -286,7 +309,18 @@ impl CollectionView {
                     .px(u(46.))
                     .pb(u(20.))
                     .child(div().flex_none().w(u(560.)).flex().flex_col().child(list.flex_1().min_h_0()))
-                    .child(card_surface().flex_1().min_w_0().p(u(26.)).rounded(u(20.)).flex().flex_col().child(about.flex_1().min_h_0())),
+                    .child(
+                        card_surface()
+                            .flex_1()
+                            .min_w_0()
+                            .p(u(26.))
+                            .rounded(u(20.))
+                            .flex()
+                            .flex_col()
+                            .gap(u(18.))
+                            .child(kit::tabs(&tabs, active))
+                            .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
+                    ),
             )
             .into_any_element()
     }
@@ -295,45 +329,32 @@ impl CollectionView {
 impl CollectionView {
     /// The page's rows: Play, then for a series the season row, that season's
     /// episodes and the picked episode's streams; a film lists its own streams.
-    fn watch_rows(
-        &mut self,
-        game: &CollectionGame,
-        details: Option<&TitleDetails>,
-        locale: DateLocale,
-        cx: &mut Context<Self>,
-    ) -> Vec<Row> {
+    fn watch_rows(&mut self, game: &CollectionGame, details: Option<&TitleDetails>, locale: DateLocale) -> Vec<Row> {
         let (label, icon) = self.primary_state(game);
         let mut rows = vec![Row::action("primary", label).icon(icon)];
-        let Some(details) = details.filter(|details| !details.episodes.is_empty()) else {
-            self.watch_ensure_streams(game, None, cx);
-            rows.extend(self.watch_stream_rows(game, None));
-            return rows;
-        };
+        // A film's streams are the card's second tab, not rows of the list.
+        let Some(details) = details.filter(|details| !details.episodes.is_empty()) else { return rows };
         let selection = self.watch_ensure_selection(&game.key, details);
         let seasons = details.seasons();
         let season = seasons.get(selection.season).copied().unwrap_or(1);
         let options: Vec<SharedString> = seasons.iter().map(|number| SharedString::from(tr!("Season {n}", n = number))).collect();
         rows.push(Row::choice("season", tr!("Season"), options, selection.season));
-        let episodes: Vec<&Episode> = details.episodes_of(season).collect();
         let watched = self.watch_resume().map(str::to_owned);
-        for (index, episode) in episodes.iter().enumerate() {
+        for (index, episode) in details.episodes_of(season).enumerate() {
             rows.push(episode_row(episode, index, watched.as_deref() == Some(episode.id.as_str()), locale));
         }
-        let video = episodes.get(selection.episode).map(|episode| episode.id.clone());
-        self.watch_ensure_streams(game, video.as_deref(), cx);
-        rows.extend(self.watch_stream_rows(game, video.as_deref()));
         rows
     }
 
-    /// A on a row of the page.
+    /// A on a row of the list: Play starts the best of the picked title or
+    /// episode, an episode row starts that episode's.
     fn watch_press_row(&mut self, game: &CollectionGame, id: &str, cx: &mut Context<Self>) {
         if id == "primary" {
-            self.watch_primary(game, cx);
+            let video = self.watch_picked_video(game);
+            self.watch_play_picked(game, video.as_deref(), cx);
             return;
         }
-        if let Some(index) = id.strip_prefix("stream:").and_then(|index| index.parse::<usize>().ok()) {
-            self.watch_play_stream(game, index, cx);
-        } else if let Some(index) = id.strip_prefix("episode:").and_then(|index| index.parse::<usize>().ok()) {
+        if let Some(index) = id.strip_prefix("episode:").and_then(|index| index.parse::<usize>().ok()) {
             self.watch_press_episode(game, index, cx);
         }
     }
@@ -357,44 +378,98 @@ impl CollectionView {
         self.images.get_or_request(&id, || vec![chain], pw, ph, Variant::Cover, 200).map(ImageSource::Render)
     }
 
-    /// The page's presses: the list navigates, ◀ ▶ move the season, A plays the
-    /// episode or the stream, X plays or stops, the wheel scrolls the card.
+    /// The page's presses. LB / RB switch the card; on the details card the list
+    /// navigates (◀ ▶ move the season, A plays the episode), on the streams card
+    /// the pad picks a stream. X plays or stops the picked title or episode.
     pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(game) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else { return false };
+        if matches!(pad, Pad::LB | Pad::RB) {
+            self.watch_switch_tab();
+            if self.watch_tab() == DetailTab::Streams {
+                let video = self.watch_picked_video(&game);
+                self.watch_ensure_streams(&game, video.as_deref(), cx);
+            }
+            cx.notify();
+            return true;
+        }
         let details = self.watch_details(key);
         let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
-        let rows = self.watch_rows(&game, details.as_deref(), locale, cx);
-        match self.console.game.list.on_pad(pad, &rows) {
-            Outcome::Activate(id) => {
-                self.watch_press_row(&game, &id, cx);
-                cx.notify();
-                true
-            }
-            Outcome::Changed(id, Value::Choice { index, .. }) if id.as_ref() == "season" => {
-                if let Some(details) = self.watch_details(key) {
-                    self.watch_pick_season(&game.key, &details, index);
-                    self.watch_forget_streams();
-                    cx.notify();
-                }
-                true
-            }
-            Outcome::Moved | Outcome::Edge(_) | Outcome::Changed(..) => {
-                cx.notify();
-                true
-            }
-            Outcome::Ignored => match pad {
-                Pad::X => {
-                    self.primary_action(key, cx);
-                    true
-                }
-                Pad::ScrollUp | Pad::ScrollDown => {
+        let picked_video = self.watch_picked_video(&game);
+        match self.watch_tab() {
+            DetailTab::Details => {
+                // The wheel follows the card's text, as the games' page does.
+                if matches!(pad, Pad::ScrollUp | Pad::ScrollDown) {
                     let step = f32::from(u(120.));
                     self.console.game.about.by(if pad == Pad::ScrollDown { step } else { -step });
-                    true
+                    return true;
                 }
-                _ => false,
-            },
+                let rows = self.watch_rows(&game, details.as_deref(), locale);
+                match self.console.game.list.on_pad(pad, &rows) {
+                    Outcome::Activate(id) => {
+                        self.watch_press_row(&game, &id, cx);
+                        cx.notify();
+                        true
+                    }
+                    Outcome::Changed(id, Value::Choice { index, .. }) if id.as_ref() == "season" => {
+                        if let Some(details) = self.watch_details(key) {
+                            self.watch_pick_season(&game.key, &details, index);
+                            self.watch_forget_streams();
+                            cx.notify();
+                        }
+                        true
+                    }
+                    Outcome::Moved | Outcome::Edge(_) | Outcome::Changed(..) => {
+                        cx.notify();
+                        true
+                    }
+                    Outcome::Ignored => match pad {
+                        Pad::X => {
+                            self.watch_play_picked(&game, picked_video.as_deref(), cx);
+                            true
+                        }
+                        _ => false,
+                    },
+                }
+            }
+            DetailTab::Streams => {
+                self.watch_ensure_streams(&game, picked_video.as_deref(), cx);
+                let rows = self.watch_stream_rows(&game, picked_video.as_deref());
+                let outcome = self.watch_streams_nav().on_pad(pad, &rows);
+                match outcome {
+                    Outcome::Activate(id) => {
+                        if let Some(index) = id.strip_prefix("stream:").and_then(|index| index.parse::<usize>().ok()) {
+                            self.watch_play_stream(&game, index, cx);
+                        }
+                        cx.notify();
+                        true
+                    }
+                    Outcome::Moved | Outcome::Edge(_) | Outcome::Changed(..) => {
+                        cx.notify();
+                        true
+                    }
+                    Outcome::Ignored => match pad {
+                        Pad::X => {
+                            self.watch_play_picked(&game, picked_video.as_deref(), cx);
+                            true
+                        }
+                        _ => false,
+                    },
+                }
+            }
         }
+    }
+
+    /// The page's hint bar: what A, the bumpers and X do on the card shown.
+    pub(super) fn watch_page_hints(&self, key: &SharedString) -> Vec<Hint> {
+        let primary = self.lib.as_ref().and_then(|lib| lib.get(key)).map(|game| self.primary_label(game)).unwrap_or(tr!("Play"));
+        let mut hints = vec![hint(Btn::A, tr!("Select")), hint(Btn::Bumpers, tr!("Tabs"))];
+        if self.watch_tab() == DetailTab::Details {
+            hints.push(hint(Btn::LeftRight, tr!("Change")));
+        }
+        hints.push(hint(Btn::X, primary));
+        hints.push(hint(Btn::B, tr!("Back")));
+        hints.push(hint(Btn::Start, tr!("Menu")));
+        hints
     }
 }
 
@@ -493,6 +568,21 @@ mod tests {
         let other = Selection { season: 1, episode: 0 };
         assert_eq!(picked_episode(&details, other).map(|episode| episode.name.as_str()), Some("The North Remembers"));
         assert_eq!(picked_episode(&details, Selection { season: 9, episode: 0 }), None, "no such season");
+    }
+
+    #[test]
+    fn the_card_follows_the_episode_the_list_is_on() {
+        let rows = vec![
+            Row::action("primary", "Play"),
+            Row::choice("season", "Season", vec!["Season 1".into()], 0),
+            episode_row(&episode(1, 1, "A"), 0, false, DateLocale::En),
+            episode_row(&episode(1, 2, "B"), 1, false, DateLocale::En),
+        ];
+        assert_eq!(focused_episode(&rows, 0), None, "Play is not an episode");
+        assert_eq!(focused_episode(&rows, 1), None, "a season is not an episode");
+        assert_eq!(focused_episode(&rows, 2), Some(0));
+        assert_eq!(focused_episode(&rows, 3), Some(1));
+        assert_eq!(focused_episode(&rows, 9), None);
     }
 
     #[test]
