@@ -26,6 +26,8 @@ use crate::ui::icon;
 pub(super) struct WatchPlayback {
     /// The title `state` describes (the Collection key).
     item: Option<String>,
+    /// The episode `state` is for, when the title is a series.
+    video: Option<String>,
     state: StreamsState,
     /// The stream the main Play starts; the first when the list arrives.
     selected: usize,
@@ -33,6 +35,27 @@ pub(super) struct WatchPlayback {
     running: Option<Running>,
     /// What the metadata sources say about the title (`console/watch_page.rs`).
     info: TitleInfo,
+    /// The season and episode the picker shows (`console/watch_page.rs`).
+    pick: Pick,
+    /// Play the first stream as soon as this episode's list arrives (A on an
+    /// episode plays it at once).
+    pending: Option<String>,
+}
+
+/// The series picker's state: which season and episode the page shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Selection {
+    /// Index into the title's seasons, not the season number.
+    pub season: usize,
+    /// Index into that season's episodes.
+    pub episode: usize,
+}
+
+/// The selection and the title it belongs to.
+#[derive(Default)]
+struct Pick {
+    item: Option<String>,
+    selection: Selection,
 }
 
 /// The metadata sources' answer for the title, and where the load stands.
@@ -41,6 +64,8 @@ struct TitleInfo {
     /// The title `state` describes (the Collection key).
     item: Option<String>,
     state: TitleState,
+    /// The episode the stored progress points at, when the page opened.
+    resume: Option<String>,
 }
 
 #[derive(Default)]
@@ -90,18 +115,33 @@ impl CollectionView {
         cx.notify();
 
         let app = self.app_paths.clone();
-        let title = TitleRef::new(&game.runner, crate::fork::watch::sources::id(game), crate::fork::watch::sources::kind(game))
+        let provider = game.runner.clone();
+        let id = crate::fork::watch::sources::id(game).to_owned();
+        let title = TitleRef::new(&provider, &id, crate::fork::watch::sources::kind(game))
             .named(&game.title, crate::fork::watch::sources::year(game));
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { heronite_watch::metadata::details(&app, &title) }).await;
+            let result = cx
+                .background_spawn(async move {
+                    let details = heronite_watch::metadata::details(&app, &title)?;
+                    // Where the person stopped, read from the local records: offline
+                    // and free, and what the picker opens on.
+                    let resume = heronite_watch::progress::local(&app, &provider, &id).and_then(|progress| progress.video_id);
+                    Ok::<_, anyhow::Error>((details, resume))
+                })
+                .await;
             this.update(cx, |this, cx| {
                 // Another title took the page while this one loaded.
                 if this.watch.info.item.as_deref() != Some(key.as_str()) {
                     return;
                 }
                 this.watch.info.state = match result {
-                    Ok(Some(details)) => TitleState::Ready(Arc::new(details)),
-                    Ok(None) => TitleState::Missing,
+                    Ok((Some(details), resume)) => {
+                        this.watch.info.resume = resume;
+                        // The new details decide which episode the picker opens on.
+                        this.watch.pick = Pick::default();
+                        TitleState::Ready(Arc::new(details))
+                    }
+                    Ok((None, _)) => TitleState::Missing,
                     Err(error) => {
                         log::debug!("watch details: {error:#}");
                         TitleState::Failed
@@ -131,30 +171,32 @@ impl CollectionView {
         self.watch.info.item.as_deref() == Some(key) && matches!(self.watch.info.state, TitleState::Failed)
     }
 
-    /// Loads the streams of `game` unless the title already has a result
-    /// (loaded, loading or failed). Play resets a failure to ask again.
-    pub(super) fn watch_ensure_streams(&mut self, game: &CollectionGame, cx: &mut Context<Self>) {
+    /// Loads the streams of `game` (or of one episode, when `video` names it)
+    /// unless that answer is already there. Play resets a failure to ask again.
+    pub(super) fn watch_ensure_streams(&mut self, game: &CollectionGame, video: Option<&str>, cx: &mut Context<Self>) {
         let key = game.key.clone();
-        let current = self.watch.item.as_deref() == Some(key.as_str());
-        // Loading, loaded or failed: the detail page draws what it has. Play
-        // resets a failure to ask again.
+        let video = video.map(str::to_owned);
+        let current = self.watch.item.as_deref() == Some(key.as_str()) && self.watch.video == video;
+        // Loading, loaded or failed: the page draws what it has. Play resets a
+        // failure to ask again.
         if current && !matches!(self.watch.state, StreamsState::Idle) {
             return;
         }
         self.watch.item = Some(key.clone());
+        self.watch.video = video.clone();
         self.watch.state = StreamsState::Loading;
         self.watch.selected = 0;
         cx.notify();
 
         let app = self.app_paths.clone();
-        let id = crate::fork::watch::sources::id(game).to_owned();
+        let id = video.clone().unwrap_or_else(|| crate::fork::watch::sources::id(game).to_owned());
         let provider = game.runner.clone();
         let kind = crate::fork::watch::sources::kind(game).to_owned();
         cx.spawn(async move |this, cx| {
             let result = cx.background_spawn(async move { heronite_watch::playback::streams(&app, &provider, &kind, &id) }).await;
             this.update(cx, |this, cx| {
-                // Another title took the selection while this one loaded.
-                if this.watch.item.as_deref() != Some(key.as_str()) {
+                // Another title or episode took the page while this one loaded.
+                if this.watch.item.as_deref() != Some(key.as_str()) || this.watch.video != video {
                     return;
                 }
                 this.watch.state = match result {
@@ -164,11 +206,93 @@ impl CollectionView {
                         StreamsState::Error(tr!("Could not load streams: {error}", error = format!("{error:#}")).to_string())
                     }
                 };
+                // A on an episode: its best stream starts as soon as it is known.
+                let play_now = this.watch.pending.take().is_some_and(|pending| Some(pending) == this.watch.video);
+                let has_streams = matches!(&this.watch.state, StreamsState::Ready(streams) if !streams.is_empty());
                 cx.notify();
+                if play_now && has_streams {
+                    if let Some(game) = this.lib.as_ref().and_then(|lib| lib.get(&key)).cloned() {
+                        this.watch_play_stream(&game, 0, cx);
+                    }
+                }
             })
             .ok();
         })
         .detach();
+    }
+
+    /// Opening a title's page: a film asks for its streams now; a series waits
+    /// for the page to pick an episode.
+    pub(super) fn watch_open_title(&mut self, game: &CollectionGame, cx: &mut Context<Self>) {
+        if crate::fork::watch::sources::kind(game) == "series" {
+            return;
+        }
+        self.watch_ensure_streams(game, None, cx);
+    }
+
+    /// A on an episode: it becomes the picked one, its streams are asked for and
+    /// the best starts when they arrive.
+    pub(super) fn watch_play_episode(&mut self, game: &CollectionGame, video: &str, cx: &mut Context<Self>) {
+        let same = self.watch.item.as_deref() == Some(game.key.as_str()) && self.watch.video.as_deref() == Some(video);
+        match (same, &self.watch.state) {
+            (true, StreamsState::Ready(streams)) if !streams.is_empty() => {
+                self.watch_play_stream(game, 0, cx);
+                return;
+            }
+            (true, StreamsState::Loading) => {
+                self.watch.pending = Some(video.to_owned());
+                cx.notify();
+                return;
+            }
+            _ => {}
+        }
+        // Idle, failed, empty or another episode: ask again and play the best.
+        self.watch.item = Some(game.key.clone());
+        self.watch.video = Some(video.to_owned());
+        self.watch.state = StreamsState::Idle;
+        self.watch.pending = Some(video.to_owned());
+        self.watch_ensure_streams(game, Some(video), cx);
+    }
+
+    /// The picker's selection for `key`: the episode the stored progress points
+    /// at, else the first episode of the first season.
+    pub(super) fn watch_ensure_selection(&mut self, key: &str, details: &TitleDetails) -> Selection {
+        let selection = match self.watch.pick.item.as_deref() {
+            Some(item) if item == key => self.watch.pick.selection,
+            _ => default_selection(details, self.watch.info.resume.as_deref()),
+        };
+        let selection = clamp_selection(details, selection);
+        if self.watch.pick.item.as_deref() != Some(key) || self.watch.pick.selection != selection {
+            self.watch.pick = Pick { item: Some(key.to_owned()), selection };
+        }
+        selection
+    }
+
+    /// ◀ ▶ on the season row: the new season's first episode.
+    pub(super) fn watch_pick_season(&mut self, key: &str, details: &TitleDetails, season: usize) -> Selection {
+        let season = season.min(details.season_count().saturating_sub(1));
+        let selection = clamp_selection(details, Selection { season, episode: 0 });
+        self.watch.pick = Pick { item: Some(key.to_owned()), selection };
+        selection
+    }
+
+    /// The episode the focus settled on: what A would play.
+    pub(super) fn watch_pick_episode(&mut self, key: &str, selection: Selection) -> Selection {
+        self.watch.pick = Pick { item: Some(key.to_owned()), selection };
+        selection
+    }
+
+    /// The episode the stored progress points at: the picker ticks it.
+    pub(super) fn watch_resume(&self) -> Option<&str> {
+        self.watch.info.resume.as_deref()
+    }
+
+    /// Forgets the loaded streams: another season's episodes come next.
+    pub(super) fn watch_forget_streams(&mut self) {
+        self.watch.item = None;
+        self.watch.video = None;
+        self.watch.pending = None;
+        self.watch.state = StreamsState::Idle;
     }
 
     /// Play, Stop or "find the streams": what Play does for a film.
@@ -178,9 +302,9 @@ impl CollectionView {
             return;
         }
         if matches!(self.watch.state, StreamsState::Error(_) | StreamsState::Idle) {
-            self.watch.item = None;
+            let video = self.watch.video.clone();
             self.watch.state = StreamsState::Idle;
-            self.watch_ensure_streams(game, cx);
+            self.watch_ensure_streams(game, video.as_deref(), cx);
             return;
         }
         match &self.watch.state {
@@ -219,7 +343,10 @@ impl CollectionView {
             provider: game.runner.clone(),
             id: crate::fork::watch::sources::id(game).to_owned(),
             kind: crate::fork::watch::sources::kind(game).to_owned(),
-            title: game.title.clone(),
+            video_id: self.watch.video.clone(),
+            // What mpv's window and the desktop panels call it: the episode,
+            // when the page picked one.
+            title: self.watch_title(game),
             stream,
         };
         let (key, app_name) = (game.key.clone(), game.app_name.clone());
@@ -265,9 +392,26 @@ impl CollectionView {
         cx.notify();
     }
 
-    /// The rows the console game page adds under Play: one per stream.
+    /// The title as a playing session names it: the episode's code and name when
+    /// the page picked one, else the title.
+    fn watch_title(&self, game: &CollectionGame) -> String {
+        let Some(video) = self.watch.video.as_deref() else { return game.title.clone() };
+        let Some(details) = self.watch_details(&game.key) else { return game.title.clone() };
+        let Some(episode) = details.episode_with_id(video) else { return game.title.clone() };
+        match episode.name.trim() {
+            "" => format!("{} · {}", game.title, episode.code()),
+            name => format!("{} · {} {name}", game.title, episode.code()),
+        }
+    }
+
+    /// The rows the console page adds under Play for a film: one per stream.
     pub(super) fn watch_console_rows(&self, game: &CollectionGame) -> Vec<Row> {
-        if self.watch.item.as_deref() != Some(game.key.as_str()) {
+        self.watch_stream_rows(game, None)
+    }
+
+    /// The rows of one episode's streams (`None`: the title's own, for a film).
+    pub(super) fn watch_stream_rows(&self, game: &CollectionGame, video: Option<&str>) -> Vec<Row> {
+        if self.watch.item.as_deref() != Some(game.key.as_str()) || self.watch.video.as_deref() != video {
             return vec![Row::text("watch:loading", tr!("Streams"), tr!("Finding streams\u{2026}")).icon(Icon::Downloading)];
         }
         match &self.watch.state {
@@ -298,9 +442,13 @@ impl CollectionView {
         if self.space != super::Space::Watch {
             return None;
         }
-        if let Some(game) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() {
-            self.watch_ensure_streams(&game, cx);
+        let game = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned()?;
+        // A series' streams belong to an episode, and only the console page
+        // picks one; the desktop panel lists them for films.
+        if crate::fork::watch::sources::kind(&game) == "series" {
+            return None;
         }
+        self.watch_ensure_streams(&game, None, cx);
         self.watch_streams_section(key, cx)
     }
 
@@ -366,6 +514,26 @@ impl CollectionView {
     }
 }
 
+/// The picker's first selection: the episode the stored pointer names, else the
+/// first episode of the first season.
+fn default_selection(details: &TitleDetails, resume: Option<&str>) -> Selection {
+    let seasons = details.seasons();
+    let Some(resume) = resume else { return Selection::default() };
+    let Some(episode) = details.episode_with_id(resume) else { return Selection::default() };
+    let season = seasons.iter().position(|season| *season == episode.season).unwrap_or(0);
+    let listed = seasons.get(season).copied().unwrap_or(episode.season);
+    let episode = details.episodes_of(listed).position(|listed| listed.id == resume).unwrap_or(0);
+    Selection { season, episode }
+}
+
+/// Keeps a selection inside the seasons and episodes the source lists.
+fn clamp_selection(details: &TitleDetails, selection: Selection) -> Selection {
+    let seasons = details.seasons();
+    let season = selection.season.min(seasons.len().saturating_sub(1));
+    let episodes = seasons.get(season).map(|season| details.episodes_of(*season).count()).unwrap_or(0);
+    Selection { season, episode: selection.episode.min(episodes.saturating_sub(1)) }
+}
+
 fn notice(text: impl Into<SharedString>) -> AnyElement {
     div()
         .px(px(14.))
@@ -426,6 +594,7 @@ fn stream_detail(stream: &StreamChoice, label: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use heronite_watch::metadata::Episode;
     // `gpui_kit::*` brings gpui's `test` macro into scope.
     use core::prelude::v1::test;
 
@@ -462,5 +631,35 @@ mod tests {
         assert!(detail.contains(&heronite_epic::util::file_size_local(1_500_000_000.0)), "{detail}");
         assert!(!detail.contains("\u{1f464}"), "{detail}");
         assert!(!detail.contains("\u{1f4be}"), "{detail}");
+    }
+
+    fn episode(season: u32, number: u32) -> Episode {
+        Episode { id: format!("tt1:{season}:{number}"), season, number, name: format!("S{season}E{number}"), ..Episode::default() }
+    }
+
+    fn series() -> TitleDetails {
+        TitleDetails {
+            kind: "series".into(),
+            id: "tt1".into(),
+            name: "A Series".into(),
+            episodes: vec![episode(1, 1), episode(1, 2), episode(2, 1), episode(2, 2), episode(2, 3)],
+            ..TitleDetails::default()
+        }
+    }
+
+    #[test]
+    fn the_picker_opens_on_the_stored_episode() {
+        let details = series();
+        assert_eq!(default_selection(&details, Some("tt1:2:2")), Selection { season: 1, episode: 1 });
+        assert_eq!(default_selection(&details, None), Selection::default(), "no progress: the first episode");
+        assert_eq!(default_selection(&details, Some("tt9:1:1")), Selection::default(), "an episode this title does not list");
+    }
+
+    #[test]
+    fn a_selection_stays_inside_the_seasons_the_source_lists() {
+        let details = series();
+        assert_eq!(clamp_selection(&details, Selection { season: 9, episode: 9 }), Selection { season: 1, episode: 2 });
+        assert_eq!(clamp_selection(&details, Selection { season: 0, episode: 9 }), Selection { season: 0, episode: 1 });
+        assert_eq!(clamp_selection(&TitleDetails::default(), Selection { season: 3, episode: 3 }), Selection::default());
     }
 }

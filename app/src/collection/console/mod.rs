@@ -684,7 +684,8 @@ impl CollectionView {
         self.console.screen = Screen::Game(key.clone());
         if self.space == Space::Watch {
             if let Some(game) = self.lib.as_ref().and_then(|library| library.get(&key)).cloned() {
-                self.watch_ensure_streams(&game, cx);
+                // A series waits for the page to pick an episode (F-012).
+                self.watch_open_title(&game, cx);
             }
         }
     }

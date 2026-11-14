@@ -8,6 +8,7 @@
 pub mod collection;
 pub mod metadata;
 pub mod playback;
+pub mod progress;
 pub mod registry;
 
 pub use heronite_watch_core::auth::AuthKey;

@@ -272,10 +272,10 @@ impl CollectionView {
     /// `false` lets the shell use the press (B goes back).
     pub(super) fn game_pad(&mut self, key: &SharedString, pad: Pad, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let key = &self.acting_key(key);
-        // Fork-Seam: F-012 — a film page is the page whatever the theme picks,
-        // so it uses the Classic page's routing and look.
+        // Fork-Seam: F-012 — a film page is the page whatever the theme picks;
+        // its own routing knows the season and episode rows.
         if self.space == super::super::Space::Watch {
-            return self.game_pad_classic(key, pad, window, cx);
+            return self.watch_page_pad(key, pad, window, cx);
         }
         match look::theme().game_page {
             GamePage::Classic => self.game_pad_classic(key, pad, window, cx),

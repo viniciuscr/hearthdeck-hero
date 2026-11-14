@@ -14,7 +14,7 @@ use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::metadata::MetaCtx;
 use heronite_watch_state::details as cache;
 
-pub use heronite_watch_core::metadata::{MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
+pub use heronite_watch_core::metadata::{Episode, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
 
 /// The metadata sources Watch ships with, in the order they are asked.
 pub fn sources() -> &'static [&'static dyn WatchMetadataSource] {

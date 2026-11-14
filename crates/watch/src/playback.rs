@@ -30,8 +30,12 @@ pub struct PlaybackRequest {
     pub provider: String,
     /// The provider's id for the title, also the local progress key.
     pub id: String,
-    /// `movie` in v1.
+    /// `movie` or `series`.
     pub kind: String,
+    /// The episode being played, when the title is a series. The progress
+    /// record stays keyed by `id`; this is what resumes, and what the provider
+    /// stores as the record's `video_id`.
+    pub video_id: Option<String>,
     pub title: String,
     pub stream: StreamChoice,
 }
@@ -58,9 +62,9 @@ pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Res
     let provider = registry::find(&request.provider).ok_or_else(|| anyhow!("Unknown Watch provider: {}", request.provider))?;
     let resolved = provider.resolve(&ctx, &request.stream)?;
     let previous = progress_record(app, provider, &ctx, &request.id);
-    let start_ms = previous.as_ref().and_then(resume_at);
+    let start_ms = previous.as_ref().filter(|progress| resumes_this(progress, request)).and_then(resume_at);
     let outcome = play_url(request, resolved, start_ms, stop)?;
-    record(app, provider, &ctx, &request.id, previous.as_ref(), &outcome);
+    record(app, provider, &ctx, &request.id, request.video_id.as_deref(), previous.as_ref(), &outcome);
     Ok(outcome)
 }
 
@@ -94,6 +98,16 @@ fn progress_record(app: &AppPaths, provider: &dyn WatchProvider, ctx: &Ctx<'_>, 
     }
 }
 
+/// Whether the stored position belongs to what is being played: a series only
+/// resumes the episode its pointer names, never another one.
+fn resumes_this(progress: &MovieProgress, request: &PlaybackRequest) -> bool {
+    match request.video_id.as_deref() {
+        Some(video) => progress.video_id.as_deref() == Some(video),
+        // A film stores its own id as the pointer; a record without one is a film's too.
+        None => progress.video_id.as_deref().is_none_or(|pointer| pointer == request.id),
+    }
+}
+
 /// A position worth resuming: started, and not near its end.
 fn resume_at(progress: &MovieProgress) -> Option<u64> {
     if progress.finished || progress.position_ms == 0 {
@@ -117,6 +131,7 @@ fn record(
     provider: &dyn WatchProvider,
     ctx: &Ctx<'_>,
     id: &str,
+    video_id: Option<&str>,
     previous: Option<&MovieProgress>,
     outcome: &PlaybackOutcome,
 ) {
@@ -132,9 +147,12 @@ fn record(
         duration_ms: outcome.duration_ms,
         updated_at: Utc::now(),
         finished: finished(outcome.position_ms, outcome.duration_ms),
-        // A series' episode pointer comes from the stored record; a film's is
-        // its own id.
-        video_id: previous.and_then(|progress| progress.video_id.clone()).or_else(|| Some(id.to_owned())),
+        // The episode just played; without one, the pointer the record already
+        // had (a series), else the film's own id.
+        video_id: video_id
+            .map(str::to_owned)
+            .or_else(|| previous.and_then(|progress| progress.video_id.clone()))
+            .or_else(|| Some(id.to_owned())),
     };
     let mut movies = store::read_movies(app);
     store::upsert_progress(&mut movies, progress.clone());
@@ -263,10 +281,48 @@ mod tests {
             finished: false,
             video_id: Some("tt1:1:2".into()),
         };
-        record(&app, &NoopProvider, &ctx, "tt1", Some(&previous), &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        record(&app, &NoopProvider, &ctx, "tt1", None, Some(&previous), &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
 
         let stored = store::read_movies(&app);
         assert_eq!(store::progress_for(&stored, "stremio", "tt1").unwrap().video_id.as_deref(), Some("tt1:1:2"));
+    }
+
+    #[test]
+    fn a_series_records_the_episode_that_played_and_a_film_its_own_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let credentials = StoreCredentials::new(&app);
+        let http = UreqTransport::new();
+        let ctx = Ctx { http: &http, credentials: &credentials };
+        record(&app, &NoopProvider, &ctx, "tt1", Some("tt1:1:3"), None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        assert_eq!(store::progress_for(&store::read_movies(&app), "stremio", "tt1").unwrap().video_id.as_deref(), Some("tt1:1:3"));
+
+        record(&app, &NoopProvider, &ctx, "tt2", None, None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        assert_eq!(store::progress_for(&store::read_movies(&app), "stremio", "tt2").unwrap().video_id.as_deref(), Some("tt2"));
+    }
+
+    fn request(id: &str, video_id: Option<&str>) -> PlaybackRequest {
+        PlaybackRequest {
+            provider: "stremio".into(),
+            id: id.into(),
+            kind: if video_id.is_some() { "series".into() } else { "movie".into() },
+            video_id: video_id.map(str::to_owned),
+            title: id.into(),
+            stream: StreamChoice::default(),
+        }
+    }
+
+    #[test]
+    fn only_the_episode_that_played_resumes() {
+        let earlier = MovieProgress { video_id: Some("tt1:1:2".into()), ..progress(60_000, 600_000, false) };
+        assert!(resumes_this(&earlier, &request("tt1", Some("tt1:1:2"))), "the same episode resumes");
+        assert!(!resumes_this(&earlier, &request("tt1", Some("tt1:1:3"))), "another episode starts at the beginning");
+        assert!(!resumes_this(&earlier, &request("tt1", None)), "a film's record is not this series' pointer");
+
+        let film = progress(60_000, 600_000, false);
+        assert!(resumes_this(&film, &request("tt1", None)));
+        let legacy = MovieProgress { video_id: Some("tt1".into()), ..progress(60_000, 600_000, false) };
+        assert!(resumes_this(&legacy, &request("tt1", None)), "a film stores its own id as the pointer");
     }
 
     #[test]

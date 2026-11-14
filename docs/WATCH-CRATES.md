@@ -115,7 +115,8 @@ the app uses.
 | `heronite_watch::account` | `create_link`, `read_link`, `LinkOffer`, `LinkPoll` |
 | `heronite_watch::store` | `read_auth`, `write_auth`, `clear_auth` |
 | `heronite_watch::collection` | `ROOT`, `library` |
-| `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` |
+| `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
+| `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider) |
 | `heronite_watch::metadata` | `details`, `details_with`, `sources`, `TitleDetails`, `TitleRef` |
 | `heronite_watch::player` | `PlaybackOutcome` |
 | `heronite_watch::types` | `StreamChoice` |
@@ -149,7 +150,10 @@ module and a re-export cannot share a name (`collection` is the case).
 
 The provider name is the `GameInfo.runner`/`source` value the projection already
 writes. Playback takes it from the game: `PlaybackRequest.provider` and the
-provider argument of `streams`. No screen learns a provider's name.
+provider argument of `streams`. No screen learns a provider's name. A series
+adds two things that are not the provider's: `PlaybackRequest.video_id` (the
+episode the addons named, also what `movies.json` stores as the pointer) and
+the picker's season/episode selection, which is the page's own state.
 
 ## Invariants the refactor preserves
 

@@ -10,18 +10,28 @@
 //! playtime, status, folders, screenshots or HowLongToBeat. The description
 //! and the details come from the metadata sources (`heronite_watch::metadata`:
 //! Cinemeta today), while Play and its rows are the provider's streams.
+//!
+//! A series gets a picker in the same list: a season row moved with ◀ ▶, one row
+//! per episode of that season, and the picked episode's streams under them. A
+//! on an episode plays its best stream at once; the card previews what the
+//! picker is on.
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use heronite_data::text::DateLocale;
+use heronite_data::CollectionGame;
 use heronite_i18n::tr;
-use heronite_watch::metadata::TitleDetails;
+use heronite_images::{ImageRef, Variant};
+use heronite_watch::metadata::{Episode, TitleDetails};
 
+use super::super::watch_playback::Selection;
 use super::super::CollectionView;
 use super::game::facts_table;
 use super::hero::{card_surface, fitted_title};
 use crate::console::kit::{self, u};
+use crate::console::list::{Outcome, Row, Value};
 use crate::console::motion;
+use crate::console::Pad;
 use crate::icons::Icon;
 use crate::theme;
 
@@ -85,13 +95,80 @@ fn detail_lines(details: Option<&TitleDetails>, library_genres: &[String], local
         push(tr!("Country"), names(&details.countries));
         push(tr!("Awards"), details.awards.clone());
         push(tr!("Status"), details.series_status.clone());
-        push(tr!("Seasons"), details.seasons.map(|count| count.to_string()));
-        push(tr!("Episodes"), details.episodes.map(|count| count.to_string()));
+        push(tr!("Seasons"), (details.season_count() > 0).then(|| details.season_count().to_string()));
+        push(tr!("Episodes"), (details.episode_count() > 0).then(|| details.episode_count().to_string()));
     }
     if details.is_none_or(|details| details.genres.is_empty()) {
         push(tr!("Genres"), names(library_genres));
     }
     lines
+}
+
+/// "Winter Is Coming", or "Episode 3" when the source has no name.
+fn episode_name(episode: &Episode) -> String {
+    match episode.name.trim() {
+        "" => tr!("Episode {n}", n = episode.number).to_string(),
+        name => name.to_owned(),
+    }
+}
+
+/// "1 · Winter Is Coming": the picker row's label.
+fn episode_label(episode: &Episode) -> String {
+    format!("{} · {}", episode.number, episode_name(episode))
+}
+
+/// "S1E2 · 18 Apr 2011": the picker row's second line.
+fn episode_desc(episode: &Episode, locale: DateLocale) -> String {
+    let mut parts = vec![episode.code()];
+    parts
+        .extend(episode.released.as_deref().map(|at| heronite_data::text::format_timestamp(at, locale)).filter(|at| !at.trim().is_empty()));
+    parts.join(" \u{b7} ")
+}
+
+/// One row of a season's episodes ("episode:{index}" in the list); the episode
+/// the stored progress points at wears a tick.
+fn episode_row(episode: &Episode, index: usize, watched: bool, locale: DateLocale) -> Row {
+    let row = Row::action(SharedString::from(format!("episode:{index}")), episode_label(episode)).desc(episode_desc(episode, locale));
+    row.icon(if watched { Icon::Check } else { Icon::PlayArrow })
+}
+
+/// The episode the picker shows: the chosen one of the chosen season.
+fn picked_episode(details: &TitleDetails, selection: Selection) -> Option<&Episode> {
+    let season = details.seasons().get(selection.season).copied()?;
+    details.episodes_of(season).nth(selection.episode)
+}
+
+/// The picked episode above the title's own details: still, code, name, date,
+/// rating and what it is about.
+fn episode_card(episode: &Episode, still: Option<ImageSource>, locale: DateLocale) -> Div {
+    let mut line = vec![episode.code()];
+    line.extend(episode.released.as_deref().map(|at| heronite_data::text::format_timestamp(at, locale)).filter(|at| !at.trim().is_empty()));
+    line.extend(episode.rating.as_ref().map(|rating| tr!("IMDb {rating}", rating = rating).to_string()));
+    div()
+        .flex()
+        .flex_col()
+        .gap(u(10.))
+        .child(
+            div()
+                .flex_none()
+                .w(u(420.))
+                .h(u(236.))
+                .rounded(u(14.))
+                .overflow_hidden()
+                .bg(kit::ink(0.08))
+                .children(still.map(|still| img(still).size_full().object_fit(ObjectFit::Cover))),
+        )
+        .child(div().text_size(u(20.)).font_weight(theme::W_BOLD).text_color(theme::text_primary()).child(format!(
+            "{} \u{b7} {}",
+            episode.code(),
+            episode_name(episode)
+        )))
+        .children((!line.is_empty()).then(|| div().text_size(u(14.)).text_color(theme::text_muted()).child(line.join(" \u{b7} "))))
+        .children(
+            episode.overview.clone().filter(|overview| !overview.trim().is_empty()).map(|overview| {
+                div().max_w(u(640.)).text_size(u(15.)).line_height(u(22.)).text_color(theme::text_primary()).child(overview)
+            }),
+        )
 }
 
 impl CollectionView {
@@ -101,13 +178,19 @@ impl CollectionView {
             return kit::empty(Icon::Warning, tr!("This title is gone"), tr!("Press B to go back.")).into_any_element();
         };
         self.console_focus_game(Some(key.clone()), cx);
-        self.watch_ensure_streams(&g, cx);
         self.watch_ensure_details(&g, cx);
 
         // Everything the page draws is taken before the view is borrowed mutably
         // (the list, the cover and the scroll driver all need `&mut self`).
         let details = self.watch_details(key);
         let failed = self.watch_details_failed(key);
+        // A series opens on the episode the stored progress points at.
+        let selection =
+            details.as_deref().filter(|details| !details.episodes.is_empty()).map(|details| self.watch_ensure_selection(key, details));
+        let picked = match (details.as_deref(), selection) {
+            (Some(details), Some(selection)) => picked_episode(details, selection).cloned(),
+            _ => None,
+        };
         let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
         let facts = facts_line(g.source_label, details.as_deref(), crate::fork::watch::sources::year(&g));
         let watched = watched_line(g.playtime_minutes, g.last_played.as_deref(), locale);
@@ -118,9 +201,10 @@ impl CollectionView {
             .map(str::to_owned)
             .filter(|text| !text.trim().is_empty());
 
-        let rows = self.game_rows(&g, cx);
+        let rows = self.watch_rows(&g, details.as_deref(), locale, cx);
         let list = self.console.game.list.render("console-game-actions", &rows, true);
         let s = kit::scale();
+        let still = picked.as_ref().and_then(|episode| episode.thumbnail.as_deref()).and_then(|url| self.episode_still(url, 420., 236., s));
         let (cw, ch) = (136., 136. * self.cover_aspect);
         let cover = self.cover(key, cw * s, ch * s, window.scale_factor(), 300);
         let title = fitted_title(52., g.title.chars().count());
@@ -171,6 +255,9 @@ impl CollectionView {
             .gap(u(20.))
             .overflow_y_scroll()
             .track_scroll(self.console.game.about.handle());
+        if let Some(episode) = picked.as_ref() {
+            about = about.child(episode_card(episode, still, locale));
+        }
         if let Some(overview) = overview {
             about = about
                 .child(kit::body_text(overview).max_w(u(980.)).text_size(u(16.)).line_height(u(25.)).text_color(theme::text_primary()));
@@ -202,6 +289,112 @@ impl CollectionView {
                     .child(card_surface().flex_1().min_w_0().p(u(26.)).rounded(u(20.)).flex().flex_col().child(about.flex_1().min_h_0())),
             )
             .into_any_element()
+    }
+}
+
+impl CollectionView {
+    /// The page's rows: Play, then for a series the season row, that season's
+    /// episodes and the picked episode's streams; a film lists its own streams.
+    fn watch_rows(
+        &mut self,
+        game: &CollectionGame,
+        details: Option<&TitleDetails>,
+        locale: DateLocale,
+        cx: &mut Context<Self>,
+    ) -> Vec<Row> {
+        let (label, icon) = self.primary_state(game);
+        let mut rows = vec![Row::action("primary", label).icon(icon)];
+        let Some(details) = details.filter(|details| !details.episodes.is_empty()) else {
+            self.watch_ensure_streams(game, None, cx);
+            rows.extend(self.watch_stream_rows(game, None));
+            return rows;
+        };
+        let selection = self.watch_ensure_selection(&game.key, details);
+        let seasons = details.seasons();
+        let season = seasons.get(selection.season).copied().unwrap_or(1);
+        let options: Vec<SharedString> = seasons.iter().map(|number| SharedString::from(tr!("Season {n}", n = number))).collect();
+        rows.push(Row::choice("season", tr!("Season"), options, selection.season));
+        let episodes: Vec<&Episode> = details.episodes_of(season).collect();
+        let watched = self.watch_resume().map(str::to_owned);
+        for (index, episode) in episodes.iter().enumerate() {
+            rows.push(episode_row(episode, index, watched.as_deref() == Some(episode.id.as_str()), locale));
+        }
+        let video = episodes.get(selection.episode).map(|episode| episode.id.clone());
+        self.watch_ensure_streams(game, video.as_deref(), cx);
+        rows.extend(self.watch_stream_rows(game, video.as_deref()));
+        rows
+    }
+
+    /// A on a row of the page.
+    fn watch_press_row(&mut self, game: &CollectionGame, id: &str, cx: &mut Context<Self>) {
+        if id == "primary" {
+            self.watch_primary(game, cx);
+            return;
+        }
+        if let Some(index) = id.strip_prefix("stream:").and_then(|index| index.parse::<usize>().ok()) {
+            self.watch_play_stream(game, index, cx);
+        } else if let Some(index) = id.strip_prefix("episode:").and_then(|index| index.parse::<usize>().ok()) {
+            self.watch_press_episode(game, index, cx);
+        }
+    }
+
+    /// A on an episode: it becomes the pick and its best stream starts at once.
+    fn watch_press_episode(&mut self, game: &CollectionGame, index: usize, cx: &mut Context<Self>) {
+        let Some(details) = self.watch_details(&game.key) else { return };
+        let selection = self.watch_ensure_selection(&game.key, &details);
+        let picked = Selection { season: selection.season, episode: index };
+        let Some(episode) = picked_episode(&details, picked) else { return };
+        let video = episode.id.clone();
+        self.watch_pick_episode(&game.key, picked);
+        self.watch_play_episode(game, &video, cx);
+    }
+
+    /// A 16:9 still from its URL, once loaded (the loader caches it by size).
+    fn episode_still(&mut self, url: &str, w: f32, h: f32, scale: f32) -> Option<ImageSource> {
+        let (pw, ph) = ((w * scale).round() as u32, (h * scale).round() as u32);
+        let id: SharedString = format!("still:{url}:{pw}x{ph}").into();
+        let chain = ImageRef::Url(url.to_owned());
+        self.images.get_or_request(&id, || vec![chain], pw, ph, Variant::Cover, 200).map(ImageSource::Render)
+    }
+
+    /// The page's presses: the list navigates, ◀ ▶ move the season, A plays the
+    /// episode or the stream, X plays or stops, the wheel scrolls the card.
+    pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(game) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else { return false };
+        let details = self.watch_details(key);
+        let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
+        let rows = self.watch_rows(&game, details.as_deref(), locale, cx);
+        match self.console.game.list.on_pad(pad, &rows) {
+            Outcome::Activate(id) => {
+                self.watch_press_row(&game, &id, cx);
+                cx.notify();
+                true
+            }
+            Outcome::Changed(id, Value::Choice { index, .. }) if id.as_ref() == "season" => {
+                if let Some(details) = self.watch_details(key) {
+                    self.watch_pick_season(&game.key, &details, index);
+                    self.watch_forget_streams();
+                    cx.notify();
+                }
+                true
+            }
+            Outcome::Moved | Outcome::Edge(_) | Outcome::Changed(..) => {
+                cx.notify();
+                true
+            }
+            Outcome::Ignored => match pad {
+                Pad::X => {
+                    self.primary_action(key, cx);
+                    true
+                }
+                Pad::ScrollUp | Pad::ScrollDown => {
+                    let step = f32::from(u(120.));
+                    self.console.game.about.by(if pad == Pad::ScrollDown { step } else { -step });
+                    true
+                }
+                _ => false,
+            },
+        }
     }
 }
 
@@ -254,15 +447,59 @@ mod tests {
         }
     }
 
+    fn episode(season: u32, number: u32, name: &str) -> Episode {
+        Episode {
+            id: format!("tt0944947:{season}:{number}"),
+            season,
+            number,
+            name: name.into(),
+            thumbnail: Some(format!("https://episodes.metahub.space/tt0944947/{season}/{number}/w780.jpg")),
+            released: Some(format!("2011-0{season}-1{number}")),
+            ..Episode::default()
+        }
+    }
+
+    fn series() -> TitleDetails {
+        TitleDetails {
+            kind: "series".into(),
+            series_status: Some("Ended".into()),
+            episodes: vec![episode(1, 1, "Winter Is Coming"), episode(1, 2, "The Kingsroad"), episode(2, 1, "The North Remembers")],
+            ..matrix()
+        }
+    }
+
     #[test]
     fn a_series_adds_its_status_and_counts() {
-        let details =
-            TitleDetails { kind: "series".into(), series_status: Some("Ended".into()), seasons: Some(8), episodes: Some(73), ..matrix() };
+        let details = series();
         let lines = detail_lines(Some(&details), &[], DateLocale::En);
         let value = |label: &str| lines.iter().find(|line| line.label == label).map(|line| line.value.as_str());
         assert_eq!(value("Status"), Some("Ended"));
-        assert_eq!(value("Seasons"), Some("8"));
-        assert_eq!(value("Episodes"), Some("73"));
+        assert_eq!(value("Seasons"), Some("2"));
+        assert_eq!(value("Episodes"), Some("3"));
+    }
+
+    #[test]
+    fn the_picker_names_each_episode_of_the_chosen_season() {
+        let details = series();
+        let selection = Selection { season: 0, episode: 1 };
+        let picked = picked_episode(&details, selection).expect("the season has two episodes");
+        assert_eq!(picked.code(), "S1E2");
+        assert_eq!(episode_label(picked), "2 \u{b7} The Kingsroad");
+        assert_eq!(episode_desc(picked, DateLocale::En), "S1E2 \u{b7} 1/12/2011");
+        // The row's id says which episode of the season the list means.
+        assert_eq!(episode_row(picked, 1, false, DateLocale::En).id.as_ref(), "episode:1");
+        assert!(episode_row(picked, 1, true, DateLocale::En).icon.is_some(), "a watched episode wears a tick");
+
+        let other = Selection { season: 1, episode: 0 };
+        assert_eq!(picked_episode(&details, other).map(|episode| episode.name.as_str()), Some("The North Remembers"));
+        assert_eq!(picked_episode(&details, Selection { season: 9, episode: 0 }), None, "no such season");
+    }
+
+    #[test]
+    fn an_unnamed_episode_is_its_number() {
+        let unnamed = Episode { season: 1, number: 7, ..Episode::default() };
+        assert_eq!(episode_name(&unnamed), "Episode 7");
+        assert_eq!(episode_label(&unnamed), "7 \u{b7} Episode 7");
     }
 
     #[test]

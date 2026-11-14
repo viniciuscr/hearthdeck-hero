@@ -10,7 +10,7 @@ use serde_json::Value;
 use url::Url;
 
 use heronite_watch_core::http::{http_status, redacted, Transport};
-use heronite_watch_core::metadata::TitleDetails;
+use heronite_watch_core::metadata::{Episode, TitleDetails};
 use heronite_watch_core::types::{MovieItem, StreamChoice};
 
 /// Addons serialize optional lists as `null`, and `serde(default)` only
@@ -102,12 +102,35 @@ impl MetaPreview {
     }
 }
 
-/// One `videos` entry of a series' meta. Only the season and episode numbers
-/// are read: they are counted, never listed.
+/// One `videos` entry of a series' meta: an episode and what its row and the
+/// stream request for it need.
 #[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MetaVideo {
+    /// The addon's video id (`tt0944947:1:1`): what its `stream` resource takes.
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub season: Option<u32>,
+    /// The episode number; Cinemeta sends it as both `number` and `episode`.
+    #[serde(default)]
+    pub number: Option<u32>,
+    #[serde(default)]
+    pub episode: Option<u32>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub overview: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
+    #[serde(default)]
+    pub released: Option<Value>,
+    #[serde(default)]
+    pub first_aired: Option<Value>,
+    #[serde(default)]
+    pub rating: Option<Value>,
 }
 
 /// The addon protocol's `meta` object: what a `meta/{type}/{id}.json` answers.
@@ -168,9 +191,7 @@ impl MetaDetails {
     pub fn into_details(self, id: &str, kind: &str) -> Option<TitleDetails> {
         let name = self.name.filter(|name| !name.trim().is_empty())?;
         let genres = if self.genres.is_empty() { self.genre } else { self.genres };
-        // Season 0 is the specials: counted neither as a season nor an episode.
-        let seasons: Vec<u32> = self.videos.iter().filter_map(|video| video.season.filter(|s| *s > 0)).collect();
-        let seasons_count = seasons.iter().copied().collect::<std::collections::BTreeSet<_>>().len();
+        let episodes = episodes_of(&self.videos, id);
         Some(TitleDetails {
             source: String::new(),
             id: id.to_owned(),
@@ -188,13 +209,40 @@ impl MetaDetails {
             countries: split_names(self.country.as_deref()),
             awards: self.awards.filter(|awards| !awards.trim().is_empty()),
             series_status: text(self.status),
-            seasons: (seasons_count > 0).then_some(seasons_count as u32),
-            episodes: (!seasons.is_empty()).then_some(seasons.len() as u32),
+            episodes,
             poster: self.poster,
             background: self.background,
             logo: self.logo,
         })
     }
+}
+
+/// The `videos` list as episodes, in season order. Season 0 holds the specials
+/// and is left out, as is any entry without a season or an episode number.
+fn episodes_of(videos: &[MetaVideo], series_id: &str) -> Vec<Episode> {
+    let mut episodes: Vec<Episode> = videos
+        .iter()
+        .filter_map(|video| {
+            let season = video.season.filter(|season| *season > 0)?;
+            let number = video.number.or(video.episode).filter(|number| *number > 0)?;
+            // An addon that omits the id still names the episode the standard
+            // way, which is what the `stream` resource expects.
+            let id = video.id.clone().filter(|id| !id.trim().is_empty()).unwrap_or_else(|| format!("{series_id}:{season}:{number}"));
+            Some(Episode {
+                id,
+                season,
+                number,
+                name: video.name.clone().map(|name| name.trim().to_owned()).filter(|name| !name.is_empty()).unwrap_or_default(),
+                overview: video.overview.clone().or_else(|| video.description.clone()).filter(|overview| !overview.trim().is_empty()),
+                thumbnail: video.thumbnail.clone().filter(|thumbnail| !thumbnail.trim().is_empty()),
+                released: text(video.released.clone()).or_else(|| text(video.first_aired.clone())).and_then(|date| day_of(&date)),
+                // Cinemeta rates an unreleased episode "0"; that is no rating.
+                rating: text(video.rating.clone()).filter(|rating| rating.trim() != "0"),
+            })
+        })
+        .collect();
+    episodes.sort_by_key(|episode| (episode.season, episode.number));
+    episodes
 }
 
 /// `1999-03-31T00:00:00.000Z` as `1999-03-31`; a date alone is unchanged.
@@ -523,21 +571,44 @@ mod tests {
         assert_eq!(details.countries, ["United States"]);
         assert!(details.awards.as_deref().is_some_and(|awards| awards.contains("Oscars")));
         assert_eq!(details.series_status, None);
-        assert_eq!(details.seasons, None);
-        assert_eq!(details.episodes, None);
+        assert!(details.episodes.is_empty(), "a film has no episodes");
+        assert_eq!(details.season_count(), 0);
     }
 
     #[test]
-    fn a_series_counts_its_seasons_and_episodes_without_the_specials() {
+    fn a_series_lists_its_episodes_without_the_specials() {
         let transport = Stub(Answer::Body(include_str!("../tests/fixtures/meta_series.json")));
         let details = details(&transport, "series", "tt0944947").expect("the fixture has a meta");
         assert_eq!(details.year.as_deref(), Some("2011–2019"));
         assert_eq!(details.series_status.as_deref(), Some("Ended"));
-        // Season 0 holds the specials: neither a season nor an episode here.
-        assert_eq!(details.seasons, Some(2));
-        assert_eq!(details.episodes, Some(3));
         assert_eq!(details.countries, ["United States", "United Kingdom"]);
         assert!(details.directors.is_empty());
+        // Season 0 (the specials) is out, and so is the entry with no number.
+        assert_eq!(details.seasons(), [1, 2]);
+        assert_eq!(details.episode_count(), 3);
+
+        let first = &details.episodes[0];
+        assert_eq!(first.id, "tt0944947:1:1");
+        assert_eq!(first.season, 1);
+        assert_eq!(first.number, 1);
+        assert_eq!(first.code(), "S1E1");
+        assert_eq!(first.name, "Winter Is Coming");
+        assert!(first.overview.as_deref().is_some_and(|overview| overview.contains("Ned Stark")));
+        assert_eq!(first.thumbnail.as_deref(), Some("https://episodes.metahub.space/tt0944947/1/1/w780.jpg"));
+        assert_eq!(first.released.as_deref(), Some("2011-04-18"));
+        assert_eq!(first.rating.as_deref(), Some("8.9"));
+        // "0" is Cinemeta's way of saying it has no rating for the episode.
+        assert_eq!(details.episodes[1].rating, None);
+        assert_eq!(details.episodes_of(1).count(), 2);
+    }
+
+    #[test]
+    fn an_episode_without_an_id_is_named_the_standard_way() {
+        let transport = Stub(Answer::Body(include_str!("../tests/fixtures/meta_series.json")));
+        let details = details(&transport, "series", "tt0944947").expect("the fixture has a meta");
+        // The season 2 entry of the fixture carries no id: the standard video
+        // id is what a stream addon expects.
+        assert_eq!(details.episode_with_id("tt0944947:2:1").map(|episode| episode.name.as_str()), Some("The North Remembers"));
     }
 
     #[test]

@@ -10,7 +10,7 @@ pub mod metadata;
 pub mod provider;
 pub mod types;
 
-pub use metadata::{MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
+pub use metadata::{Episode, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
 pub use provider::{CatalogDescriptor, Credentials, Ctx, Rail, ResolvedStream, Secret, StreamOrigin, WatchProvider};
 
 pub type Result<T> = anyhow::Result<T>;

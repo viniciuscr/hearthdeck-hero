@@ -136,12 +136,10 @@ pub struct TitleDetails {
     /// Series only: `Ended`, `Continuing`.
     #[serde(default)]
     pub series_status: Option<String>,
-    /// Series only: how many seasons and episodes the source lists. Season 0
-    /// (specials) is not counted.
+    /// Series only: every episode the source lists, ordered by season and
+    /// number. Season 0 (the specials) is not here.
     #[serde(default)]
-    pub seasons: Option<u32>,
-    #[serde(default)]
-    pub episodes: Option<u32>,
+    pub episodes: Vec<Episode>,
     /// Art the source knows, when the library record lacks it.
     #[serde(default)]
     pub poster: Option<String>,
@@ -151,9 +149,68 @@ pub struct TitleDetails {
     pub logo: Option<String>,
 }
 
+/// One episode of a series: what the picker row and the stream request need.
+///
+/// `id` is the addon's own video id (`tt0944947:1:1`): it is what the `stream`
+/// resource is asked for and what progress stores as `video_id`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Episode {
+    pub id: String,
+    pub season: u32,
+    pub number: u32,
+    /// The episode's name; empty when the source has none.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub overview: Option<String>,
+    /// A 16:9 still, when the source has one.
+    #[serde(default)]
+    pub thumbnail: Option<String>,
+    /// The air date (`2011-04-18`).
+    #[serde(default)]
+    pub released: Option<String>,
+    /// `8.2`, as the source prints it; `0` when it has none.
+    #[serde(default)]
+    pub rating: Option<String>,
+}
+
+impl Episode {
+    /// `S1E2`, the label a picker row and the player's title use.
+    pub fn code(&self) -> String {
+        format!("S{}E{}", self.season, self.number)
+    }
+}
+
 impl TitleDetails {
     /// The source's description, or the library's when it has none.
     pub fn description_or<'a>(&'a self, fallback: Option<&'a str>) -> Option<&'a str> {
         self.description.as_deref().filter(|d| !d.trim().is_empty()).or(fallback)
+    }
+
+    /// The season numbers the source lists, ascending.
+    pub fn seasons(&self) -> Vec<u32> {
+        let mut seasons: Vec<u32> = self.episodes.iter().map(|episode| episode.season).collect();
+        seasons.sort_unstable();
+        seasons.dedup();
+        seasons
+    }
+
+    /// How many seasons and episodes the source lists.
+    pub fn season_count(&self) -> usize {
+        self.seasons().len()
+    }
+
+    pub fn episode_count(&self) -> usize {
+        self.episodes.len()
+    }
+
+    /// The episodes of one season, ordered.
+    pub fn episodes_of(&self, season: u32) -> impl Iterator<Item = &Episode> {
+        self.episodes.iter().filter(move |episode| episode.season == season)
+    }
+
+    /// The episode with this video id, when the source lists it.
+    pub fn episode_with_id(&self, id: &str) -> Option<&Episode> {
+        self.episodes.iter().find(|episode| episode.id == id)
     }
 }

@@ -11,9 +11,12 @@ the rules that apply while building it.
 > title is a **metadata source** (Cinemeta today), a different contract, crate
 > and registry from the **media provider** (Stremio: titles, streams, progress);
 > a provider is never asked to describe a title, and `details()` is not on
-> `WatchProvider`. A series reports its status, seasons and episodes; picking an
-> episode is still out of scope. HowLongToBeat is no longer asked about titles
-> in the Watch space.
+> `WatchProvider`. A series reports its status, seasons and episodes, and the
+> film page carries the picker: a season row moved with ◀ ▶, one row per episode,
+> that episode's streams under it, and A starts the best stream of the focused
+> episode at once. Watched marks follow the stored episode pointer (`video_id`);
+> Stremio's per-episode `watched` bitfield is still out. HowLongToBeat is no
+> longer asked about titles in the Watch space.
 
 > **Revision 2026-11-12 — native playback only, films first.**
 > The Stremio desktop app is no longer required and is no longer used for
@@ -55,9 +58,10 @@ discovery through Cinemeta, a film page fed by metadata sources (Cinemeta's
 is the expected one), playback through the installed Stremio Service and a
 supervised `mpv`, and watch-progress read/write through Stremio's datastore.
 
-**Out (v1):** episode selection inside a series, Windows playback, an in-app
-video renderer, any plugin/addon host, and any change to the game catalog, its
-data files or its launch paths.
+**Out (v1):** per-episode watched state from Stremio's `watched` bitfield,
+season 0 (the specials) in the picker, Windows playback, an in-app video
+renderer, any plugin/addon host, and any change to the game catalog, its data
+files or its launch paths.
 
 **Non-negotiable:** a gamepad must control every playback path we ship, either
 directly or through a documented handoff. No secret may reach a log, an error
@@ -231,6 +235,9 @@ Envelope, source `stremio-core`:
 - `GET {transport}/meta/{type}/{id}.json` for details.
 - `GET {transport}/stream/{type}/{id}.json` for streams; a missing `streams`
   list is an error, an empty array is a valid "nothing to play".
+- A series asks per episode, with the episode's own video id as the id:
+  `stream/series/{tt-id}:{season}:{episode}.json`. Its `meta` `videos[]` names
+  those ids (`tt0944947:1:1`); one without an id is named that way here.
 - Cinemeta is the catalog/meta source and declares no `stream` resource.
 - Torrentio is the stream source; **PROBE REQUIRED** for its actual fields
   (`infoHash`/`fileIdx` vs `url`, `behaviorHints`, size/seeders text).
@@ -290,8 +297,11 @@ Envelope, source `stremio-core`:
   older than the finished threshold and less than the duration.
 - Mark finished at Stremio's 70 % threshold (`WATCHED_THRESHOLD_COEF`) but do not
   set `flagged_watched`/`times_watched` unless the user marks it watched.
+- A series' record stays keyed by the series id and carries the episode in
+  `video_id` (the video id the addons used); resume applies only when the stored
+  pointer names the episode being played, and another episode starts at zero.
 - Local `movies.json` is the source of truth between writes; Stremio is the
-  cross-device source.
+  cross-device source. The picker opens on the stored pointer and ticks it.
 
 ### 7. Metadata sources (verified 2026-11-14)
 
