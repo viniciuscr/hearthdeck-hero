@@ -34,6 +34,8 @@ pub const IMAGE: &str = "https://image.tmdb.org/t/p";
 const PLAYS_WITH: &str = "stremio";
 /// How many results a discover page holds.
 const PAGE: u32 = 20;
+/// The last page TMDB answers; past it the API errors instead of ending.
+const MAX_PAGE: u32 = 500;
 /// Years offered as a filter: this year and the 39 before it.
 const YEARS: i32 = 40;
 /// A rating order over the whole catalogue is noise without a floor.
@@ -125,14 +127,19 @@ impl WatchCatalogSource for Tmdb {
         let mut items = Vec::new();
         for result in &found.results {
             // TMDB ids mean nothing to our library, players or progress: an item
-            // without an IMDb id could not be played, so it is not shown.
-            let Some(imdb) = imdb_id(ctx, &key, kind, result.id)? else {
-                continue;
-            };
-            items.push(item(result, &imdb, watch_kind(kind)));
+            // without an IMDb id could not be played, so it is not shown. One
+            // title whose ids cannot be fetched costs that card, not the page.
+            match imdb_id(ctx, &key, kind, result.id) {
+                Ok(Some(imdb)) => items.push(item(result, &imdb, watch_kind(kind))),
+                Ok(None) => {}
+                Err(error) => log::warn!("TMDB external ids for {} {}: {error:#}", kind, result.id),
+            }
         }
-        let more = page < found.total_pages.max(1);
-        Ok(CatalogPage { items, more })
+        // TMDB stops at page 500: beyond it the answer is an error, not an empty
+        // page, so the feed must end here.
+        let more = page < found.total_pages.clamp(1, MAX_PAGE);
+        let consumed = found.results.len() as u32;
+        Ok(CatalogPage { items, more, consumed })
     }
 }
 

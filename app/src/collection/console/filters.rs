@@ -192,8 +192,18 @@ impl CollectionView {
                         Item::Catalog => {
                             let at = catalogs.iter().position(|(id, catalog)| *id == source && catalog.id == current).unwrap_or(0);
                             let (chosen_source, chosen) = catalogs[step(at, catalogs.len())].clone();
-                            let kept: Vec<(String, String)> =
+                            let mut kept: Vec<(String, String)> =
                                 filters.into_iter().filter(|(id, _)| chosen.filters.iter().any(|filter| filter.id == *id)).collect();
+                            // A catalog that cannot be asked without a filter
+                            // (Cinemeta's `year`) takes its first value, or its
+                            // chip would browse nothing.
+                            for filter in &chosen.filters {
+                                if filter.required && !kept.iter().any(|(id, _)| *id == filter.id) {
+                                    if let Some(value) = filter.values.first() {
+                                        kept.push((filter.id.clone(), value.clone()));
+                                    }
+                                }
+                            }
                             let order = if chosen.sorts.contains(&sort) { sort } else { chosen.sorts.first().copied().unwrap_or_default() };
                             self.watch_feed_select(kind, chosen_source, chosen.id, order, kept, cx);
                             return true;

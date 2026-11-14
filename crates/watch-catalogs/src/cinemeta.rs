@@ -86,13 +86,15 @@ impl WatchCatalogSource for Cinemeta {
             .into_iter()
             .map(|mut movie| {
                 movie.provider = PLAYS_WITH.into();
+                movie.addon = DESCRIPTOR.id.into();
                 movie
             })
             .collect();
         // Cinemeta does not say how many a catalog holds: an empty page is the
         // end, and one request more finds it.
         let more = !items.is_empty();
-        Ok(CatalogPage { items, more })
+        let consumed = items.len() as u32;
+        Ok(CatalogPage { items, more, consumed })
     }
 }
 
@@ -118,7 +120,7 @@ fn descriptor_of(catalog: &Catalog) -> Option<CatalogDescriptor> {
             // The `year` catalog carries its year in the protocol's `genre`
             // slot; the screens call that filter a year.
             let (id, label) = match (catalog.id.as_str(), id) {
-                ("year", _) => ("year", "year"),
+                ("year", "genre") => ("year", "year"),
                 (_, "genre") => ("genre", "genre"),
                 _ => return None,
             };
@@ -220,6 +222,8 @@ mod tests {
         let page = Cinemeta::builtin().catalog(&ctx, &request).unwrap();
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].provider, "stremio", "Cinemeta describes; Stremio plays");
+        assert_eq!(page.items[0].addon, "cinemeta", "and says which catalogue it came from");
+        assert_eq!(page.consumed, 1);
         assert!(page.more, "a page with items says another may follow");
         let asked = http.seen.lock().unwrap().clone();
         assert!(asked.iter().any(|url| url.ends_with("catalog/movie/imdbRating/skip=50&genre=Sci-Fi.json")), "{asked:?}");

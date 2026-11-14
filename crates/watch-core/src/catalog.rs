@@ -95,6 +95,11 @@ pub struct CatalogPage {
     /// The source's own answer to "is there another page"; an empty page is the
     /// end even when it says otherwise.
     pub more: bool,
+    /// How many of the source's own results this page paged through. It is what
+    /// the caller adds to `skip`: a source that drops rows it cannot use
+    /// (TMDB, without an IMDb id) has still moved on by them, and one whose
+    /// pages have a fixed size must be asked for the next page, not asked again.
+    pub consumed: u32,
 }
 
 /// What Settings lists a catalog source by.
@@ -153,7 +158,7 @@ mod tests {
         }
         fn catalog(&self, _: &CatalogCtx<'_>, request: &CatalogRequest) -> Result<CatalogPage> {
             let more = request.skip == 0;
-            Ok(CatalogPage { items: Vec::new(), more })
+            Ok(CatalogPage { items: Vec::new(), more, consumed: 20 })
         }
     }
 

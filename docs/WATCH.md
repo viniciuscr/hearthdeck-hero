@@ -320,8 +320,11 @@ Envelope, source `stremio-core`:
   where the provider advertises it.
 - Extras are **path segments** (`catalog/{type}/{id}/skip=100&genre=Sci-Fi.json`),
   percent-encoded; a query string is ignored by both hosts.
-- A page's items carry the feed that produced them (`watchCatalog` = kind,
-  catalog, order and filters). Changing a chip, the order or a filter
+- A page's items carry the feed that produced them (`watchCatalog` = source,
+  kind, catalog, order and filters), and a page counts how many of the source's
+  own results it consumed — TMDB drops the titles it has no IMDb id for, and its
+  pages are a fixed twenty, so `skip` advances by what was consumed and the next
+  page is asked for rather than the same one again. Changing a chip, the order or a filter
   **replaces that kind's pages** in one rewrite and starts again at `skip=0`;
   scrolling appends. The rails (no feed) and the other kind are untouched.
 - A tab lists its feed's own ids once it has asked for a page, so the rails never

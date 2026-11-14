@@ -116,7 +116,7 @@ impl WatchCatalogSource for Stub {
         }])
     }
     fn catalog(&self, _: &CatalogCtx<'_>, _: &CatalogRequest) -> Result<CatalogPage> {
-        Ok(CatalogPage { items: Vec::new(), more: false })
+        Ok(CatalogPage { items: Vec::new(), more: false, consumed: 0 })
     }
 }
 

@@ -21,9 +21,6 @@ use heronite_watch::catalog::{CatalogDescriptor, CatalogRequest, CatalogSort};
 
 use super::CollectionView;
 
-/// The catalog source a tab browses before anything is known: the first one the
-/// settings turn on, which the registry reports.
-const FIRST_SOURCE: &str = "cinemeta";
 /// How many rows from the end the next page is asked for.
 const PREFETCH_ROWS: usize = 2;
 /// How long to wait after a failed page (a broken request must not spin the
@@ -146,10 +143,11 @@ impl CollectionView {
     }
 
     /// The source the tab browses: the one it chose, else the first enabled.
+    /// Empty until a source's catalogs have arrived.
     pub(super) fn watch_feed_source(&self, kind: &str) -> String {
         match self.watch_catalog.feeds.get(kind).map(|feed| feed.source.clone()).filter(|source| !source.is_empty()) {
             Some(source) => source,
-            None => self.watch_catalogs_of(kind).first().map(|(source, _)| source.clone()).unwrap_or_else(|| FIRST_SOURCE.to_owned()),
+            None => self.watch_catalogs_of(kind).first().map(|(source, _)| source.clone()).unwrap_or_default(),
         }
     }
 
@@ -203,7 +201,13 @@ impl CollectionView {
             self.watch_catalog.declared_epoch = epoch;
             self.watch_catalog.declared = None;
             self.watch_catalog.loading_declared = false;
-            self.watch_catalog.feeds.clear();
+            // A page in flight belongs to a feed that is gone now: bump each
+            // feed's generation in place rather than dropping it, so the page
+            // that lands is refused instead of painted into a new feed.
+            for feed in self.watch_catalog.feeds.values_mut() {
+                let generation = feed.generation + 1;
+                feed.reset(generation);
+            }
         }
         if self.watch_catalog.declared.is_some() || self.watch_catalog.loading_declared {
             return;
@@ -211,6 +215,7 @@ impl CollectionView {
         self.watch_catalog.loading_declared = true;
         let app = self.app_paths.clone();
         cx.spawn(async move |this, cx| {
+            let epoch = epoch;
             let declared = cx
                 .background_spawn(async move {
                     let settings = heronite_watch::settings::read(&app);
@@ -229,6 +234,12 @@ impl CollectionView {
                 .await;
             this.update(cx, |this, cx| {
                 this.watch_catalog.loading_declared = false;
+                if this.watch_catalog.declared_epoch != epoch {
+                    // The sources changed while this list was being fetched: an
+                    // older answer must not win over the newer one.
+                    log::debug!("watch catalogs: a stale list was dropped");
+                    return;
+                }
                 log::info!("watch catalogs: {} declared", declared.len());
                 this.watch_catalog.declared = Some(declared);
                 cx.notify();
@@ -269,6 +280,12 @@ impl CollectionView {
     /// loaded. Called from the grid's render, so it must be a no-op unless a
     /// page is genuinely due.
     pub(super) fn watch_feed_advance(&mut self, kind: &'static str, visible_end: usize, rows: usize, cx: &mut Context<Self>) {
+        // Nothing to browse by until the enabled sources have answered: a feed
+        // must never ask a source the person turned off.
+        self.watch_catalogs_ensure(cx);
+        if self.watch_catalog.declared.is_none() || self.watch_catalogs_of(kind).is_empty() {
+            return;
+        }
         let feed = self.watch_catalog.feeds.entry(kind).or_default();
         if feed.done || feed.loading || feed.looking_up.is_some() {
             return;
@@ -322,6 +339,9 @@ impl CollectionView {
         if self.watch_catalog.feeds.get(kind).is_some_and(|feed| feed.loading) {
             return;
         }
+        if self.watch_catalogs_of(kind).is_empty() {
+            return;
+        }
         // A feed asked for before the declared list arrived still knows whose it
         // is: the first source, its first catalog.
         let declared_first = self.watch_catalogs_of(kind).first().cloned();
@@ -331,7 +351,8 @@ impl CollectionView {
         let generation = feed.generation;
         let first = feed.skip == 0;
         let source = if feed.source.is_empty() {
-            let source = declared_first.as_ref().map_or_else(|| FIRST_SOURCE.to_owned(), |(source, _)| source.clone());
+            let Some((source, _)) = declared_first.as_ref() else { return };
+            let source = source.clone();
             feed.source.clone_from(&source);
             if feed.catalog.is_empty() {
                 if let Some((_, catalog)) = declared_first {
@@ -367,6 +388,8 @@ impl CollectionView {
                 if !feed.accepts(generation) {
                     // The person changed catalog, order, filter or search while
                     // this page was in flight: it belongs to a feed that is gone.
+                    // The latch is released here, or the tab would wait for ever.
+                    feed.loading = false;
                     log::debug!("watch catalog {kind}: a stale page was dropped");
                     return;
                 }
@@ -375,16 +398,16 @@ impl CollectionView {
                 match result {
                     Ok((page, added)) => {
                         let items = page.items;
-                        let mut done = !page.more || items.is_empty();
+                        let mut done = !page.more;
                         feed.ids.extend(items.iter().map(|item| item.id.clone()));
                         if let Some(query) = feed.looking_up.take() {
                             // A search is one page: Cinemeta does not paginate it.
                             done = true;
-                            feed.skip = items.len() as u32;
+                            feed.skip = feed.skip.saturating_add(page.consumed);
                             feed.shown_query = Some(query);
                             feed.empty_pages = 0;
                         } else {
-                            feed.skip += items.len() as u32;
+                            feed.skip = feed.skip.saturating_add(page.consumed);
                             feed.empty_pages = if added == 0 && !items.is_empty() { feed.empty_pages.saturating_add(1) } else { 0 };
                         }
                         // A page that brings nothing new twice stops the feed: it

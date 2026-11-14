@@ -18,9 +18,6 @@ pub use heronite_watch_core::catalog::{
     CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
 };
 
-/// How many items a page holds (Cinemeta answers 50; a source decides its own).
-pub const PAGE: u32 = 50;
-
 /// The catalog sources this build has, and which of them the person turned on.
 pub fn sources() -> &'static [&'static dyn WatchCatalogSource] {
     heronite_watch_catalogs::sources()
@@ -50,10 +47,12 @@ fn source_of(id: &str) -> Result<&'static dyn WatchCatalogSource> {
     heronite_watch_catalogs::find(id).ok_or_else(|| anyhow!("Unknown catalog source: {id}"))
 }
 
-/// The key a page's items carry: the catalog, order and filters that produced
-/// them. Replacing a feed drops exactly the pages of the previous one.
-pub fn feed_key(request: &CatalogRequest) -> String {
-    let mut key = format!("{}:{}:{:?}", request.kind, request.catalog.trim(), request.sort);
+/// The key a page's items carry: the kind, the source, the catalog, the order
+/// and the filters that produced them. The kind leads because the projection
+/// replaces a whole kind's pages by prefix; the source follows because two
+/// sources may name a catalog alike.
+pub fn feed_key(source: &str, request: &CatalogRequest) -> String {
+    let mut key = format!("{}:{source}:{}:{:?}", request.kind, request.catalog.trim(), request.sort);
     for (id, value) in &request.filters {
         key.push_str(&format!(";{id}={value}"));
     }
@@ -71,7 +70,7 @@ pub fn page_with(http: &dyn Transport, app: &AppPaths, source: &str, request: &C
     let credentials = StoreCredentials::new(app);
     let ctx = CatalogCtx { http, credentials: &credentials };
     let mut page = source_of(source)?.catalog(&ctx, request)?;
-    let key = feed_key(request);
+    let key = feed_key(source, request);
     for item in &mut page.items {
         item.catalog = Some(key.clone());
     }
@@ -215,10 +214,11 @@ mod tests {
         let mut later = base.clone();
         later.skip = 150;
 
-        assert_eq!(feed_key(&base), feed_key(&base), "the same request is the same feed");
-        assert_ne!(feed_key(&base), feed_key(&by_rating));
-        assert_ne!(feed_key(&base), feed_key(&filtered));
-        assert_eq!(feed_key(&base), feed_key(&later), "the page is not part of the feed");
+        assert_eq!(feed_key("cinemeta", &base), feed_key("cinemeta", &base), "the same request is the same feed");
+        assert_ne!(feed_key("cinemeta", &base), feed_key("cinemeta", &by_rating));
+        assert_ne!(feed_key("cinemeta", &base), feed_key("cinemeta", &filtered));
+        assert_ne!(feed_key("cinemeta", &base), feed_key("tmdb", &base), "another source is another feed");
+        assert_eq!(feed_key("cinemeta", &base), feed_key("cinemeta", &later), "the page is not part of the feed");
     }
 
     #[test]
