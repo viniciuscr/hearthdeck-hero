@@ -1,0 +1,21 @@
+{
+  "id": "com.linvo.cinemeta",
+  "name": "Cinemeta",
+  "resources": ["catalog", "meta"],
+  "types": ["movie", "series"],
+  "idPrefixes": ["tt"],
+  "catalogs": [
+    { "type": "movie", "id": "top", "name": "Popular",
+      "extra": [{ "name": "genre", "options": ["Action", "Sci-Fi"] }, { "name": "skip" }, { "name": "search", "isRequired": false }] },
+    { "type": "movie", "id": "imdbRating", "name": "Featured",
+      "extra": [{ "name": "genre", "options": ["Action", "Sci-Fi"] }, { "name": "skip" }] },
+    { "type": "movie", "id": "year", "name": "New",
+      "extra": [{ "name": "genre", "options": ["1999", "2008"], "isRequired": true }, { "name": "skip" }] },
+    { "type": "series", "id": "top", "name": "Popular",
+      "extra": [{ "name": "genre", "options": ["Drama"] }, { "name": "skip" }, { "name": "search", "isRequired": false }] },
+    { "type": "series", "id": "imdbRating", "name": "Featured",
+      "extra": [{ "name": "genre", "options": ["Drama"] }, { "name": "skip" }] },
+    { "type": "series", "id": "year", "name": "New",
+      "extra": [{ "name": "genre", "options": ["2002", "2008"], "isRequired": true }, { "name": "skip" }] }
+  ]
+}

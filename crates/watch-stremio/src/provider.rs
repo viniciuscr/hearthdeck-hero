@@ -6,10 +6,14 @@
 use anyhow::{anyhow, bail, Context, Result};
 use url::Url;
 
-use heronite_watch_addon::addon::{AddonClient, StreamAnswer};
+use heronite_watch_addon::addon::{AddonClient, Catalog, StreamAnswer};
 use heronite_watch_core::auth::AuthKey;
-use heronite_watch_core::provider::{CatalogDescriptor, CatalogRequest, Ctx, Rail, ResolvedStream, StreamOrigin, WatchProvider};
+use heronite_watch_core::provider::{
+    CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, Ctx, Rail, RailDescriptor, ResolvedStream, StreamOrigin,
+    WatchProvider,
+};
 use heronite_watch_core::types::{MovieItem, MovieProgress, StreamChoice};
+use serde_json::Value;
 
 use crate::account::addon_collection;
 use crate::catalog::{self, CINEMETA};
@@ -18,7 +22,7 @@ use crate::endpoints::Endpoints;
 use crate::streaming::StreamingServer;
 use crate::ID;
 
-const CONTINUE_WATCHING: CatalogDescriptor = CatalogDescriptor { id: "continue-watching", kind: "" };
+const CONTINUE_WATCHING: RailDescriptor = RailDescriptor { id: "continue-watching", kind: "" };
 
 pub struct Stremio;
 
@@ -75,7 +79,7 @@ impl WatchProvider for Stremio {
         addon.manifest()?;
         for kind in ["movie", "series"] {
             let items = catalog::top(&addon, kind)?;
-            rails.push(Rail { catalog: CatalogDescriptor { id: "top", kind }, items });
+            rails.push(Rail { catalog: RailDescriptor { id: "top", kind }, items });
         }
         Ok(rails)
     }
@@ -157,14 +161,26 @@ impl WatchProvider for Stremio {
         Ok(ResolvedStream { url, origin: StreamOrigin::LocalService })
     }
 
-    /// A page of Cinemeta's catalog: `top` with `skip` for paging, `genre` to
-    /// filter it and `search` to query it (one page: Cinemeta does not paginate
-    /// a search).
-    fn catalog(&self, ctx: &Ctx<'_>, request: &CatalogRequest) -> Result<Vec<MovieItem>> {
+    /// Cinemeta's catalogs for the Movies and Series tabs, straight from its
+    /// manifest: `top` (its own order), `imdbRating` (best rated) and `year`
+    /// (newest, which needs a year). The extras the manifest declares become the
+    /// filters, and decide the search and paging flags.
+    fn catalogs(&self, ctx: &Ctx<'_>) -> Result<Vec<CatalogDescriptor>> {
+        let endpoints = Endpoints::default();
+        endpoints.validate()?;
+        let mut addon = AddonClient::new(ctx.http, CINEMETA)?;
+        let manifest = addon.manifest()?;
+        Ok(manifest.catalogs.iter().filter_map(descriptor_of).collect())
+    }
+
+    /// A page of Cinemeta's catalog. The sort picks the catalog (`top` for the
+    /// provider's own order, `imdbRating` best rated, `year` newest); `skip`,
+    /// `search` and the provider's `genre`/year filter are extras.
+    fn catalog(&self, ctx: &Ctx<'_>, request: &CatalogRequest) -> Result<CatalogPage> {
         let endpoints = Endpoints::default();
         endpoints.validate()?;
         if !matches!(request.kind.as_str(), "movie" | "series") {
-            return Ok(Vec::new());
+            return Ok(CatalogPage::default());
         }
         let addon = AddonClient::new(ctx.http, CINEMETA)?;
         let skip = request.skip.to_string();
@@ -175,20 +191,34 @@ impl WatchProvider for Stremio {
         if let Some(search) = request.search.as_deref().map(str::trim).filter(|search| !search.is_empty()) {
             extra.push(("search", search));
         }
-        if let Some(genre) = request.genre.as_deref().map(str::trim).filter(|genre| !genre.is_empty()) {
-            extra.push(("genre", genre));
+        // The screen's filters are the provider's: `genre`, or the year the
+        // `year` catalog carries in the same slot.
+        for (id, value) in &request.filters {
+            let value = value.trim();
+            if !value.is_empty() && (id == "genre" || id == "year") {
+                extra.push(("genre", value));
+            }
         }
-        let catalog = request.catalog.trim();
-        let catalog = if catalog.is_empty() { "top" } else { catalog };
-        Ok(addon
+        let catalog = match request.catalog.trim() {
+            "" => match request.sort {
+                CatalogSort::Rating => "imdbRating",
+                CatalogSort::Newest => "year",
+                CatalogSort::Popular | CatalogSort::Title => "top",
+            },
+            named => named,
+        };
+        let items: Vec<MovieItem> = addon
             .catalog(&request.kind, catalog, &extra)?
             .into_iter()
             .map(|mut movie| {
                 movie.provider = ID.into();
-                movie.catalog = true;
                 movie
             })
-            .collect())
+            .collect();
+        // Cinemeta does not say how many a catalog holds: an empty page is the
+        // end, and one request more finds it.
+        let more = !items.is_empty();
+        Ok(CatalogPage { items, more })
     }
 
     /// Read-merge-write of the full record; a failed write is the caller's to
@@ -221,4 +251,57 @@ impl WatchProvider for Stremio {
         let client = DatastoreClient::new(ctx.http, &endpoints, key);
         datastore::write_progress(&client, progress).map(|_| ())
     }
+}
+
+/// One manifest catalog as a descriptor, for the catalogs the tabs can page:
+/// `top`, `imdbRating` and `year`. Anything else is left out (a catalog without
+/// a sort we can label has no chip to render).
+fn descriptor_of(catalog: &Catalog) -> Option<CatalogDescriptor> {
+    if !matches!(catalog.kind.as_str(), "movie" | "series") {
+        return None;
+    }
+    let sorts = match catalog.id.as_str() {
+        "top" => vec![CatalogSort::Popular],
+        "imdbRating" => vec![CatalogSort::Rating],
+        "year" => vec![CatalogSort::Newest],
+        _ => return None,
+    };
+    let extras: &[Value] = catalog.extra.as_array().map_or(&[], Vec::as_slice);
+    let named = |name: &str| extras.iter().any(|extra| extra["name"].as_str() == Some(name));
+    let filters = extras
+        .iter()
+        .filter_map(|extra| {
+            let id = extra["name"].as_str()?;
+            // The `year` catalog carries its year in the protocol's `genre`
+            // slot; the screens call that filter a year.
+            let (id, label) = match (catalog.id.as_str(), id) {
+                ("year", "genre") => ("year", "year"),
+                ("genre", _) => ("genre", "genre"),
+                (_, "genre") => ("genre", "genre"),
+                _ => return None,
+            };
+            let values: Vec<String> = extra["options"]
+                .as_array()
+                .map(|options| options.iter().filter_map(|value| value.as_str().map(str::to_owned)).collect())
+                .unwrap_or_default();
+            if values.is_empty() {
+                return None;
+            }
+            Some(CatalogFilter {
+                id: id.to_owned(),
+                label: label.to_owned(),
+                values,
+                required: extra["isRequired"].as_bool().unwrap_or(false),
+            })
+        })
+        .collect();
+    Some(CatalogDescriptor {
+        id: catalog.id.clone(),
+        name: catalog.name.clone().unwrap_or_else(|| catalog.id.clone()),
+        kind: catalog.kind.clone(),
+        sorts,
+        filters,
+        search: named("search"),
+        paging: named("skip"),
+    })
 }

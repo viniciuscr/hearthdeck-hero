@@ -36,6 +36,10 @@ const SORT: [&str; 3] = [n_!("Title"), n_!("Last played"), n_!("Playtime")];
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Item {
     Search,
+    /// The provider's catalogs (a catalog tab).
+    Catalog,
+    /// One filter the provider declares (a catalog tab).
+    Filter,
     Show,
     Sort,
     Favourites,
@@ -99,6 +103,21 @@ impl CollectionView {
             let (_, spec) = self.filters_target();
             let games = self.console_games(&spec.source);
             let mut v = vec![Item::Search];
+            if let Some(kind) = crate::collection::watch_catalog::feed_kind(&spec.source) {
+                // A catalog tab is browsed by what the provider declares: its
+                // catalogs, the orders it can page by, and its own filters.
+                if !self.watch_catalogs_of(kind).is_empty() {
+                    v.push(Item::Catalog);
+                    let descriptor = self.watch_descriptor(kind);
+                    if descriptor.as_ref().is_some_and(|descriptor| descriptor.sorts.len() > 1) {
+                        v.push(Item::Sort);
+                    }
+                    if descriptor.as_ref().is_some_and(|descriptor| !descriptor.filters.is_empty()) {
+                        v.push(Item::Filter);
+                    }
+                }
+                return v;
+            }
             if spec.source.strip_prefix("type:").is_none() {
                 v.push(Item::Kind);
             }
@@ -150,6 +169,62 @@ impl CollectionView {
         let watch_games = if self.space == Space::Watch { self.console_games(&spec.source) } else { Vec::new() };
         let genre_n = watch_sources::genres(&watch_games).len() + 1;
         let provider_n = watch_sources::providers(&watch_games).len() + 1;
+        // A catalog tab changes the feed, not the local filter indices: the
+        // provider decides which catalogs, orders and filters exist.
+        if self.space == Space::Watch {
+            if let Some(kind) = crate::collection::watch_catalog::feed_kind(&spec.source) {
+                let cycling = matches!(pad, Pad::Left | Pad::Right | Pad::A);
+                let catalogs = self.watch_catalogs_of(kind);
+                if cycling && !catalogs.is_empty() && matches!(items[i], Item::Catalog | Item::Sort | Item::Filter) {
+                    let current = self.watch_feed_catalog(kind);
+                    let sort = self.watch_feed_sort(kind);
+                    let filters = self.watch_feed_filters(kind);
+                    let descriptor = self.watch_descriptor(kind);
+                    let step = |at: usize, total: usize| {
+                        if pad == Pad::A {
+                            (at + 1) % total
+                        } else {
+                            layouts::step(at, total, pad.dir(), false)
+                        }
+                    };
+                    match items[i] {
+                        Item::Catalog => {
+                            let at = catalogs.iter().position(|catalog| catalog.id == current).unwrap_or(0);
+                            let chosen = catalogs[step(at, catalogs.len())].clone();
+                            let kept: Vec<(String, String)> =
+                                filters.into_iter().filter(|(id, _)| chosen.filters.iter().any(|filter| filter.id == *id)).collect();
+                            let order = if chosen.sorts.contains(&sort) { sort } else { chosen.sorts.first().copied().unwrap_or_default() };
+                            self.watch_feed_select(kind, chosen.id.clone(), order, kept, cx);
+                            return true;
+                        }
+                        Item::Sort => {
+                            if let Some(sorts) =
+                                descriptor.as_ref().map(|descriptor| descriptor.sorts.clone()).filter(|sorts| sorts.len() > 1)
+                            {
+                                let at = sorts.iter().position(|order| *order == sort).unwrap_or(0);
+                                self.watch_feed_select(kind, current, sorts[step(at, sorts.len())], filters, cx);
+                                return true;
+                            }
+                        }
+                        Item::Filter => {
+                            if let Some(filter) = descriptor.and_then(|descriptor| descriptor.filters.into_iter().next()) {
+                                let chosen = filters.iter().find(|(id, _)| *id == filter.id).map(|(_, value)| value.clone());
+                                let at =
+                                    chosen.as_ref().and_then(|value| filter.values.iter().position(|v| v == value)).map_or(0, |i| i + 1);
+                                let next = step(at, filter.values.len() + 1);
+                                let mut kept: Vec<(String, String)> = filters.into_iter().filter(|(id, _)| *id != filter.id).collect();
+                                if let Some(value) = next.checked_sub(1).and_then(|i| filter.values.get(i)) {
+                                    kept.push((filter.id.clone(), value.clone()));
+                                }
+                                self.watch_feed_select(kind, current, sort, kept, cx);
+                                return true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
         let before = (self.tab_nav(target).grid.filters.clone(), self.console.search.clone());
         if pad == Pad::X {
             self.console.search.clear();

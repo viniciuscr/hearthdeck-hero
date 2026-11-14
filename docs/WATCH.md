@@ -276,24 +276,38 @@ Envelope, source `stremio-core`:
 
 ### 3a. Browse-all catalogs (probed 2026-11-14)
 
-- The Movies and Series tabs are the provider's catalog, not a filter over the
-  rails: they ask for one page, merge it into the Watch library (marked
-  `watchCatalog`, so a rails refresh keeps it) and reload, which is why cards,
-  covers, details and streams work unchanged.
-- Cinemeta's `top` catalog answers **50** items per page and pages deep
-  (`skip=100`, `skip=200`, … tested past 400). A `genre` filters it; a `search`
-  answers **one page of at most 20** (`skip=20` after a search is empty).
-- Extras are **path segments**: `catalog/{type}/{id}/skip=100&genre=Sci-Fi.json`.
-  A query string is ignored by Cinemeta and by the `cinemeta-catalogs` host it
-  redirects to; the path segment is percent-encoded, so a search with spaces or
-  an `&` cannot break it.
-- The app fetches the next page when the grid's last visible row comes within
-  two rows of the end (the wheel and the pad both move that), shows
-  "Loading more…" under the grid while a page is in flight, and retries a failed
-  page only after 20 s: asking again on every frame is what made the grid blink.
-- A catalog tab is ordered by what the provider sent — the Watch sort has
-  "Popular" first for that reason. Sorting by title while pages land would move
-  every row under the person scrolling; the other sorts stay available.
+- A provider **declares** the catalogs the Movies and Series tabs browse
+  (`WatchProvider::catalogs`): each with a name, its kind, the orders it can page
+  by (a closed set: Popular, Rating, Newest, Title), its filters (id, label,
+  values, required) and whether it takes a search and `skip`. The panel draws
+  what the provider declares; a provider that declares none leaves the tabs with
+  what the rails carry.
+- Cinemeta declares three per kind: `top` ("Popular"; filter `genre`; search;
+  paging), `imdbRating` ("Featured"; order Rating; filter `genre`; paging) and
+  `year` ("New"; order Newest; a **required** filter whose values are years and
+  which travels in the protocol's `genre` slot).
+- Probed with redirects followed — every catalog answers **307** to
+  `cinemeta-catalogs.strem.io/<id>/catalog/…`, which the transport follows:
+  `top` 50; `imdbRating` 49, then 50 at `skip=50`; `year/genre=1999` 50, and 50
+  more at `skip=50`; `year/genre=2008` for series 50; `imdbRating/genre=Sci-Fi`
+  49; `top/search=matrix` 21. `skip` is honoured past 400 on `top`. `search`
+  answers even where the manifest does not declare it, but the tabs offer it only
+  where the provider advertises it.
+- Extras are **path segments** (`catalog/{type}/{id}/skip=100&genre=Sci-Fi.json`),
+  percent-encoded; a query string is ignored by both hosts.
+- A page's items carry the feed that produced them (`watchCatalog` = kind,
+  catalog, order and filters). Changing a chip, the order or a filter
+  **replaces that kind's pages** in one rewrite and starts again at `skip=0`;
+  scrolling appends. The rails (no feed) and the other kind are untouched.
+- A tab lists its feed's own ids once it has asked for a page, so the rails never
+  leak into a catalog and a search shows its own titles.
+- The app asks for the next page when the grid's last visible row is within two
+  rows of the end (the wheel and the pad both move that), shows "Loading more…"
+  while a page is in flight, and retries a failed page only after 20 s — a fetch
+  per frame is what made the grid blink. A page that lands after the feed changed
+  is dropped (the feed's generation).
+- A catalog tab is ordered by what the provider sends, which is why the order row
+  appears only where a catalog offers more than one.
 
 ### 4a. Stream resolution
 

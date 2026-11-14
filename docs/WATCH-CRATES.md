@@ -57,7 +57,8 @@ pub trait WatchProvider: Send + Sync {
     fn browse(&self, ctx: &Ctx<'_>) -> Result<Vec<Rail>>;  // every rail, in display order
     fn streams(&self, ctx: &Ctx<'_>, kind: &str, id: &str) -> Result<Vec<StreamChoice>>;
     fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<ResolvedStream>; // URL + origin
-    fn catalog(&self, _: &Ctx<'_>, _: &CatalogRequest) -> Result<Vec<MovieItem>> { Ok(Vec::new()) } // a page for the tabs
+    fn catalogs(&self, _: &Ctx<'_>) -> Result<Vec<CatalogDescriptor>> { Ok(Vec::new()) } // what the tabs may browse
+    fn catalog(&self, _: &Ctx<'_>, _: &CatalogRequest) -> Result<CatalogPage> { Ok(CatalogPage::default()) } // a page, and `more`
     fn write_progress(&self, _: &Ctx<'_>, _: &MovieProgress) -> Result<()> { Ok(()) }
 }
 
@@ -118,7 +119,7 @@ the app uses.
 | `heronite_watch::collection` | `ROOT`, `library` |
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
 | `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider) |
-| `heronite_watch::catalog` | `page`, `page_with`, `more_with`, `CatalogRequest`, `PAGE` |
+| `heronite_watch::catalog` | `catalogs`, `catalogs_with`, `page`, `page_with`, `more_with`, `replace_with`, `feed_key`, `CatalogRequest`, `CatalogSort` |
 | `heronite_watch::settings` | `read`, `write`, `Settings` (Settings → Watch) |
 | `heronite_watch::service` | `launches`, `Launch` (headless runtime or launcher, each with its `command`), `is_up`, `PROBE`, `ATTEMPT`, `LAUNCHER_ENV` |
 | `heronite_watch::metadata` | `details`, `details_with`, `sources`, `TitleDetails`, `TitleRef` |
@@ -140,7 +141,10 @@ module and a re-export cannot share a name (`collection` is the case).
   directory is a separate hardening change.
 - `heronite-watch-state::collection` owns `<cache>/watch-library/**`, written
   through `DataPaths` accessors and read with `Library::load_with`. It is
-  regenerated on every load and never merged with the game library.
+  regenerated on every load and never merged with the game library. `append`
+  merges a catalog page (its items carry the feed in `watchCatalog`), `replace`
+  swaps a whole kind's catalog pages in one rewrite, and `refresh` keeps those
+  pages across a rails sync.
 - `heronite-watch-state::settings` owns `<config>/watch-settings.json`: the
   choices that are neither theme, account nor rails (today: whether the service
   this app started is stopped when a session ends). Unknown fields are kept.

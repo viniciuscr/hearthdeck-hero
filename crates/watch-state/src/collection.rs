@@ -25,7 +25,7 @@ where
     F: FnOnce() -> Result<Vec<MovieItem>>,
 {
     let mut movies = fetch()?;
-    for item in stored(root).into_iter().filter(|item| item.catalog) {
+    for item in stored(root).into_iter().filter(|item| item.catalog.is_some()) {
         if !movies.iter().any(|movie| same(movie, &item)) {
             movies.push(item);
         }
@@ -47,6 +47,25 @@ pub fn append(root: &Path, movies: &[MovieItem]) -> Result<usize> {
     if added > 0 {
         write_root(root, &all)?;
     }
+    Ok(added)
+}
+
+/// Replaces the catalog pages of one kind with `movies`, in a single write: a
+/// tab shows one feed at a time, so a changed catalog, order or filter must not
+/// leave an earlier feed's pages behind. The rails and the other kind stay
+/// untouched. Returns how many items were new.
+pub fn replace(root: &Path, kind: &str, movies: &[MovieItem]) -> Result<usize> {
+    let prefix = format!("{kind}:");
+    let mut all: Vec<MovieItem> =
+        stored(root).into_iter().filter(|item| item.catalog.as_deref().is_none_or(|feed| !feed.starts_with(&prefix))).collect();
+    let before = all.len();
+    for movie in movies {
+        if !all.iter().any(|seen| same(seen, movie)) {
+            all.push(movie.clone());
+        }
+    }
+    let added = all.len() - before;
+    write_root(root, &all)?;
     Ok(added)
 }
 
@@ -89,7 +108,7 @@ fn stored_item(game: &Value, metadata: &Value, timestamps: &Value) -> Option<Mov
             .map(|genres| genres.iter().filter_map(Value::as_str).map(str::to_owned).collect())
             .unwrap_or_default(),
         top: extra.get("stremioTop").and_then(Value::as_bool).unwrap_or(false),
-        catalog: extra.get(CATALOG_KEY).and_then(Value::as_bool).unwrap_or(false),
+        catalog: text(extra.get(CATALOG_KEY)),
         last_watched: text(stamp.and_then(|stamp| stamp.get("lastPlayed"))),
         minutes_played: stamp.and_then(|stamp| stamp.get("totalPlayed")).and_then(Value::as_f64).unwrap_or(0.0),
         provider: runner.to_owned(),
@@ -171,7 +190,7 @@ fn game_json(movie: &MovieItem) -> Value {
         "extra": {
             "stremioType": kind,
             "stremioTop": movie.top,
-            CATALOG_KEY: movie.catalog,
+            CATALOG_KEY: &movie.catalog,
             "provider": provider,
             "watchId": &movie.id,
         },
@@ -250,7 +269,7 @@ mod tests {
         write_root(root, &[movie("tt1", "A Film")]).unwrap();
 
         let mut page = movie("tt2", "Another Film");
-        page.catalog = true;
+        page.catalog = Some("movie:top:Popular".into());
         let added = append(root, &[page, movie("tt1", "A Film")]).unwrap();
         assert_eq!(added, 1, "a title already there is not added again");
 
@@ -259,8 +278,33 @@ mod tests {
         let items = stored(root);
         let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, ["tt3", "tt2"]);
-        assert!(items.iter().any(|item| item.id == "tt2" && item.catalog), "the page is still marked");
+        assert!(items.iter().any(|item| item.id == "tt2" && item.catalog.is_some()), "the page is still marked");
         assert_eq!(items[1].year.as_deref(), Some("2026"), "the page keeps its metadata");
+    }
+
+    #[test]
+    fn replacing_a_feed_drops_only_its_pages() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_root(root, &[movie("tt1", "A Film")]).unwrap();
+        let mut old = movie("tt2", "Old Page");
+        old.catalog = Some("movie:top:Popular".into());
+        let mut other = movie("tt3", "Other Kind");
+        other.kind = "series".into();
+        other.catalog = Some("series:top:Popular".into());
+        append(root, &[old, other]).unwrap();
+
+        let mut fresh = movie("tt9", "New Page");
+        fresh.catalog = Some("movie:imdbRating:Rating".into());
+        let added = replace(root, "movie", &[fresh]).unwrap();
+        assert_eq!(added, 1);
+
+        let items = stored(root);
+        let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
+        assert!(ids.contains(&"tt1"), "the rails stay: {ids:?}");
+        assert!(ids.contains(&"tt9"), "the new page is there: {ids:?}");
+        assert!(!ids.contains(&"tt2"), "the previous feed's page is gone: {ids:?}");
+        assert!(ids.contains(&"tt3"), "the other kind is untouched: {ids:?}");
     }
 
     #[test]
@@ -273,7 +317,7 @@ mod tests {
         write_root(root, &[watched]).unwrap();
 
         let mut page = movie("tt2", "Another Film");
-        page.catalog = true;
+        page.catalog = Some("movie:top:Popular".into());
         append(root, &[page]).unwrap();
         let items = stored(root);
         let watched = items.iter().find(|item| item.id == "tt1").expect("the title is still there");

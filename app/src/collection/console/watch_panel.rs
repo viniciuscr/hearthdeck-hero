@@ -4,6 +4,7 @@
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use heronite_i18n::tr;
+use heronite_watch::catalog::CatalogSort;
 
 use super::filters::{segments, Item};
 use crate::collection::CollectionView;
@@ -79,10 +80,62 @@ impl CollectionView {
                 to(Item::Kind, &pointer::along(f.kind, k, Pad::Left, Pad::Right))
             }));
         }
-        body = body
-            .child(kit::caption(tr!("Sort")))
-            .child(segments(&sorts, f.sort, focus == Item::Sort, |k| to(Item::Sort, &pointer::along(f.sort, k, Pad::Left, Pad::Right))));
-        if !genres.is_empty() {
+        // A catalog tab is browsed by what the provider declares: its catalogs,
+        // the orders it can page by (hidden when there is only one) and its own
+        // filters.
+        let catalog_kind = crate::collection::watch_catalog::feed_kind(&spec.source);
+        if let Some(kind) = catalog_kind {
+            let catalogs = self.watch_catalogs_of(kind);
+            let chosen = self.watch_feed_catalog(kind);
+            let at = catalogs.iter().position(|catalog| catalog.id == chosen).unwrap_or(0);
+            let labels: Vec<(SharedString, Option<usize>)> =
+                catalogs.iter().map(|catalog| (catalog_name(&catalog.id, &catalog.name), None)).collect();
+            body = body
+                .child(kit::caption(tr!("Catalog")))
+                .child(segments(&labels, at, focus == Item::Catalog, |k| to(Item::Catalog, &pointer::along(at, k, Pad::Left, Pad::Right))));
+            if let Some(descriptor) = self.watch_descriptor(kind) {
+                if descriptor.sorts.len() > 1 {
+                    let order = self.watch_feed_sort(kind);
+                    let at = descriptor.sorts.iter().position(|sort| *sort == order).unwrap_or(0);
+                    let options: Vec<(SharedString, Option<usize>)> =
+                        descriptor.sorts.iter().map(|sort| (sort_name(*sort), None)).collect();
+                    body = body.child(kit::caption(tr!("Sort"))).child(segments(&options, at, focus == Item::Sort, |k| {
+                        to(Item::Sort, &pointer::along(at, k, Pad::Left, Pad::Right))
+                    }));
+                }
+                if let Some(filter) = descriptor.filters.first() {
+                    let chosen_value = self.watch_feed_filters(kind).into_iter().find(|(id, _)| *id == filter.id).map(|(_, value)| value);
+                    let at = chosen_value.as_ref().and_then(|value| filter.values.iter().position(|v| v == value)).map_or(0, |i| i + 1);
+                    let text = chosen_value.unwrap_or_else(|| tr!("All").to_string());
+                    let on = focus == Item::Filter;
+                    body = body.child(row(
+                        Item::Filter,
+                        filter_label(&filter.id, &filter.label).to_string(),
+                        Icon::GridView,
+                        kit::choice_clickable(
+                            text,
+                            on,
+                            at > 0,
+                            at < filter.values.len(),
+                            140.,
+                            to(Item::Filter, &[Pad::Left]),
+                            to(Item::Filter, &[Pad::Right]),
+                        )
+                        .into_any_element(),
+                    ));
+                }
+            }
+        }
+        // Not a catalog tab: the local filters and sorts are the ones to show.
+        if catalog_kind.is_none() {
+            body = body.child(kit::caption(tr!("Sort"))).child(segments(&sorts, f.sort, focus == Item::Sort, |k| {
+                to(Item::Sort, &pointer::along(f.sort, k, Pad::Left, Pad::Right))
+            }));
+        }
+        if catalog_kind.is_some() {
+            // The rows above already are this tab's browse controls.
+        }
+        if catalog_kind.is_none() && !genres.is_empty() {
             let on = focus == Item::Genre;
             body = body.child(row(
                 Item::Genre,
@@ -100,7 +153,7 @@ impl CollectionView {
                 .into_any_element(),
             ));
         }
-        if !providers.is_empty() {
+        if catalog_kind.is_none() && !providers.is_empty() {
             let on = focus == Item::Provider;
             body = body.child(row(
                 Item::Provider,
@@ -158,5 +211,36 @@ impl CollectionView {
                 .child(motion::enter("console-watch-filters", panel, 280, 40., 0.))
                 .into_any_element(),
         )
+    }
+}
+
+/// A catalog's chip: the ids we know read in the person's language, anything
+/// else as the provider named it.
+fn catalog_name(id: &str, name: &str) -> SharedString {
+    match id {
+        "top" => tr!("Popular").to_string().into(),
+        "imdbRating" => tr!("Top rated").to_string().into(),
+        "year" => tr!("Year").to_string().into(),
+        _ => SharedString::from(name.to_owned()),
+    }
+}
+
+/// A sort's label; a provider picks from the closed set, so these are known.
+fn sort_name(sort: CatalogSort) -> SharedString {
+    match sort {
+        CatalogSort::Popular => tr!("Popular").to_string().into(),
+        CatalogSort::Rating => tr!("Top rated").to_string().into(),
+        CatalogSort::Newest => tr!("Year").to_string().into(),
+        CatalogSort::Title => tr!("Title").to_string().into(),
+    }
+}
+
+/// A filter's label, localized for the ids we know and the provider's own
+/// wording otherwise.
+fn filter_label(id: &str, label: &str) -> SharedString {
+    match id {
+        "genre" => tr!("Genre").to_string().into(),
+        "year" => tr!("Year").to_string().into(),
+        _ => SharedString::from(label.to_owned()),
     }
 }

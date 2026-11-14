@@ -377,9 +377,12 @@ impl CollectionView {
         // grid's last visible row nears the end of what is loaded (the wheel and
         // the pad both move that), or the search in the box.
         if let Some(kind) = crate::collection::watch_catalog::feed_kind(&spec.source) {
+            // The chips and rows the panel draws come from the provider, so the
+            // tabs ask what it declares before paging.
+            self.watch_catalogs_ensure(cx);
             let query = self.console.search.trim().to_owned();
             if query.is_empty() {
-                self.watch_feed_clear_search(kind);
+                self.watch_feed_clear_search(kind, cx);
                 let (_, th) = self.console_tile_size();
                 let line_h = th + GAP + label_room();
                 let rows_total = keys.len().div_ceil(cols.max(1));

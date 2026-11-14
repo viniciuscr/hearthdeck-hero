@@ -58,14 +58,14 @@ fn assemble(rails: Vec<Rail>) -> Vec<MovieItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use heronite_watch_core::provider::CatalogDescriptor;
+    use heronite_watch_core::provider::RailDescriptor;
 
     fn movie(id: &str, top: bool) -> MovieItem {
         MovieItem { id: id.into(), kind: "movie".into(), name: id.into(), top, ..MovieItem::default() }
     }
 
     fn rail(id: &'static str, items: Vec<MovieItem>) -> Rail {
-        Rail { catalog: CatalogDescriptor { id, kind: "movie" }, items }
+        Rail { catalog: RailDescriptor { id, kind: "movie" }, items }
     }
 
     #[test]

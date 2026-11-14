@@ -10,39 +10,77 @@ use anyhow::{anyhow, Result};
 use heronite_data::paths::AppPaths;
 
 use heronite_watch_core::http::{Transport, UreqTransport};
-use heronite_watch_core::provider::Ctx;
-use heronite_watch_core::types::MovieItem;
+use heronite_watch_core::provider::{CatalogPage, Ctx};
 use heronite_watch_state::collection;
 use heronite_watch_state::store::StoreCredentials;
 
 use crate::registry;
 
-pub use heronite_watch_core::provider::CatalogRequest;
+pub use heronite_watch_core::provider::{CatalogDescriptor, CatalogRequest, CatalogSort};
 
 /// How many items a page holds (Cinemeta answers 50; the provider decides).
 pub const PAGE: u32 = 50;
 
+/// The catalogs a provider offers the tabs: its manifest decides, so the screens
+/// render what it declares instead of assuming Cinemeta's.
+pub fn catalogs(app: &AppPaths, provider: &str) -> Result<Vec<CatalogDescriptor>> {
+    let http = UreqTransport::new();
+    catalogs_with(&http, app, provider)
+}
+
+/// [`catalogs`] with an injected transport, for tests.
+pub fn catalogs_with(http: &dyn Transport, app: &AppPaths, provider: &str) -> Result<Vec<CatalogDescriptor>> {
+    let credentials = StoreCredentials::new(app);
+    let ctx = Ctx { http, credentials: &credentials };
+    registry::find(provider).ok_or_else(|| anyhow!("Unknown Watch provider: {provider}"))?.catalogs(&ctx)
+}
+
+/// The key a page's items carry: the catalog, order and filters that produced
+/// them. Replacing a feed drops exactly the pages of the previous one.
+pub fn feed_key(request: &CatalogRequest) -> String {
+    let mut key = format!("{}:{}:{:?}", request.kind, request.catalog.trim(), request.sort);
+    for (id, value) in &request.filters {
+        key.push_str(&format!(";{id}={value}"));
+    }
+    key
+}
+
 /// One page of a catalog, from the provider that owns it.
-pub fn page(app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<Vec<MovieItem>> {
+pub fn page(app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<CatalogPage> {
     let http = UreqTransport::new();
     page_with(&http, app, provider, request)
 }
 
 /// [`page`] with an injected transport, for tests.
-pub fn page_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<Vec<MovieItem>> {
+pub fn page_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<CatalogPage> {
     let credentials = StoreCredentials::new(app);
     let ctx = Ctx { http, credentials: &credentials };
-    registry::find(provider).ok_or_else(|| anyhow!("Unknown Watch provider: {provider}"))?.catalog(&ctx, request)
+    let mut page = registry::find(provider).ok_or_else(|| anyhow!("Unknown Watch provider: {provider}"))?.catalog(&ctx, request)?;
+    let key = feed_key(request);
+    for item in &mut page.items {
+        item.catalog = Some(key.clone());
+    }
+    Ok(page)
 }
 
 /// Fetches the next page of `request` and merges it into the Watch library.
 /// Returns the page (its ids are what a search shows) and how many items were
 /// new; an empty page means the catalog has no more.
-pub fn more_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<(Vec<MovieItem>, usize)> {
-    let items = page_with(http, app, provider, request)?;
+pub fn more_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<(CatalogPage, usize)> {
+    let page = page_with(http, app, provider, request)?;
     let root = app.cache.join(collection::ROOT);
-    let added = collection::append(&root, &items)?;
-    Ok((items, added))
+    let added = collection::append(&root, &page.items)?;
+    Ok((page, added))
+}
+
+/// The first page of a feed, replacing whatever the previous catalog, order or
+/// filter had put in the library for that kind. Returns the page and how many
+/// items are new.
+pub fn replace_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<(CatalogPage, usize)> {
+    let page = page_with(http, app, provider, request)?;
+    let root = app.cache.join(collection::ROOT);
+    let added = collection::replace(&root, &request.kind, &page.items)?;
+    Ok((page, added))
 }
 
 #[cfg(test)]
@@ -62,8 +100,26 @@ mod tests {
     impl Transport for Fake {
         fn get(&self, url: &Url) -> Result<Vec<u8>> {
             self.seen.lock().unwrap().push(url.as_str().to_owned());
-            Ok(br#"{"metas":[{"id":"tt0133093","type":"movie","name":"The Matrix"},{"id":"tt0234215","type":"movie","name":"Reloaded"}]}"#
-                .to_vec())
+            // A different catalog answers with a different title, so a replaced
+            // feed is visible in the projection.
+            let body: &[u8] = if url.path().contains("imdbRating") {
+                br#"{"metas":[{"id":"tt9999999","type":"movie","name":"Best Rated"}]}"#
+            } else {
+                br#"{"metas":[{"id":"tt0133093","type":"movie","name":"The Matrix"},{"id":"tt0234215","type":"movie","name":"Reloaded"}]}"#
+            };
+            Ok(body.to_vec())
+        }
+        fn post_json(&self, _: &Url, _: &Value) -> Result<Vec<u8>> {
+            Ok(b"{}".to_vec())
+        }
+    }
+
+    /// Answers with no items: the catalog's end.
+    struct Empty;
+
+    impl Transport for Empty {
+        fn get(&self, _: &Url) -> Result<Vec<u8>> {
+            Ok(br#"{"metas":[]}"#.to_vec())
         }
         fn post_json(&self, _: &Url, _: &Value) -> Result<Vec<u8>> {
             Ok(b"{}".to_vec())
@@ -78,12 +134,87 @@ mod tests {
     fn a_page_asks_the_path_extras_and_marks_its_items() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Fake { seen: Mutex::new(Vec::new()) };
-        let request = CatalogRequest { kind: "movie".into(), catalog: "top".into(), skip: 100, search: None, genre: Some("Sci-Fi".into()) };
-        let items = page_with(&fake, &app(dir.path()), "stremio", &request).unwrap();
-        assert_eq!(items.len(), 2);
-        assert!(items.iter().all(|item| item.catalog && item.provider == "stremio"), "a page's items are catalog items");
+        let request = CatalogRequest {
+            kind: "movie".into(),
+            catalog: "top".into(),
+            skip: 100,
+            search: None,
+            sort: CatalogSort::Popular,
+            filters: vec![("genre".into(), "Sci-Fi".into())],
+        };
+        let page = page_with(&fake, &app(dir.path()), "stremio", &request).unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert!(page.more, "a full page says another may follow");
+        assert!(page.items.iter().all(|item| item.catalog.is_some() && item.provider == "stremio"), "a page's items carry their feed");
         let seen = fake.seen.lock().unwrap().clone();
         assert_eq!(seen, ["https://v3-cinemeta.strem.io/catalog/movie/top/skip=100&genre=Sci-Fi.json"]);
+    }
+
+    #[test]
+    fn the_order_and_the_filters_reach_the_provider_as_path_extras() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Fake { seen: Mutex::new(Vec::new()) };
+        let mut request = CatalogRequest::first("movie");
+        request.sort = CatalogSort::Rating;
+        request.filters = vec![("genre".into(), "Sci-Fi".into())];
+        page_with(&fake, &app(dir.path()), "stremio", &request).unwrap();
+        let seen = fake.seen.lock().unwrap().clone();
+        assert_eq!(seen, ["https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Sci-Fi.json"], "the order picks the catalog");
+    }
+
+    #[test]
+    fn an_empty_page_says_there_is_no_more() {
+        let dir = tempfile::tempdir().unwrap();
+        let page = page_with(&Empty, &app(dir.path()), "stremio", &CatalogRequest::first("movie")).unwrap();
+        assert!(page.items.is_empty() && !page.more, "an empty page ends the feed");
+    }
+
+    #[test]
+    fn a_feed_key_names_the_catalog_the_order_and_the_filters() {
+        let base = CatalogRequest::first("movie");
+        let mut by_rating = base.clone();
+        by_rating.sort = CatalogSort::Rating;
+        let mut filtered = base.clone();
+        filtered.filters = vec![("genre".into(), "Sci-Fi".into())];
+        let mut later = base.clone();
+        later.skip = 150;
+
+        assert_eq!(feed_key(&base), feed_key(&base), "the same request is the same feed");
+        assert_ne!(feed_key(&base), feed_key(&by_rating));
+        assert_ne!(feed_key(&base), feed_key(&filtered));
+        assert_eq!(feed_key(&base), feed_key(&later), "the page is not part of the feed");
+    }
+
+    #[test]
+    fn the_first_page_of_another_order_replaces_the_previous_feed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let fake = Fake { seen: Mutex::new(Vec::new()) };
+        let root = app.cache.join(collection::ROOT);
+
+        let (page, _) = more_with(&fake, &app, "stremio", &CatalogRequest::first("movie")).unwrap();
+        assert_eq!(page.items.len(), 2);
+        // A rails item (no feed) has to survive the replacement.
+        let rails = heronite_watch_core::types::MovieItem {
+            id: "tt0000001".into(),
+            kind: "movie".into(),
+            name: "Rail Film".into(),
+            top: true,
+            ..Default::default()
+        };
+        collection::append(&root, &[rails]).unwrap();
+
+        let mut rated = CatalogRequest::first("movie");
+        rated.sort = CatalogSort::Rating;
+        let (page, added) = replace_with(&fake, &app, "stremio", &rated).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(added, 1);
+
+        let library = Library::load_with(&DataPaths::at(root), true).unwrap();
+        let titles: Vec<&str> = library.games.iter().map(|game| game.title.as_str()).collect();
+        assert!(titles.contains(&"Rail Film"), "the rails stay: {titles:?}");
+        assert!(titles.contains(&"Best Rated"), "the new feed's page is there: {titles:?}");
+        assert!(!titles.contains(&"The Matrix"), "the previous feed's page is gone: {titles:?}");
     }
 
     #[test]
@@ -92,16 +223,16 @@ mod tests {
         let app = app(dir.path());
         let fake = Fake { seen: Mutex::new(Vec::new()) };
         let request = CatalogRequest::first("movie");
-        let (items, added) = more_with(&fake, &app, "stremio", &request).unwrap();
-        assert_eq!(items.len(), 2, "the page is what a search shows");
+        let (page, added) = more_with(&fake, &app, "stremio", &request).unwrap();
+        assert_eq!(page.items.len(), 2, "the page is what the tab shows");
         assert_eq!(added, 2, "and it is merged into the library");
         let library = Library::load_with(&DataPaths::at(app.cache.join(collection::ROOT)), true).unwrap();
         assert_eq!(library.games.len(), 2);
         assert!(library.games.iter().any(|game| game.title == "The Matrix"));
 
         // The same page again adds nothing.
-        let (items, added) = more_with(&fake, &app, "stremio", &request).unwrap();
-        assert_eq!(items.len(), 2);
+        let (page, added) = more_with(&fake, &app, "stremio", &request).unwrap();
+        assert_eq!(page.items.len(), 2);
         assert_eq!(added, 0);
     }
 }
