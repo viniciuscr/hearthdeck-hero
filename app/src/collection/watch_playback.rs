@@ -12,6 +12,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use heronite_data::CollectionGame;
 use heronite_i18n::{tr, trn};
+use heronite_watch::metadata::{TitleDetails, TitleRef};
 use heronite_watch::types::StreamChoice;
 
 use super::CollectionView;
@@ -30,6 +31,28 @@ pub(super) struct WatchPlayback {
     selected: usize,
     /// mpv is playing this title.
     running: Option<Running>,
+    /// What the metadata sources say about the title (`console/watch_page.rs`).
+    info: TitleInfo,
+}
+
+/// The metadata sources' answer for the title, and where the load stands.
+#[derive(Default)]
+struct TitleInfo {
+    /// The title `state` describes (the Collection key).
+    item: Option<String>,
+    state: TitleState,
+}
+
+#[derive(Default)]
+enum TitleState {
+    #[default]
+    Idle,
+    Loading,
+    Ready(Arc<TitleDetails>),
+    /// No metadata source knows this title; the page shows the library's own.
+    Missing,
+    /// The sources could not be asked; the page says so.
+    Failed,
 }
 
 #[derive(Clone, Default)]
@@ -53,6 +76,59 @@ impl CollectionView {
             running.stop.store(true, Ordering::Relaxed);
         }
         self.watch = WatchPlayback::default();
+    }
+
+    /// Loads what the metadata sources know about `game`, once per title: the
+    /// facade answers from its week-long cache before it asks anyone.
+    pub(super) fn watch_ensure_details(&mut self, game: &CollectionGame, cx: &mut Context<Self>) {
+        let key = game.key.clone();
+        if self.watch.info.item.as_deref() == Some(key.as_str()) && !matches!(self.watch.info.state, TitleState::Idle) {
+            return;
+        }
+        self.watch.info.item = Some(key.clone());
+        self.watch.info.state = TitleState::Loading;
+        cx.notify();
+
+        let app = self.app_paths.clone();
+        let title = TitleRef::new(&game.runner, crate::fork::watch::sources::id(game), crate::fork::watch::sources::kind(game))
+            .named(&game.title, crate::fork::watch::sources::year(game));
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { heronite_watch::metadata::details(&app, &title) }).await;
+            this.update(cx, |this, cx| {
+                // Another title took the page while this one loaded.
+                if this.watch.info.item.as_deref() != Some(key.as_str()) {
+                    return;
+                }
+                this.watch.info.state = match result {
+                    Ok(Some(details)) => TitleState::Ready(Arc::new(details)),
+                    Ok(None) => TitleState::Missing,
+                    Err(error) => {
+                        log::debug!("watch details: {error:#}");
+                        TitleState::Failed
+                    }
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The details of `key`, when they arrived. The `Arc` keeps the page able to
+    /// draw them while it borrows the view mutably.
+    pub(super) fn watch_details(&self, key: &str) -> Option<Arc<TitleDetails>> {
+        if self.watch.info.item.as_deref() != Some(key) {
+            return None;
+        }
+        match &self.watch.info.state {
+            TitleState::Ready(details) => Some(details.clone()),
+            _ => None,
+        }
+    }
+
+    /// Whether the sources could not be asked for `key`'s details.
+    pub(super) fn watch_details_failed(&self, key: &str) -> bool {
+        self.watch.info.item.as_deref() == Some(key) && matches!(self.watch.info.state, TitleState::Failed)
     }
 
     /// Loads the streams of `game` unless the title already has a result

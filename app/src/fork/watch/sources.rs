@@ -23,6 +23,12 @@ pub fn top(game: &CollectionGame) -> bool {
     game.game.extra.as_ref().and_then(|extra| extra.get("stremioTop")).and_then(serde_json::Value::as_bool).unwrap_or(false)
 }
 
+/// The year the library knows ("1999", "2011–2019"), for a metadata source
+/// that has to search by name.
+pub fn year(game: &CollectionGame) -> Option<&str> {
+    game.details.release_date.as_deref().map(str::trim).filter(|date| !date.is_empty())
+}
+
 pub fn has_genre(game: &CollectionGame, value: &str) -> bool {
     game.metadata.as_ref().is_some_and(|metadata| metadata.genres.iter().any(|genre| genre.eq_ignore_ascii_case(value)))
 }

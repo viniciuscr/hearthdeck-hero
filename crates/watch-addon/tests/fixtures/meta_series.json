@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "id": "tt0944947",
+    "type": "series",
+    "name": "Game of Thrones",
+    "year": "2011",
+    "releaseInfo": "2011–2019",
+    "released": "2011-04-17T00:00:00.000Z",
+    "runtime": "57 min",
+    "imdbRating": "9.2",
+    "description": "Nine noble families vie for control of Westeros and the Iron Throne.",
+    "genres": ["Drama", "Fantasy"],
+    "director": null,
+    "writer": ["David Benioff", "D.B. Weiss"],
+    "cast": ["Emilia Clarke", "Peter Dinklage", "Kit Harington"],
+    "country": "United States, United Kingdom",
+    "awards": "Won 59 Primetime Emmys. 396 wins & 656 nominations total",
+    "status": "Ended",
+    "poster": "https://images.metahub.space/poster/small/tt0944947/img",
+    "background": "https://images.metahub.space/background/medium/tt0944947/img",
+    "logo": "https://images.metahub.space/logo/medium/tt0944947/img",
+    "videos": [
+      {"season": 0, "number": 1, "name": "Inside Game of Thrones"},
+      {"season": 1, "number": 1, "name": "Winter Is Coming"},
+      {"season": 1, "number": 2, "name": "The Kingsroad"},
+      {"season": 2, "number": 1, "name": "The North Remembers"}
+    ]
+  }
+}

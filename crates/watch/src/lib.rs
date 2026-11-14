@@ -6,6 +6,7 @@
 //! background thread. No GPUI.
 
 pub mod collection;
+pub mod metadata;
 pub mod playback;
 pub mod registry;
 

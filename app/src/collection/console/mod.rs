@@ -23,6 +23,7 @@ mod power;
 mod sidebar;
 mod sources;
 mod tile;
+mod watch_page;
 mod watch_panel;
 
 use std::time::{Duration, Instant};

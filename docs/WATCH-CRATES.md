@@ -23,6 +23,9 @@ app
     ├── heronite-watch-stremio  the Stremio provider
     │   └── heronite-watch-addon
     │       └── heronite-watch-core
+    ├── heronite-watch-metadata the metadata sources: Cinemeta, in order
+    │   └── heronite-watch-addon
+    │       └── heronite-watch-core
     ├── heronite-watch-state    local files + Collection projection
     ├── heronite-watch-player   mpv
     └── heronite-watch-core     domain types and ports
@@ -35,6 +38,7 @@ app
 | `heronite-watch-addon` | Stremio addon protocol: manifest, catalog, meta, stream, `AddonClient`, size and seeders parsing | `heronite-watch-core` | account, datastore, endpoints, Cinemeta constants |
 | `heronite-watch-player` | mpv discovery, argument construction, IPC supervision, `PlaybackOutcome`, stream-origin policy | `heronite-data` (`proc`), url, serde_json, anyhow | protocol or provider types |
 | `heronite-watch-state` | `store` (movies, per-provider credentials) and `collection` (the Heroic-format projection) | `heronite-watch-core`, `heronite-data` | network, providers, GPUI |
+| `heronite-watch-metadata` | the metadata sources: `WatchMetadataSource`, the ordered registry and the Cinemeta source | `heronite-watch-{core,addon}` | media providers, accounts, playback, files, GPUI |
 | `heronite-watch-stremio` | endpoints, link code, `addonCollectionGet`, datastore and merge, Cinemeta catalogs, streaming server, `impl WatchProvider` | `heronite-watch-{core,addon}` | files, processes, `heronite-data` |
 
 A provider crate takes everything it needs from `Ctx`; it never opens a file or
@@ -64,6 +68,15 @@ pub trait Credentials: Send + Sync {
     fn set(&self, provider: &str, secret: &Secret) -> Result<()>;
     fn clear(&self, provider: &str) -> Result<()>;
 }
+
+/// What describes a title: a different trait from `WatchProvider` on purpose.
+/// A media provider (Stremio, YouTube) is never asked what a title *is*.
+pub trait WatchMetadataSource: Send + Sync {
+    fn descriptor(&self) -> &MetaDescriptor;      // id, name, the providers it covers
+    fn details(&self, ctx: &MetaCtx<'_>, title: &TitleRef) -> Result<Option<TitleDetails>>; // None: it does not know the title
+}
+
+pub struct MetaCtx<'a> { pub http: &'a dyn Transport }
 ```
 
 - `browse` returns every rail in one call, each with its kind and items: a
@@ -103,6 +116,7 @@ the app uses.
 | `heronite_watch::store` | `read_auth`, `write_auth`, `clear_auth` |
 | `heronite_watch::collection` | `ROOT`, `library` |
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` |
+| `heronite_watch::metadata` | `details`, `details_with`, `sources`, `TitleDetails`, `TitleRef` |
 | `heronite_watch::player` | `PlaybackOutcome` |
 | `heronite_watch::types` | `StreamChoice` |
 
@@ -122,6 +136,10 @@ module and a re-export cannot share a name (`collection` is the case).
 - `heronite-watch-state::collection` owns `<cache>/watch-library/**`, written
   through `DataPaths` accessors and read with `Library::load_with`. It is
   regenerated on every load and never merged with the game library.
+- `heronite-watch-state::details` owns `<cache>/watch-details/**`: one file per
+  `(provider, kind, id)` holding a fetch time and the `TitleDetails` a metadata
+  source answered. Fresh for seven days, served stale when no source can be
+  reached, and safe to delete.
 - There is no watch data crate: it would duplicate atomic and secret-safe writes
   that `heronite-data` already owns (`docs/WATCH.md` rule 10).
 - An upstream change to those primitives fails the fork's gate at compile time,

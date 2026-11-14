@@ -10,7 +10,7 @@ mod hero;
 mod sheet;
 mod tabs;
 
-use hero::facts_table;
+pub(super) use hero::facts_table;
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -31,8 +31,8 @@ use heronite_data::console_theme::{GamePage, TabSpec};
 use heronite_i18n::tr;
 
 pub(super) struct GameNav {
-    list: ListNav,
-    about: Glide,
+    pub(super) list: ListNav,
+    pub(super) about: Glide,
     hero: hero::Nav,
     tabs: tabs::Nav,
     sheet: sheet::Nav,
@@ -69,7 +69,7 @@ fn classic_facts(f: &super::super::vm::FocusVm) -> Vec<(SharedString, String)> {
 }
 
 impl CollectionView {
-    fn game_rows(&mut self, g: &CollectionGame, cx: &mut Context<Self>) -> Vec<Row> {
+    pub(super) fn game_rows(&mut self, g: &CollectionGame, cx: &mut Context<Self>) -> Vec<Row> {
         let playing = self.playing.contains_key(&g.app_name);
         let step = self.preparing.get(&g.app_name).cloned();
         let (label, ic) = self.primary_state(g);
@@ -238,6 +238,11 @@ impl CollectionView {
     /// starts): its Play, Uninstall, Settings... (`acting_copy`).
     pub(super) fn render_console_game(&mut self, key: &SharedString, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let key = &self.acting_key(key);
+        // Fork-Seam: F-012 — a film has a page of its own (`console/watch_page.rs`),
+        // so the games' page below stays upstream's.
+        if self.space == super::super::Space::Watch {
+            return self.render_watch_game_page(key, window, cx);
+        }
         match look::theme().game_page {
             GamePage::Classic => self.render_game_classic(key, window, cx),
             GamePage::Hero => self.render_game_hero(key, window, cx),
@@ -254,6 +259,10 @@ impl CollectionView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let key = &self.acting_key(key);
+        // Fork-Seam: F-012 — the film page is whole: no sheet floats over it.
+        if self.space == super::super::Space::Watch {
+            return None;
+        }
         match look::theme().game_page {
             GamePage::Sheet => self.render_game_sheet_layer(key, window, cx),
             _ => None,
@@ -263,6 +272,11 @@ impl CollectionView {
     /// `false` lets the shell use the press (B goes back).
     pub(super) fn game_pad(&mut self, key: &SharedString, pad: Pad, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let key = &self.acting_key(key);
+        // Fork-Seam: F-012 — a film page is the page whatever the theme picks,
+        // so it uses the Classic page's routing and look.
+        if self.space == super::super::Space::Watch {
+            return self.game_pad_classic(key, pad, window, cx);
+        }
         match look::theme().game_page {
             GamePage::Classic => self.game_pad_classic(key, pad, window, cx),
             GamePage::Hero => self.game_pad_hero(key, pad, window, cx),
@@ -273,6 +287,10 @@ impl CollectionView {
 
     pub(super) fn game_hints(&self, key: &SharedString) -> Vec<Hint> {
         let key = &self.acting_key(key);
+        // Fork-Seam: F-012 — see `game_pad`.
+        if self.space == super::super::Space::Watch {
+            return self.game_hints_classic(key);
+        }
         match look::theme().game_page {
             GamePage::Classic => self.game_hints_classic(key),
             GamePage::Hero => self.game_hints_hero(key),
@@ -283,6 +301,10 @@ impl CollectionView {
 
     /// The background shading of the game page (the Sheet keeps the tab's).
     pub(super) fn game_scrim(&self, spec: &TabSpec) -> Scrim {
+        // Fork-Seam: F-012 — see `game_pad`.
+        if self.space == super::super::Space::Watch {
+            return Scrim::Classic;
+        }
         match look::theme().game_page {
             GamePage::Classic | GamePage::Tabs => Scrim::Classic,
             GamePage::Hero => Scrim::Spot,
@@ -294,12 +316,14 @@ impl CollectionView {
     /// Whether the page has long text the wheel scrolls (its lists take clicks);
     /// the Sheet is a list alone.
     pub(super) fn game_page_scrolls_text(&self) -> bool {
-        look::theme().game_page != GamePage::Sheet || self.console.game.sheet.full()
+        // Fork-Seam: F-012 — the film page always has the synopsis to scroll.
+        self.space == super::super::Space::Watch || look::theme().game_page != GamePage::Sheet || self.console.game.sheet.full()
     }
 
     /// The Sheet opens over the tab: its top bar stays.
     pub(super) fn game_page_keeps_tabs(&self) -> bool {
-        look::theme().game_page == GamePage::Sheet && !self.console.game.sheet.full()
+        // Fork-Seam: F-012 — the film page is whole: nothing keeps a tab bar.
+        self.space != super::super::Space::Watch && look::theme().game_page == GamePage::Sheet && !self.console.game.sheet.full()
     }
 
     fn render_game_classic(&mut self, key: &SharedString, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

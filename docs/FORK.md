@@ -115,6 +115,7 @@ implementation rules live in `docs/WATCH.md`.
 | F-009 | `.github/workflows/{release,flatpak,windows-packages}.yml` | upstream release workflows guarded to the upstream repository | active |
 | F-010 | `app/src/collection/{actions,game_actions,render_focus,grid_drawer}.rs`, `app/src/collection/focus/mod.rs`, `app/src/collection/console/{mod.rs,game/mod.rs,layouts/spotlight/mod.rs}` | Native Watch playback: the stream list and Play action on both detail surfaces | active |
 | F-011 | `docs/ARCHITECTURE.md` | the watch crate map (the fork-owned watch crates are absent upstream) | active |
+| F-012 | `app/src/collection/console/{mod.rs,game/mod.rs,game/hero.rs}`, `app/src/collection/hltb_ui.rs` | a fork-owned film page for Watch titles (`console/watch_page.rs`) and no HowLongToBeat lookups for them | active |
 
 ### Conflict log
 

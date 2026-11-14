@@ -129,7 +129,7 @@ pub(super) fn detail_facts(f: &FocusVm) -> Vec<(SharedString, String)> {
 }
 
 /// The facts as label / value lines, split into `columns` columns.
-pub(super) fn facts_table(rows: &[(SharedString, String)], columns: usize) -> Div {
+pub(crate) fn facts_table(rows: &[(SharedString, String)], columns: usize) -> Div {
     let per = rows.len().div_ceil(columns.max(1)).max(1);
     div().flex().gap(u(40.)).children(rows.chunks(per).map(|chunk| {
         div().flex().flex_col().flex_1().min_w_0().gap(u(8.)).children(chunk.iter().map(|(label, value)| {

@@ -7,6 +7,7 @@ description = "Watch: Stremio account, addon protocol, local streaming server an
 
 [dependencies]
 heronite-watch-core = { path = "../watch-core" }
+heronite-watch-metadata = { path = "../watch-metadata" }
 heronite-watch-player = { path = "../watch-player" }
 heronite-watch-stremio = { path = "../watch-stremio", optional = true }
 heronite-watch-state = { path = "../watch-state" }

@@ -31,6 +31,11 @@ impl CollectionView {
     /// when fresh, else asked in the background; the section shows the
     /// answer when it arrives.
     pub(super) fn ensure_hltb_for_focus(&mut self, cx: &mut Context<Self>) {
+        // Fork-Seam: F-012 — HowLongToBeat knows games, not films: asking it
+        // about a title in the Watch space would put a game's times on a film.
+        if self.space == super::Space::Watch {
+            return;
+        }
         let Some(key) = self.focus.as_ref().map(|vm| vm.key.to_string()) else { return };
         if self.hltb_tried.contains(&key) || !cx.has_global::<HubGlobal>() {
             return;

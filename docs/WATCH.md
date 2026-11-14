@@ -4,6 +4,17 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-14 — a film page of its own, and metadata sources.**
+> Films and series get a page built for them (`app/src/collection/console/
+> watch_page.rs`) instead of the games' page: provider, year, runtime, rating,
+> what was watched, the description and the cast and crew. What describes a
+> title is a **metadata source** (Cinemeta today), a different contract, crate
+> and registry from the **media provider** (Stremio: titles, streams, progress);
+> a provider is never asked to describe a title, and `details()` is not on
+> `WatchProvider`. A series reports its status, seasons and episodes; picking an
+> episode is still out of scope. HowLongToBeat is no longer asked about titles
+> in the Watch space.
+
 > **Revision 2026-11-12 — native playback only, films first.**
 > The Stremio desktop app is no longer required and is no longer used for
 > playback. Play resolves the film's streams from the `stream` addons installed
@@ -39,7 +50,8 @@ the rules that apply while building it.
 ## Scope
 
 **In:** Linux/CachyOS, films and series, a Stremio account linked by code,
-discovery through Cinemeta, streams from the account's `stream` addons (Torrentio
+discovery through Cinemeta, a film page fed by metadata sources (Cinemeta's
+`meta` resource), streams from the account's `stream` addons (Torrentio
 is the expected one), playback through the installed Stremio Service and a
 supervised `mpv`, and watch-progress read/write through Stremio's datastore.
 
@@ -281,6 +293,36 @@ Envelope, source `stremio-core`:
 - Local `movies.json` is the source of truth between writes; Stremio is the
   cross-device source.
 
+### 7. Metadata sources (verified 2026-11-14)
+
+- What **describes** a title is a metadata source, not a media provider. The
+  media provider (`WatchProvider`: Stremio, YouTube) owns titles, streams and
+  progress; a metadata source (`WatchMetadataSource`) owns what a title *is*.
+  They are different traits, crates (`heronite-watch-stremio` vs
+  `heronite-watch-metadata`), registries and, later, settings. A media provider
+  is never asked to describe a title.
+- The answer is `TitleDetails`: name, year (`releaseInfo`), released date,
+  runtime, rating, description, genres, directors, writers, cast, countries,
+  awards, a series' status, its season and episode counts, and art.
+- Sources answer through the addon protocol: `GET {transport}/meta/{type}/{id}.json`.
+  Cinemeta is the first source (`https://v3-cinemeta.strem.io/manifest.json`);
+  a second one later is another addon's manifest, added to the registry, with no
+  change to a media provider.
+- A 404 is "this source does not know the title" (`None`), not a fault: the next
+  source is asked. A timeout, a 5xx or a body that is not JSON is an error; the
+  registry keeps it aside, asks the next source, and when none answers the page
+  says the details are unavailable.
+- `meta` sends `null` for what it does not know, lists included. `videos` holds
+  a series' episodes: season 0 is the specials, counted neither as a season nor
+  as an episode.
+- The answer is cached per `(provider, kind, id)` under
+  `<cache>/watch-details/**` (`heronite-watch-state::details`), fresh for seven
+  days; a stale answer is served when no source can be reached. The files are
+  disposable: delete them and they are fetched again.
+- The film page shows the source's facts and none of the games' rows (installed
+  state, playtime, status, folders, HowLongToBeat). Play and its stream rows stay
+  the provider's.
+
 ## Flows
 
 - **Link:** `Unlinked → Pending(code) → Linked`; expired/consumed code returns to
@@ -340,8 +382,10 @@ Envelope, source `stremio-core`:
 | F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection `Space::Watch`, console space item, Watch Play action | active |
 | F-010 | `app/src/collection/{actions,game_actions,render_focus,grid_drawer}.rs`, `app/src/collection/focus/mod.rs`, `app/src/collection/console/{mod.rs,game/mod.rs,layouts/spotlight/mod.rs}` | Native Watch playback: the stream list and Play action on both detail surfaces | active |
 | F-011 | `docs/ARCHITECTURE.md` | the watch crate map (the fork-owned watch crates are absent upstream) | active |
+| F-012 | `app/src/collection/console/{mod.rs,game/mod.rs,game/hero.rs}`, `app/src/collection/hltb_ui.rs` | a fork-owned film page for Watch titles (`console/watch_page.rs`) and no HowLongToBeat lookups for them | active |
 
-Fork-owned code (`crates/watch*`, `app/src/collection/watch_playback.rs`,
+Fork-owned code (`crates/watch*`,
+`app/src/collection/console/watch_page.rs`, `app/src/collection/watch_playback.rs`,
 `app/src/fork/watch/**`, this document) is not a deviation and is not listed
 here; only upstream files are.
 
@@ -409,5 +453,17 @@ current crate map.
   `resources`, `types`, `catalogs` or `idPrefixes` as `null`; `serde(default)`
   does not cover that. Manifests now read `null` as an empty list (and a
   `null` addon list as no addons); an addon with no `transportUrl` is skipped.
+- **2026-11-14, Cinemeta meta.** `GET
+  https://v3-cinemeta.strem.io/meta/{movie|series}/{tt-id}.json` answers
+  `{"meta":{…}}` with `awards`, `cast`, `country` (comma-joined), `description`,
+  `director` and `writer` (arrays; `null` for a series' director), `genre` and
+  `genres`, `imdbRating` (a string), `released` (an ISO timestamp), `runtime`
+  ("136 min"), `status` (a series, "Ended"), `videos` (a series' episodes: 67
+  for Breaking Bad, season 0 holding the specials), `poster`, `background`,
+  `logo` and `trailerStreams`. An unknown id answers 307 to
+  `cinemeta-live.strem.io` and then 404, so "no answer" has to stay distinct
+  from a fault: `AddonClient::details` maps 404 to `None` and any other status
+  to `HttpStatus`. The film page's facts come from `TitleDetails`; the cache
+  keeps an answer for a week.
 
 

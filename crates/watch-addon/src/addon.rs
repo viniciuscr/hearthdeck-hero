@@ -10,6 +10,7 @@ use serde_json::Value;
 use url::Url;
 
 use heronite_watch_core::http::{http_status, redacted, Transport};
+use heronite_watch_core::metadata::TitleDetails;
 use heronite_watch_core::types::{MovieItem, StreamChoice};
 
 /// Addons serialize optional lists as `null`, and `serde(default)` only
@@ -101,6 +102,117 @@ impl MetaPreview {
     }
 }
 
+/// One `videos` entry of a series' meta. Only the season and episode numbers
+/// are read: they are counted, never listed.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct MetaVideo {
+    #[serde(default)]
+    pub season: Option<u32>,
+}
+
+/// The addon protocol's `meta` object: what a `meta/{type}/{id}.json` answers.
+/// Addons send `null` for what they do not know, and Cinemeta joins its people
+/// and countries with `, `.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetaDetails {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(rename = "type", default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub year: Option<Value>,
+    #[serde(default)]
+    pub release_info: Option<Value>,
+    #[serde(default)]
+    pub released: Option<Value>,
+    #[serde(default)]
+    pub runtime: Option<Value>,
+    #[serde(default)]
+    pub imdb_rating: Option<Value>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub genres: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub genre: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub director: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub writer: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub cast: Vec<String>,
+    #[serde(default)]
+    pub country: Option<String>,
+    #[serde(default)]
+    pub awards: Option<String>,
+    #[serde(default)]
+    pub status: Option<Value>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub videos: Vec<MetaVideo>,
+    #[serde(default)]
+    pub poster: Option<String>,
+    #[serde(default)]
+    pub background: Option<String>,
+    #[serde(default)]
+    pub logo: Option<String>,
+}
+
+impl MetaDetails {
+    /// The wire object as the screens' details type, `None` without a name.
+    /// The id and kind are the requested ones: they key the cache and the
+    /// record, and an addon that omits them must not break that. `source` is
+    /// left to the registry, which knows which source answered.
+    pub fn into_details(self, id: &str, kind: &str) -> Option<TitleDetails> {
+        let name = self.name.filter(|name| !name.trim().is_empty())?;
+        let genres = if self.genres.is_empty() { self.genre } else { self.genres };
+        // Season 0 is the specials: counted neither as a season nor an episode.
+        let seasons: Vec<u32> = self.videos.iter().filter_map(|video| video.season.filter(|s| *s > 0)).collect();
+        let seasons_count = seasons.iter().copied().collect::<std::collections::BTreeSet<_>>().len();
+        Some(TitleDetails {
+            source: String::new(),
+            id: id.to_owned(),
+            kind: kind.to_owned(),
+            name,
+            year: text(self.release_info).or_else(|| text(self.year)),
+            released: text(self.released).and_then(|date| day_of(&date)),
+            runtime: text(self.runtime),
+            rating: text(self.imdb_rating),
+            description: self.description.filter(|text| !text.trim().is_empty()),
+            genres: clean(genres),
+            directors: clean(self.director),
+            writers: clean(self.writer),
+            cast: clean(self.cast),
+            countries: split_names(self.country.as_deref()),
+            awards: self.awards.filter(|awards| !awards.trim().is_empty()),
+            series_status: text(self.status),
+            seasons: (seasons_count > 0).then_some(seasons_count as u32),
+            episodes: (!seasons.is_empty()).then_some(seasons.len() as u32),
+            poster: self.poster,
+            background: self.background,
+            logo: self.logo,
+        })
+    }
+}
+
+/// `1999-03-31T00:00:00.000Z` as `1999-03-31`; a date alone is unchanged.
+fn day_of(text: &str) -> Option<String> {
+    let day = text.split('T').next().unwrap_or(text).trim();
+    (!day.is_empty()).then(|| day.to_owned())
+}
+
+/// The names as the source lists them, without blanks.
+fn clean(names: Vec<String>) -> Vec<String> {
+    names.into_iter().map(|name| name.trim().to_owned()).filter(|name| !name.is_empty()).collect()
+}
+
+/// `"United States, United Kingdom"` as two names.
+fn split_names(list: Option<&str>) -> Vec<String> {
+    list.map(|list| clean(list.split(',').map(str::to_owned).collect())).unwrap_or_default()
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stream {
@@ -182,14 +294,21 @@ impl<'a> AddonClient<'a> {
         Ok(previews.into_iter().map(|preview| preview.into_item(&self.id)).collect())
     }
 
-    pub fn meta(&self, kind: &str, id: &str) -> Result<Option<MovieItem>> {
-        let body = self.http.get(&self.base.join(&format!("meta/{kind}/{id}.json"))?)?;
+    /// What the addon knows about one title, or `None` when it does not serve
+    /// it (a 404). Any other answer is a fault: a body without `meta` is not
+    /// the same as a title the addon does not have.
+    pub fn details(&self, kind: &str, id: &str) -> Result<Option<TitleDetails>> {
+        let body = match self.http.get(&self.base.join(&format!("meta/{kind}/{id}.json"))?) {
+            Ok(body) => body,
+            Err(error) if http_status(&error) == Some(404) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         let value: Value = serde_json::from_slice(&body).context("addon meta")?;
         let Some(meta) = value.get("meta").filter(|meta| !meta.is_null()) else {
             return Ok(None);
         };
-        let preview: MetaPreview = serde_json::from_value(meta.clone()).context("addon meta object")?;
-        Ok(Some(preview.into_item(&self.id)))
+        let meta: MetaDetails = serde_json::from_value(meta.clone()).context("addon meta object")?;
+        Ok(meta.into_details(id, kind))
     }
 
     /// A missing `streams` list is an error; an empty list is a valid answer.
@@ -380,5 +499,65 @@ mod tests {
         assert_eq!(streams.len(), 1);
         assert_eq!(streams[0].addon, "addon");
         assert_eq!(streams[0].file_idx, Some(0));
+    }
+
+    fn details(transport: &Stub, kind: &str, id: &str) -> Option<TitleDetails> {
+        client(transport).details(kind, id).unwrap()
+    }
+
+    #[test]
+    fn a_movie_meta_becomes_the_pages_details() {
+        let transport = Stub(Answer::Body(include_str!("../tests/fixtures/meta_movie.json")));
+        let details = details(&transport, "movie", "tt0133093").expect("the fixture has a meta");
+        assert_eq!(details.id, "tt0133093");
+        assert_eq!(details.kind, "movie");
+        assert_eq!(details.name, "The Matrix");
+        assert_eq!(details.year.as_deref(), Some("1999"));
+        assert_eq!(details.released.as_deref(), Some("1999-03-31"));
+        assert_eq!(details.runtime.as_deref(), Some("136 min"));
+        assert_eq!(details.rating.as_deref(), Some("8.7"));
+        assert_eq!(details.genres, ["Action", "Sci-Fi"]);
+        assert_eq!(details.directors, ["Lana Wachowski", "Lilly Wachowski"]);
+        assert_eq!(details.writers.len(), 2);
+        assert_eq!(details.cast.len(), 3);
+        assert_eq!(details.countries, ["United States"]);
+        assert!(details.awards.as_deref().is_some_and(|awards| awards.contains("Oscars")));
+        assert_eq!(details.series_status, None);
+        assert_eq!(details.seasons, None);
+        assert_eq!(details.episodes, None);
+    }
+
+    #[test]
+    fn a_series_counts_its_seasons_and_episodes_without_the_specials() {
+        let transport = Stub(Answer::Body(include_str!("../tests/fixtures/meta_series.json")));
+        let details = details(&transport, "series", "tt0944947").expect("the fixture has a meta");
+        assert_eq!(details.year.as_deref(), Some("2011–2019"));
+        assert_eq!(details.series_status.as_deref(), Some("Ended"));
+        // Season 0 holds the specials: neither a season nor an episode here.
+        assert_eq!(details.seasons, Some(2));
+        assert_eq!(details.episodes, Some(3));
+        assert_eq!(details.countries, ["United States", "United Kingdom"]);
+        assert!(details.directors.is_empty());
+    }
+
+    #[test]
+    fn a_body_without_meta_is_not_an_answer() {
+        let transport = Stub(Answer::Body(r#"{"meta":null}"#));
+        assert_eq!(details(&transport, "movie", "tt1"), None);
+        let transport = Stub(Answer::Body(r#"{"meta":{"id":"tt1","type":"movie"}}"#));
+        assert_eq!(details(&transport, "movie", "tt1"), None, "a meta without a name says nothing");
+    }
+
+    #[test]
+    fn a_404_on_meta_means_the_addon_does_not_know_the_title() {
+        let transport = Stub(Answer::Status(404));
+        assert_eq!(details(&transport, "movie", "tt1"), None);
+    }
+
+    #[test]
+    fn a_500_on_meta_is_a_fault_with_its_status() {
+        let transport = Stub(Answer::Status(500));
+        let error = client(&transport).details("movie", "tt1").unwrap_err();
+        assert_eq!(http_status(&error), Some(500));
     }
 }

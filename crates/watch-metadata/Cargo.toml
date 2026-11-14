@@ -1,0 +1,18 @@
+[package]
+name = "heronite-watch-metadata"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What describes a Watch title: the metadata sources (Cinemeta first) and their registry"
+
+[dependencies]
+heronite-watch-core = { path = "../watch-core" }
+heronite-watch-addon = { path = "../watch-addon" }
+anyhow.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+url = "2"
+
+[lints]
+workspace = true

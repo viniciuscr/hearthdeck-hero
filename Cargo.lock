@@ -4087,6 +4087,7 @@ dependencies = [
  "heronite-data",
  "heronite-watch-addon",
  "heronite-watch-core",
+ "heronite-watch-metadata",
  "heronite-watch-player",
  "heronite-watch-state",
  "heronite-watch-stremio",
@@ -4117,6 +4118,17 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+ "url",
+]
+
+[[package]]
+name = "heronite-watch-metadata"
+version = "1.6.1"
+dependencies = [
+ "anyhow",
+ "heronite-watch-addon",
+ "heronite-watch-core",
+ "serde_json",
  "url",
 ]
 

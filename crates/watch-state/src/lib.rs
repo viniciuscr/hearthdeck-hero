@@ -2,4 +2,5 @@
 //! Heroic-format projection the Collection screens read. No network.
 
 pub mod collection;
+pub mod details;
 pub mod store;
