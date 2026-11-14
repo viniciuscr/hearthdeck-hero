@@ -87,6 +87,7 @@ pub use screenshots::screenshots_global;
 pub mod stage;
 mod vm;
 mod watch_playback;
+mod watch_service;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -316,6 +317,8 @@ pub struct CollectionView {
     console: console::ConsoleUi,
     /// The focused film's streams and its mpv session (`watch_playback.rs`).
     watch: watch_playback::WatchPlayback,
+    /// The Stremio service this app started, if any (`watch_service.rs`).
+    watch_service: watch_service::WatchService,
     /// Language the precomputed view models and the search placeholder were
     /// built in.
     lang: heronite_i18n::Lang,
@@ -579,6 +582,7 @@ impl CollectionView {
             palette: palette::Host::new(window, cx),
             console: Default::default(),
             watch: Default::default(),
+            watch_service: Default::default(),
             lang: heronite_i18n::current(),
         };
         this.apply_start_view();

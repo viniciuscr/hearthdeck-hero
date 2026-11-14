@@ -257,9 +257,17 @@ Envelope, source `stremio-core`:
   `{"torrent":{"infoHash":"…"},"peerSearch":{"sources":["dht:…", …],"min":40,"max":200}}`.
 - Stream URL: `{baseUrl}/{infoHash}/{fileIdx}` (confirm the exact shape).
 - A direct `url` stream bypasses the service.
-- Health: probe `/settings` before playback. When the service is down, the play
-  fails with that reason: there is no Stremio-app handoff. Never assume
-  "localhost" is trusted: the service is a separate process, not our code.
+- Health: probe `/settings` before playback. When the service is down the app
+  starts it — `stremio-service`, found through `STREMIO_SERVICE`, then `PATH`,
+  then `/usr/share/stremio-service/stremio-service` and
+  `/opt/stremio/stremio-service` — waits up to 20 s for it to answer, and plays.
+  A launcher that exits at once reports its last error line instead.
+- The app owns only the process it started: Settings → Watch decides whether it
+  is stopped when the session ends (default on, to free its memory); a service
+  that was already running belongs to the person's desktop session and is never
+  touched.
+- Never assume "localhost" is trusted: the service is a separate process, not
+  our code.
 
 ### 4a. Stream resolution
 
@@ -401,8 +409,8 @@ Envelope, source `stremio-core`:
 
 Fork-owned code (`crates/watch*`,
 `app/src/collection/console/watch_page.rs`, `app/src/collection/watch_playback.rs`,
-`app/src/fork/watch/**`, this document) is not a deviation and is not listed
-here; only upstream files are.
+`app/src/collection/watch_service.rs`, `app/src/fork/watch/**`, this document)
+is not a deviation and is not listed here; only upstream files are.
 
 ## Phase 0 probe checklist
 

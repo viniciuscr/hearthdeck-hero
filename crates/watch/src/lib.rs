@@ -10,6 +10,7 @@ pub mod metadata;
 pub mod playback;
 pub mod progress;
 pub mod registry;
+pub mod service;
 
 pub use heronite_watch_core::auth::AuthKey;
 pub use heronite_watch_core::http::{Transport, UreqTransport};
@@ -30,6 +31,11 @@ pub mod player {
 /// The local watch state the settings screen reads and writes.
 pub mod store {
     pub use heronite_watch_state::store::{clear_auth, read_auth, write_auth};
+}
+
+/// Settings → Watch: what the person chose beyond account, theme and rails.
+pub mod settings {
+    pub use heronite_watch_state::settings::{read, write, Settings};
 }
 
 /// The item types the screens show.

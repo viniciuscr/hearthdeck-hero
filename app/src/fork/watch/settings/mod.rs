@@ -123,6 +123,16 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
         .into_any_element(),
     ]);
 
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let service = card([toggle_row(
+        "watch-service-stop",
+        tr!("Stop the Stremio service after watching"),
+        Some(tr!("Frees its memory; it is started again when you play a torrent.")),
+        settings.stop_service_when_done,
+    )
+    .on_click(cx.listener(|d, _, _, cx| toggle_service(d, cx)))
+    .into_any_element()]);
+
     let reset = action_button(
         "watch-reset",
         ButtonKind::Glass,
@@ -152,6 +162,8 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
                 .child(meta_text(tr!("Choose what the Watch home shows. The console uses this theme; ☰ → Customize edits it in detail."))),
         )
         .child(rails)
+        .child(caption(tr!("Stremio service")))
+        .child(service)
         .child(div().flex().items_center().gap(px(8.)).child(reset));
     if let Some(notice) = &d.watch.notice {
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
@@ -161,6 +173,15 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
 
 fn rail_on(prefs: &ConsolePrefs, kind: &str) -> bool {
     prefs.theme.shelves.iter().any(|shelf| shelf.kind == kind && shelf.on)
+}
+
+fn toggle_service(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    settings.stop_service_when_done = !settings.stop_service_when_done;
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    cx.notify();
 }
 
 fn toggle_rail(d: &mut SettingsPage, kind: &str, cx: &mut Context<SettingsPage>) {
@@ -270,6 +291,9 @@ pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
     rows.push(Row::toggle("watch-rail:provider:top-movies", tr!("Top movies"), rail_on(&prefs, "provider:top-movies")));
     rows.push(Row::toggle("watch-rail:provider:top-series", tr!("Top series"), rail_on(&prefs, "provider:top-series")));
     rows.push(Row::action("watch-reset", tr!("Reset Watch theme")));
+    rows.push(Row::header(tr!("Stremio service")));
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    rows.push(Row::toggle("watch-service-stop", tr!("Stop the Stremio service after watching"), settings.stop_service_when_done));
     rows
 }
 
@@ -292,6 +316,14 @@ pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, cx: &mut Con
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-rail:") => {
             let kind = id.trim_start_matches("watch-rail:");
             set_rail(d, kind, on, cx);
+        }
+        Outcome::Changed(id, Value::Toggle(on)) if id.as_ref() == "watch-service-stop" => {
+            let mut settings = heronite_watch::settings::read(&d.ctx.app);
+            settings.stop_service_when_done = on;
+            if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+                log::warn!("saving the Watch settings: {error:#}");
+            }
+            cx.notify();
         }
         _ => {}
     }

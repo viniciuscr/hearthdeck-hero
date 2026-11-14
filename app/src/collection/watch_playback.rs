@@ -400,6 +400,13 @@ impl CollectionView {
             }
             return;
         }
+        // A torrent needs the local service: start it first when it is down
+        // (`watch_service.rs`); the play here runs again once it answers.
+        if stream.info_hash.is_some() && !self.watch_service_ready() && !self.watch_service.starting {
+            self.show_toast(tr!("Starting the Stremio service…"), false, cx);
+            self.watch_service_start(game.key.clone(), index, cx);
+            return;
+        }
 
         self.watch.selected = index;
         let stop = Arc::new(AtomicBool::new(false));
@@ -454,6 +461,8 @@ impl CollectionView {
         if self.watch.running.as_ref().is_some_and(|running| running.key == key) {
             self.watch.running = None;
         }
+        // The service we started was for this session.
+        self.watch_service_finished(cx);
         self.refresh_focus();
         if let Ok(Err(error)) = result {
             log::warn!("watch playback: {error:#}");

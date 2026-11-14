@@ -3,4 +3,5 @@
 
 pub mod collection;
 pub mod details;
+pub mod settings;
 pub mod store;
