@@ -118,7 +118,7 @@ the app uses.
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
 | `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider) |
 | `heronite_watch::settings` | `read`, `write`, `Settings` (Settings → Watch) |
-| `heronite_watch::service` | `candidates`, `launcher`, `is_up`, `command`, `PROBE`, `START_TIMEOUT`, `LAUNCHER_ENV` |
+| `heronite_watch::service` | `launches`, `Launch` (headless runtime or launcher, each with its `command`), `is_up`, `PROBE`, `ATTEMPT`, `LAUNCHER_ENV` |
 | `heronite_watch::metadata` | `details`, `details_with`, `sources`, `TitleDetails`, `TitleRef` |
 | `heronite_watch::player` | `PlaybackOutcome` |
 | `heronite_watch::types` | `StreamChoice` |

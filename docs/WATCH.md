@@ -258,10 +258,15 @@ Envelope, source `stremio-core`:
 - Stream URL: `{baseUrl}/{infoHash}/{fileIdx}` (confirm the exact shape).
 - A direct `url` stream bypasses the service.
 - Health: probe `/settings` before playback. When the service is down the app
-  starts it — `stremio-service`, found through `STREMIO_SERVICE`, then `PATH`,
-  then `/usr/share/stremio-service/stremio-service` and
-  `/opt/stremio/stremio-service` — waits up to 20 s for it to answer, and plays.
-  A launcher that exits at once reports its last error line instead.
+  starts it and waits (8 s per attempt) for it to answer, trying the headless
+  `stremio-runtime <server.js>` first and the `stremio-service` launcher after
+  it: the launcher builds a tray icon, so it exits at once without a desktop
+  session. Both are found through `STREMIO_SERVICE`, then `PATH`, then
+  `/usr/share/stremio-service` and `/opt/stremio`. A launch that exits or never
+  answers contributes its last error lines to the report.
+- The service's `baseUrl` names the machine's **LAN** address (for other
+  devices); the player always fetches from loopback, keeping only the answered
+  port, so the stream stays inside the loopback trust boundary.
 - The app owns only the process it started: Settings → Watch decides whether it
   is stopped when the session ends (default on, to free its memory); a service
   that was already running belongs to the person's desktop session and is never
@@ -476,6 +481,15 @@ current crate map.
   `resources`, `types`, `catalogs` or `idPrefixes` as `null`; `serde(default)`
   does not cover that. Manifests now read `null` as an empty list (and a
   `null` addon list as no addons); an addon with no `transportUrl` is skipped.
+- **2026-11-14, the Stremio service, headless.** `stremio-service` (the packaged
+  launcher) exits at once without a desktop session — `Failed to build tray
+  icon: Read-only file system` — while `/usr/share/stremio-service/stremio-runtime
+  /usr/share/stremio-service/server.js` answers `/settings` in about a second
+  and keeps running; it finds the package's ffmpeg next to itself (the launcher
+  passes `FFMPEG_BIN`/`FFPROBE_BIN`, which we now do too). `GET /settings`
+  answers `baseUrl` as the machine's **LAN** address (`http://192.168.178.100:11470`
+  here), which the old loopback-only check refused: the player now keeps the
+  answered port on loopback instead.
 - **2026-11-14, Cinemeta meta.** `GET
   https://v3-cinemeta.strem.io/meta/{movie|series}/{tt-id}.json` answers
   `{"meta":{…}}` with `awards`, `cast`, `country` (comma-joined), `description`,

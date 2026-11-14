@@ -5,7 +5,7 @@
 //! machine before Phase 5 ships. The service is a separate process; "localhost"
 //! is not first-party.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use url::Url;
@@ -26,7 +26,10 @@ impl<'a> StreamingServer<'a> {
         Ok(Self { http, base: directory(base) })
     }
 
-    /// The service's playback base (`baseUrl`), not the settings URL.
+    /// The service's playback base, always on loopback: the host it answers is
+    /// not used (the service advertises the machine's LAN address there, for
+    /// other devices on the network), only its port, on the loopback URL we
+    /// already asked.
     pub fn base_url(&self) -> Result<Url> {
         #[derive(Deserialize)]
         struct Envelope {
@@ -35,13 +38,18 @@ impl<'a> StreamingServer<'a> {
         }
         let body = self.http.get(&self.base.join("settings")?)?;
         let envelope: Envelope = serde_json::from_slice(&body).context("streaming server settings")?;
-        // The answer is not trusted any more than the configured host: a
-        // compromised service must not point the player off loopback.
+        if !matches!(envelope.base_url.scheme(), "http" | "https") {
+            bail!("streaming server must speak http or https");
+        }
         let host = envelope.base_url.host_str().unwrap_or_default();
         if !matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]") {
-            bail!("streaming server must be on loopback");
+            log::debug!("streaming server advertises {host}; streaming from loopback");
         }
-        Ok(envelope.base_url)
+        let mut base = self.base.clone();
+        if let Some(port) = envelope.base_url.port() {
+            base.set_port(Some(port)).map_err(|()| anyhow!("streaming server port"))?;
+        }
+        Ok(directory(base))
     }
 
     /// Asks the service to fetch and seed a torrent. The service manages the
@@ -126,6 +134,29 @@ mod tests {
     fn stream_url_uses_the_base_and_file_index() {
         let url = StreamingServer::stream_url(&Url::parse("http://127.0.0.1:11470").unwrap(), HASH, Some(2)).unwrap();
         assert_eq!(url.as_str(), format!("http://127.0.0.1:11470/{HASH}/2"));
+    }
+
+    #[test]
+    fn a_lan_answer_is_served_on_loopback() {
+        // Stremio advertises the machine's LAN address there, for other devices;
+        // the player only ever fetches from loopback.
+        let fake = Fake { settings: br#"{"baseUrl":"http://192.168.178.100:11470/","values":{}}"#.to_vec(), body: Mutex::new(None) };
+        let server = StreamingServer::new(&fake, Url::parse("http://127.0.0.1:11470").unwrap()).unwrap();
+        assert_eq!(server.base_url().unwrap().as_str(), "http://127.0.0.1:11470/");
+    }
+
+    #[test]
+    fn an_answer_on_another_port_keeps_that_port_on_loopback() {
+        let fake = Fake { settings: br#"{"baseUrl":"http://10.0.0.5:11600/","values":{}}"#.to_vec(), body: Mutex::new(None) };
+        let server = StreamingServer::new(&fake, Url::parse("http://127.0.0.1:11470").unwrap()).unwrap();
+        assert_eq!(server.base_url().unwrap().as_str(), "http://127.0.0.1:11600/");
+    }
+
+    #[test]
+    fn an_answer_that_is_not_http_is_refused() {
+        let fake = Fake { settings: br#"{"baseUrl":"ftp://127.0.0.1:11470/","values":{}}"#.to_vec(), body: Mutex::new(None) };
+        let server = StreamingServer::new(&fake, Url::parse("http://127.0.0.1:11470").unwrap()).unwrap();
+        assert!(server.base_url().is_err());
     }
 
     #[test]

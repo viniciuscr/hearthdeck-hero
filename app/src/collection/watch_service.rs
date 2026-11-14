@@ -97,32 +97,51 @@ pub(super) fn start(endpoints: &heronite_watch::Endpoints) -> Result<Option<Chil
     if heronite_watch::service::is_up(base) {
         return Ok(None);
     }
-    let Some(launcher) = heronite_watch::service::launcher() else {
+    let launches = heronite_watch::service::launches();
+    if launches.is_empty() {
         bail!(
-            "Stremio Service is not installed. Install the stremio-service package, or set {} to its launcher.",
+            "Stremio Service is not installed. Install the stremio-service package, or set {} to its launcher or runtime.",
             heronite_watch::service::LAUNCHER_ENV
         );
-    };
-    let mut command = heronite_watch::service::command(&launcher);
-    heronite_platform::process::new_group(&mut command);
-    let mut child = heronite_data::proc::spawn(&mut command).with_context(|| format!("starting {}", launcher.display()))?;
-    log::info!("watch service: started {}", launcher.display());
-    let errors = Tail::follow(&mut child);
-
-    let deadline = Instant::now() + heronite_watch::service::START_TIMEOUT;
-    loop {
-        if heronite_watch::service::is_up(base) {
-            return Ok(Some(child));
-        }
-        if let Some(status) = child.try_wait().context("asking the service")? {
-            bail!("the service stopped at once ({status}){}", errors.last());
-        }
-        if Instant::now() >= deadline {
-            stop(&mut child);
-            bail!("the service did not answer within {} s{}", heronite_watch::service::START_TIMEOUT.as_secs(), errors.last());
-        }
-        std::thread::sleep(Duration::from_millis(250));
     }
+    // The headless runtime comes first; the launcher (which wants a tray icon)
+    // only if that fails. Each failure is kept for the report.
+    let mut failures: Vec<String> = Vec::new();
+    for launch in launches {
+        let mut command = launch.command();
+        heronite_platform::process::new_group(&mut command);
+        let mut child = match heronite_data::proc::spawn(&mut command).with_context(|| format!("starting {}", launch.name())) {
+            Ok(child) => child,
+            Err(error) => {
+                failures.push(format!("{}: {error:#}", launch.name()));
+                continue;
+            }
+        };
+        log::info!("watch service: started {}", launch.name());
+        let errors = Tail::follow(&mut child);
+        let deadline = Instant::now() + heronite_watch::service::ATTEMPT;
+        loop {
+            if heronite_watch::service::is_up(base) {
+                return Ok(Some(child));
+            }
+            if let Some(status) = child.try_wait().context("asking the service")? {
+                failures.push(format!("{}: stopped at once ({status}){}", launch.name(), errors.last()));
+                break;
+            }
+            if Instant::now() >= deadline {
+                stop(&mut child);
+                failures.push(format!(
+                    "{}: no answer within {} s{}",
+                    launch.name(),
+                    heronite_watch::service::ATTEMPT.as_secs(),
+                    errors.last()
+                ));
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+    bail!("the Stremio service did not start ({})", failures.join("; "))
 }
 
 /// Ends the service this app started: its whole process group (the launcher
@@ -190,13 +209,16 @@ impl Tail {
         Self(tail)
     }
 
-    /// ` — the last line`, or nothing when the service said nothing.
+    /// ` — the last lines`, or nothing when the service said nothing. The
+    /// launcher prints "Error: …", "Caused by:" and the reason, so the reason
+    /// comes with what failed.
     fn last(&self) -> String {
         let kept = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
-        match kept.lines().rev().find(|line| !line.trim().is_empty()) {
-            Some(line) => format!(" — {}", line.trim()),
-            None => String::new(),
+        let lines: Vec<&str> = kept.lines().map(str::trim).filter(|line| !line.is_empty() && *line != "Caused by:").collect();
+        if lines.is_empty() {
+            return String::new();
         }
+        format!(" — {}", lines[lines.len().saturating_sub(2)..].join(" — "))
     }
 }
 
@@ -213,9 +235,28 @@ mod tests {
     }
 
     #[test]
-    fn only_the_last_error_line_is_reported() {
-        let tail = Tail(Arc::new(Mutex::new("first line\nlast line\n".into())));
-        assert_eq!(tail.last(), " — last line");
+    fn the_report_keeps_what_failed_and_why() {
+        let tail = Tail(Arc::new(Mutex::new(
+            "noise\nError: Failed to build tray icon\n\nCaused by:\n    Read-only file system (os error 30)\n".into(),
+        )));
+        assert_eq!(tail.last(), " — Error: Failed to build tray icon — Read-only file system (os error 30)");
+    }
+
+    /// The real service on this machine, opt-in: it starts the headless runtime,
+    /// waits for `/settings`, and stops it again.
+    #[test]
+    #[ignore = "starts the installed Stremio service"]
+    fn the_installed_service_starts_and_answers() {
+        let endpoints = heronite_watch::Endpoints::default();
+        let started = start(&endpoints).expect("the service starts");
+        let Some(mut child) = started else {
+            // It was already running: nothing of ours to stop.
+            assert!(heronite_watch::service::is_up(&endpoints.streaming_server));
+            return;
+        };
+        assert!(heronite_watch::service::is_up(&endpoints.streaming_server), "the service answers");
+        stop(&mut child);
+        assert!(!heronite_watch::service::is_up(&endpoints.streaming_server), "it stops again");
     }
 
     #[cfg(unix)]
