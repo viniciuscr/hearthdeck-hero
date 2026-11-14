@@ -109,10 +109,10 @@ impl CollectionView {
                 if !self.watch_catalogs_of(kind).is_empty() {
                     v.push(Item::Catalog);
                     let descriptor = self.watch_descriptor(kind);
-                    if descriptor.as_ref().is_some_and(|descriptor| descriptor.sorts.len() > 1) {
+                    if descriptor.as_ref().is_some_and(|(_, descriptor)| descriptor.sorts.len() > 1) {
                         v.push(Item::Sort);
                     }
-                    if descriptor.as_ref().is_some_and(|descriptor| !descriptor.filters.is_empty()) {
+                    if descriptor.as_ref().is_some_and(|(_, descriptor)| !descriptor.filters.is_empty()) {
                         v.push(Item::Filter);
                     }
                 }
@@ -176,6 +176,7 @@ impl CollectionView {
                 let cycling = matches!(pad, Pad::Left | Pad::Right | Pad::A);
                 let catalogs = self.watch_catalogs_of(kind);
                 if cycling && !catalogs.is_empty() && matches!(items[i], Item::Catalog | Item::Sort | Item::Filter) {
+                    let source = self.watch_feed_source(kind);
                     let current = self.watch_feed_catalog(kind);
                     let sort = self.watch_feed_sort(kind);
                     let filters = self.watch_feed_filters(kind);
@@ -189,25 +190,25 @@ impl CollectionView {
                     };
                     match items[i] {
                         Item::Catalog => {
-                            let at = catalogs.iter().position(|catalog| catalog.id == current).unwrap_or(0);
-                            let chosen = catalogs[step(at, catalogs.len())].clone();
+                            let at = catalogs.iter().position(|(id, catalog)| *id == source && catalog.id == current).unwrap_or(0);
+                            let (chosen_source, chosen) = catalogs[step(at, catalogs.len())].clone();
                             let kept: Vec<(String, String)> =
                                 filters.into_iter().filter(|(id, _)| chosen.filters.iter().any(|filter| filter.id == *id)).collect();
                             let order = if chosen.sorts.contains(&sort) { sort } else { chosen.sorts.first().copied().unwrap_or_default() };
-                            self.watch_feed_select(kind, chosen.id.clone(), order, kept, cx);
+                            self.watch_feed_select(kind, chosen_source, chosen.id, order, kept, cx);
                             return true;
                         }
                         Item::Sort => {
                             if let Some(sorts) =
-                                descriptor.as_ref().map(|descriptor| descriptor.sorts.clone()).filter(|sorts| sorts.len() > 1)
+                                descriptor.as_ref().map(|(_, descriptor)| descriptor.sorts.clone()).filter(|sorts| sorts.len() > 1)
                             {
                                 let at = sorts.iter().position(|order| *order == sort).unwrap_or(0);
-                                self.watch_feed_select(kind, current, sorts[step(at, sorts.len())], filters, cx);
+                                self.watch_feed_select(kind, source, current, sorts[step(at, sorts.len())], filters, cx);
                                 return true;
                             }
                         }
                         Item::Filter => {
-                            if let Some(filter) = descriptor.and_then(|descriptor| descriptor.filters.into_iter().next()) {
+                            if let Some(filter) = descriptor.and_then(|(_, descriptor)| descriptor.filters.into_iter().next()) {
                                 let chosen = filters.iter().find(|(id, _)| *id == filter.id).map(|(_, value)| value.clone());
                                 let at =
                                     chosen.as_ref().and_then(|value| filter.values.iter().position(|v| v == value)).map_or(0, |i| i + 1);
@@ -216,7 +217,7 @@ impl CollectionView {
                                 if let Some(value) = next.checked_sub(1).and_then(|i| filter.values.get(i)) {
                                     kept.push((filter.id.clone(), value.clone()));
                                 }
-                                self.watch_feed_select(kind, current, sort, kept, cx);
+                                self.watch_feed_select(kind, source, current, sort, kept, cx);
                                 return true;
                             }
                         }

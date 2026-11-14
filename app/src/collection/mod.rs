@@ -86,7 +86,7 @@ pub use load::{discard_preload, preload_library};
 pub use screenshots::screenshots_global;
 pub mod stage;
 mod vm;
-mod watch_catalog;
+pub(crate) mod watch_catalog;
 mod watch_playback;
 mod watch_service;
 

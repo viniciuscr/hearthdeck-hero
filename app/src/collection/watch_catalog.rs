@@ -12,6 +12,7 @@
 //! repaint a tab the person has already changed.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui_kit::prelude::*;
@@ -20,8 +21,9 @@ use heronite_watch::catalog::{CatalogDescriptor, CatalogRequest, CatalogSort};
 
 use super::CollectionView;
 
-/// The provider the tabs browse.
-const PROVIDER: &str = "cinemeta";
+/// The catalog source a tab browses before anything is known: the first one the
+/// settings turn on, which the registry reports.
+const FIRST_SOURCE: &str = "cinemeta";
 /// How many rows from the end the next page is asked for.
 const PREFETCH_ROWS: usize = 2;
 /// How long to wait after a failed page (a broken request must not spin the
@@ -30,8 +32,22 @@ const RETRY: Duration = Duration::from_secs(20);
 /// Pages that brought nothing new before the feed gives up (a provider that
 /// ignores `skip` would otherwise be asked for ever).
 const EMPTY_PAGES: u8 = 2;
-/// The catalog a tab shows before the provider's list has arrived.
+/// The catalog a tab shows before the list of them has arrived.
 const DEFAULT_CATALOG: &str = "top";
+
+/// Bumped when the person turns catalog sources on or off (Settings → Watch →
+/// Catalogs): the tabs then fetch the list again instead of keeping the one
+/// they cached.
+static CATALOG_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Says the enabled sources changed.
+pub(crate) fn catalogs_changed() {
+    CATALOG_EPOCH.fetch_add(1, Ordering::SeqCst);
+}
+
+fn catalogs_epoch() -> u64 {
+    CATALOG_EPOCH.load(Ordering::SeqCst)
+}
 
 /// The feed a tab source browses, when the tab is one of the catalog ones.
 pub(super) fn feed_kind(source: &str) -> Option<&'static str> {
@@ -58,6 +74,8 @@ struct Feed {
     loading: bool,
     /// The provider has no more pages.
     done: bool,
+    /// The catalog source the tab browses (a catalog belongs to one source).
+    source: String,
     /// The catalog the tab shows.
     catalog: String,
     sort: CatalogSort,
@@ -96,8 +114,11 @@ impl Feed {
 #[derive(Default)]
 pub(super) struct WatchCatalog {
     feeds: HashMap<&'static str, Feed>,
-    /// The provider's catalogs, fetched once when a tab needs them.
-    declared: Option<Vec<CatalogDescriptor>>,
+    /// What the enabled sources declare, fetched once when a tab needs it:
+    /// `(source id, catalog)`.
+    declared: Option<Vec<(String, CatalogDescriptor)>>,
+    /// The epoch `declared` was fetched in.
+    declared_epoch: u64,
     loading_declared: bool,
 }
 
@@ -118,24 +139,49 @@ impl WatchCatalog {
 }
 
 impl CollectionView {
-    /// The catalogs the provider declares for a tab's kind; empty until the list
-    /// has been fetched.
-    pub(super) fn watch_catalogs_of(&self, kind: &str) -> Vec<CatalogDescriptor> {
-        self.watch_catalog.declared.clone().unwrap_or_default().into_iter().filter(|catalog| catalog.kind == kind).collect()
+    /// What the enabled sources declare for a tab's kind, in their order; empty
+    /// until the list has been fetched.
+    pub(super) fn watch_catalogs_of(&self, kind: &str) -> Vec<(String, CatalogDescriptor)> {
+        self.watch_catalog.declared.clone().unwrap_or_default().into_iter().filter(|(_, catalog)| catalog.kind == kind).collect()
     }
 
-    /// The catalog the tab shows now (the provider's first one by default).
-    pub(super) fn watch_feed_catalog(&self, kind: &str) -> String {
-        match self.watch_catalog.feeds.get(kind).map(|feed| feed.catalog.clone()).filter(|catalog| !catalog.is_empty()) {
-            Some(catalog) => catalog,
-            None => self.watch_catalogs_of(kind).first().map(|catalog| catalog.id.clone()).unwrap_or_else(|| DEFAULT_CATALOG.to_owned()),
+    /// The source the tab browses: the one it chose, else the first enabled.
+    pub(super) fn watch_feed_source(&self, kind: &str) -> String {
+        match self.watch_catalog.feeds.get(kind).map(|feed| feed.source.clone()).filter(|source| !source.is_empty()) {
+            Some(source) => source,
+            None => self.watch_catalogs_of(kind).first().map(|(source, _)| source.clone()).unwrap_or_else(|| FIRST_SOURCE.to_owned()),
         }
     }
 
-    /// The descriptor the tab is browsing now, with its sorts and filters.
-    pub(super) fn watch_descriptor(&self, kind: &str) -> Option<CatalogDescriptor> {
-        let chosen = self.watch_feed_catalog(kind);
-        self.watch_catalogs_of(kind).into_iter().find(|catalog| catalog.id == chosen)
+    /// The catalog the tab shows now (that source's first one by default).
+    pub(super) fn watch_feed_catalog(&self, kind: &str) -> String {
+        match self.watch_catalog.feeds.get(kind).map(|feed| feed.catalog.clone()).filter(|catalog| !catalog.is_empty()) {
+            Some(catalog) => catalog,
+            None => {
+                let source = self.watch_feed_source(kind);
+                self.watch_catalogs_of(kind)
+                    .into_iter()
+                    .find(|(id, _)| *id == source)
+                    .map(|(_, catalog)| catalog.id)
+                    .unwrap_or_else(|| DEFAULT_CATALOG.to_owned())
+            }
+        }
+    }
+
+    /// The source and descriptor the tab is browsing now, with the sorts and
+    /// filters that source declares.
+    pub(super) fn watch_descriptor(&self, kind: &str) -> Option<(String, CatalogDescriptor)> {
+        let (source, catalog) = (self.watch_feed_source(kind), self.watch_feed_catalog(kind));
+        self.watch_catalogs_of(kind).into_iter().find(|(id, descriptor)| *id == source && descriptor.id == catalog)
+    }
+
+    /// What Settings calls a source (`cinemeta` → Cinemeta).
+    pub(super) fn watch_source_name(&self, source: &str) -> String {
+        heronite_watch::catalog::sources()
+            .iter()
+            .find(|candidate| candidate.descriptor().id == source)
+            .map(|candidate| candidate.descriptor().name.to_owned())
+            .unwrap_or_else(|| source.to_owned())
     }
 
     /// The order the tab shows now.
@@ -150,23 +196,42 @@ impl CollectionView {
 
     /// Fetches what the provider declares, once.
     pub(super) fn watch_catalogs_ensure(&mut self, cx: &mut Context<Self>) {
+        // Turning a source on or off leaves the cached list stale: its chips and
+        // its feeds go with it.
+        let epoch = catalogs_epoch();
+        if self.watch_catalog.declared_epoch != epoch {
+            self.watch_catalog.declared_epoch = epoch;
+            self.watch_catalog.declared = None;
+            self.watch_catalog.loading_declared = false;
+            self.watch_catalog.feeds.clear();
+        }
         if self.watch_catalog.declared.is_some() || self.watch_catalog.loading_declared {
             return;
         }
         self.watch_catalog.loading_declared = true;
         let app = self.app_paths.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { heronite_watch::catalog::catalogs(&app, PROVIDER) }).await;
+            let declared = cx
+                .background_spawn(async move {
+                    let settings = heronite_watch::settings::read(&app);
+                    let mut declared: Vec<(String, CatalogDescriptor)> = Vec::new();
+                    for source in heronite_watch::catalog::enabled(&settings.catalog_sources) {
+                        let id = source.descriptor().id.to_owned();
+                        match heronite_watch::catalog::catalogs(&app, &id) {
+                            Ok(catalogs) => declared.extend(catalogs.into_iter().map(|catalog| (id.clone(), catalog))),
+                            // One source failing (a missing key, an outage) must
+                            // not take the others' catalogs away.
+                            Err(error) => log::warn!("watch catalogs {id}: {error:#}"),
+                        }
+                    }
+                    declared
+                })
+                .await;
             this.update(cx, |this, cx| {
                 this.watch_catalog.loading_declared = false;
-                match result {
-                    Ok(declared) => {
-                        log::info!("watch catalogs: {} declared", declared.len());
-                        this.watch_catalog.declared = Some(declared);
-                        cx.notify();
-                    }
-                    Err(error) => log::warn!("watch catalogs: {error:#}"),
-                }
+                log::info!("watch catalogs: {} declared", declared.len());
+                this.watch_catalog.declared = Some(declared);
+                cx.notify();
             })
             .ok();
         })
@@ -178,15 +243,17 @@ impl CollectionView {
     pub(super) fn watch_feed_select(
         &mut self,
         kind: &'static str,
+        source: String,
         catalog: String,
         sort: CatalogSort,
         filters: Vec<(String, String)>,
         cx: &mut Context<Self>,
     ) {
         let feed = self.watch_catalog.feeds.entry(kind).or_default();
-        if feed.requested && feed.catalog == catalog && feed.sort == sort && feed.filters == filters {
+        if feed.requested && feed.source == source && feed.catalog == catalog && feed.sort == sort && feed.filters == filters {
             return;
         }
+        feed.source = source;
         feed.catalog = catalog;
         feed.sort = sort;
         feed.filters = filters;
@@ -252,14 +319,29 @@ impl CollectionView {
     /// replaces that kind's pages; later ones are merged, so scrolling deeper
     /// keeps what is already there.
     fn watch_feed_fetch(&mut self, kind: &'static str, cx: &mut Context<Self>) {
-        let feed = self.watch_catalog.feeds.entry(kind).or_default();
-        if feed.loading {
+        if self.watch_catalog.feeds.get(kind).is_some_and(|feed| feed.loading) {
             return;
         }
+        // A feed asked for before the declared list arrived still knows whose it
+        // is: the first source, its first catalog.
+        let declared_first = self.watch_catalogs_of(kind).first().cloned();
+        let feed = self.watch_catalog.feeds.entry(kind).or_default();
         feed.requested = true;
         feed.loading = true;
         let generation = feed.generation;
         let first = feed.skip == 0;
+        let source = if feed.source.is_empty() {
+            let source = declared_first.as_ref().map_or_else(|| FIRST_SOURCE.to_owned(), |(source, _)| source.clone());
+            feed.source.clone_from(&source);
+            if feed.catalog.is_empty() {
+                if let Some((_, catalog)) = declared_first {
+                    feed.catalog = catalog.id;
+                }
+            }
+            source
+        } else {
+            feed.source.clone()
+        };
         let request = CatalogRequest {
             kind: kind.to_owned(),
             catalog: feed.catalog.clone(),
@@ -274,9 +356,9 @@ impl CollectionView {
                 .background_spawn(async move {
                     let http = heronite_watch::UreqTransport::new();
                     if first {
-                        heronite_watch::catalog::replace_with(&http, &app, PROVIDER, &request)
+                        heronite_watch::catalog::replace_with(&http, &app, &source, &request)
                     } else {
-                        heronite_watch::catalog::more_with(&http, &app, PROVIDER, &request)
+                        heronite_watch::catalog::more_with(&http, &app, &source, &request)
                     }
                 })
                 .await;

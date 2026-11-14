@@ -86,14 +86,30 @@ impl CollectionView {
         let catalog_kind = crate::collection::watch_catalog::feed_kind(&spec.source);
         if let Some(kind) = catalog_kind {
             let catalogs = self.watch_catalogs_of(kind);
+            let source = self.watch_feed_source(kind);
             let chosen = self.watch_feed_catalog(kind);
-            let at = catalogs.iter().position(|catalog| catalog.id == chosen).unwrap_or(0);
-            let labels: Vec<(SharedString, Option<usize>)> =
-                catalogs.iter().map(|catalog| (catalog_name(&catalog.id, &catalog.name), None)).collect();
+            let at = catalogs.iter().position(|(id, catalog)| *id == source && catalog.id == chosen).unwrap_or(0);
+            // A chip names its source only when more than one source is on, so a
+            // single-source setup reads as it always did.
+            let several = {
+                let mut sources: Vec<&str> = catalogs.iter().map(|(id, _)| id.as_str()).collect();
+                sources.sort_unstable();
+                sources.dedup();
+                sources.len() > 1
+            };
+            let names: Vec<SharedString> = catalogs
+                .iter()
+                .map(|(id, catalog)| {
+                    let name = catalog_name(&catalog.id, &catalog.name);
+                    let label = if several { format!("{} · {name}", self.watch_source_name(id)) } else { name.to_string() };
+                    SharedString::from(label)
+                })
+                .collect();
+            let labels: Vec<(SharedString, Option<usize>)> = names.into_iter().map(|name| (name, None)).collect();
             body = body
                 .child(kit::caption(tr!("Catalog")))
                 .child(segments(&labels, at, focus == Item::Catalog, |k| to(Item::Catalog, &pointer::along(at, k, Pad::Left, Pad::Right))));
-            if let Some(descriptor) = self.watch_descriptor(kind) {
+            if let Some((_, descriptor)) = self.watch_descriptor(kind) {
                 if descriptor.sorts.len() > 1 {
                     let order = self.watch_feed_sort(kind);
                     let at = descriptor.sorts.iter().position(|sort| *sort == order).unwrap_or(0);

@@ -200,7 +200,7 @@ impl SettingsPage {
             CSec::Rows(Section::Replay) => replay::console_apply(self, outcome, cx),
             CSec::Rows(Section::About) => about::console_apply(self, outcome, cx),
             CSec::Rows(Section::Logs) => logs::console_apply(self, outcome, cx),
-            CSec::Rows(Section::Watch) => watch::console_apply(self, outcome, cx),
+            CSec::Rows(Section::Watch) => watch::console_apply(self, outcome, window, cx),
             CSec::Rows(Section::Appearance) => appearance::console_apply(self, outcome, window, cx),
             CSec::Rows(Section::ConsoleMode) => console_mode::send(self, outcome, window, cx),
             CSec::Rows(Section::Metadata) => metadata::console_apply(self, outcome, window, cx),

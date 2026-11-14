@@ -9,6 +9,7 @@ use heronite_watch::account::{create_link, read_link, LinkOffer, LinkPoll};
 use heronite_watch::{Endpoints, UreqTransport};
 
 use crate::collection::Space;
+use crate::console::layers::{self, HasLayer};
 use crate::console::list::{Outcome, Row, Value};
 use crate::console::themes;
 use crate::fork::watch::watch_theme::watch_theme;
@@ -133,6 +134,41 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
     .on_click(cx.listener(|d, _, _, cx| toggle_service(d, cx)))
     .into_any_element()]);
 
+    let catalog_rows: Vec<AnyElement> = heronite_watch::catalog::sources()
+        .iter()
+        .map(|source| {
+            let descriptor = source.descriptor();
+            let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
+            toggle_row(format!("watch-catalog-{}", descriptor.id), SharedString::from(descriptor.name.to_owned()), None, on)
+                .on_click(cx.listener(move |d, _, _, cx| set_catalog_source(d, descriptor.id, !on, cx)))
+                .into_any_element()
+        })
+        .collect();
+    let catalogs = card(catalog_rows);
+    let keyed = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().is_some();
+    let tmdb_key = card_box().py(px(12.)).child(
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(div().text_size(px(14.)).child(tr!("TMDB API key")))
+                    .child(meta_text(tr!("Needed to browse TMDB's catalogs."))),
+            )
+            .child(action_button(
+                "watch-tmdb-key",
+                ButtonKind::Glass,
+                if keyed { tr!("Replace") } else { tr!("Set") },
+                true,
+                cx.listener(|d, _, window, cx| set_tmdb_key(d, window, cx)),
+            )),
+    );
+
     let reset = action_button(
         "watch-reset",
         ButtonKind::Glass,
@@ -164,6 +200,12 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
         .child(rails)
         .child(caption(tr!("Stremio service")))
         .child(service)
+        .child(caption(tr!("Catalogs")))
+        .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!(
+            "What the Movies and Series tabs may browse. Streams do not change: a catalog only decides what is listed."
+        ))))
+        .child(catalogs)
+        .child(tmdb_key)
         .child(div().flex().items_center().gap(px(8.)).child(reset));
     if let Some(notice) = &d.watch.notice {
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
@@ -173,6 +215,48 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
 
 fn rail_on(prefs: &ConsolePrefs, kind: &str) -> bool {
     prefs.theme.shelves.iter().any(|shelf| shelf.kind == kind && shelf.on)
+}
+
+/// Turns a catalog source on or off. A catalog decides what the tabs list; it
+/// never touches the stream side, so nothing about playback changes.
+fn set_catalog_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    if on {
+        if !settings.catalog_sources.iter().any(|id| id == source) {
+            settings.catalog_sources.push(source.to_owned());
+        }
+    } else {
+        settings.catalog_sources.retain(|id| id != source);
+    }
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    crate::collection::watch_catalog::catalogs_changed();
+    cx.notify();
+}
+
+fn set_tmdb_key(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<SettingsPage>) {
+    let current = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().unwrap_or_default();
+    layers::open_osk(d.layer_mut(), tr!("TMDB API key"), &current, window, cx, |d, text, _, cx| {
+        let key = text.trim().to_owned();
+        if key.is_empty() {
+            return;
+        }
+        if let Err(error) = heronite_watch::store::write_tmdb_key(&d.ctx.app, &key) {
+            log::warn!("saving the TMDB key: {error:#}");
+            return;
+        }
+        crate::collection::watch_catalog::catalogs_changed();
+        cx.notify();
+    });
+}
+
+fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    if let Err(error) = heronite_watch::store::clear_tmdb_key(&d.ctx.app) {
+        log::warn!("clearing the TMDB key: {error:#}");
+    }
+    crate::collection::watch_catalog::catalogs_changed();
+    cx.notify();
 }
 
 fn toggle_service(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
@@ -294,15 +378,33 @@ pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
     rows.push(Row::header(tr!("Stremio service")));
     let settings = heronite_watch::settings::read(&d.ctx.app);
     rows.push(Row::toggle("watch-service-stop", tr!("Stop the Stremio service after watching"), settings.stop_service_when_done));
+    rows.push(Row::header(tr!("Catalogs")));
+    for source in heronite_watch::catalog::sources() {
+        let descriptor = source.descriptor();
+        let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
+        rows.push(Row::toggle(
+            SharedString::from(format!("watch-catalog:{}", descriptor.id)),
+            SharedString::from(descriptor.name.to_owned()),
+            on,
+        ));
+    }
+    let keyed = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().is_some();
+    rows.push(Row::info("watch-tmdb-key", tr!("TMDB API key"), if keyed { tr!("Set") } else { tr!("Not set") }));
+    rows.push(Row::action("watch-tmdb-key-set", tr!("Set the TMDB API key")));
+    if keyed {
+        rows.push(Row::action("watch-tmdb-key-remove", tr!("Remove the TMDB API key")));
+    }
     rows
 }
 
-pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, cx: &mut Context<SettingsPage>) {
+pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut Window, cx: &mut Context<SettingsPage>) {
     match outcome {
         Outcome::Activate(id) => match id.as_ref() {
             "watch-link" => start_link(d, cx),
             "watch-check" => check_link(d, cx),
             "watch-unlink" => unlink(d, cx),
+            "watch-tmdb-key-set" => set_tmdb_key(d, window, cx),
+            "watch-tmdb-key-remove" => clear_tmdb_key(d, cx),
             "watch-reset" => {
                 themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
                     prefs.theme = watch_theme();
@@ -316,6 +418,10 @@ pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, cx: &mut Con
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-rail:") => {
             let kind = id.trim_start_matches("watch-rail:");
             set_rail(d, kind, on, cx);
+        }
+        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-catalog:") => {
+            let source = id.trim_start_matches("watch-catalog:").to_owned();
+            set_catalog_source(d, &source, on, cx);
         }
         Outcome::Changed(id, Value::Toggle(on)) if id.as_ref() == "watch-service-stop" => {
             let mut settings = heronite_watch::settings::read(&d.ctx.app);
