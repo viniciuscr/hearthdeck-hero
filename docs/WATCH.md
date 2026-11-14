@@ -16,8 +16,10 @@ the rules that apply while building it.
 > episode, with the card following the focused episode. The card has two tabs,
 > LB / RB: **Details** (what the film or the picked episode is) and **Streams**
 > (where it can be played from), for films and series alike — the streams are no
-> longer rows of the list. A on an episode, and the Play button, start the best
-> stream at once. Watched marks follow the stored episode pointer (`video_id`);
+> longer rows of the list. ◀ ▶ move the focus between the list and the card; the
+> side holding it takes ↑ ↓ and A, and the details card scrolls with ↑ ↓ when it
+> has the focus (the right stick scrolls it either way). A on an episode, and the
+> Play button, start the best stream at once. Watched marks follow the stored episode pointer (`video_id`);
 > Stremio's per-episode `watched` bitfield is still out. HowLongToBeat is no
 > longer asked about titles in the Watch space.
 

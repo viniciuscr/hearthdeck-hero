@@ -24,7 +24,7 @@ use heronite_i18n::tr;
 use heronite_images::{ImageRef, Variant};
 use heronite_watch::metadata::{Episode, TitleDetails};
 
-use super::super::watch_playback::{picked_episode, DetailTab, Selection};
+use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection};
 use super::super::CollectionView;
 use super::game::facts_table;
 use super::hero::{card_surface, fitted_title};
@@ -198,7 +198,7 @@ impl CollectionView {
             .filter(|text| !text.trim().is_empty());
 
         let rows = self.watch_rows(&g, details.as_deref(), locale);
-        let list = self.console.game.list.render("console-game-actions", &rows, true);
+        let list = self.console.game.list.render("console-game-actions", &rows, self.watch_pane() == Pane::List);
         // The card follows the list: the row the pad is on decides the episode.
         if let Some(selection) = selection {
             if let Some(episode) = focused_episode(&rows, self.console.game.list.focus) {
@@ -289,7 +289,8 @@ impl CollectionView {
                 let video = picked.as_ref().map(|episode| episode.id.clone());
                 self.watch_ensure_streams(&g, video.as_deref(), cx);
                 let rows = self.watch_stream_rows(&g, video.as_deref());
-                let list = self.watch_streams_nav().render("console-watch-streams", &rows, true);
+                let focused = self.watch_pane() == Pane::Card;
+                let list = self.watch_streams_nav().render("console-watch-streams", &rows, focused);
                 (1, list.flex_1().min_h_0().into_any_element())
             }
         };
@@ -318,6 +319,7 @@ impl CollectionView {
                             .flex()
                             .flex_col()
                             .gap(u(18.))
+                            .when(self.watch_pane() == Pane::Card, |card| card.border_color(theme::console_focus()))
                             .child(kit::tabs(&tabs, active))
                             .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
                     ),
@@ -378,11 +380,9 @@ impl CollectionView {
         self.images.get_or_request(&id, || vec![chain], pw, ph, Variant::Cover, 200).map(ImageSource::Render)
     }
 
-    /// The page's presses. LB / RB switch the card; on the details card the list
-    /// navigates (◀ ▶ move the season, A plays the episode), on the streams card
-    /// the pad picks a stream. X plays or stops the picked title or episode.
     pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(game) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else { return false };
+        // LB / RB: the other card, with the pad where that card expects it.
         if matches!(pad, Pad::LB | Pad::RB) {
             self.watch_switch_tab();
             if self.watch_tab() == DetailTab::Streams {
@@ -395,77 +395,103 @@ impl CollectionView {
         let details = self.watch_details(key);
         let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
         let picked_video = self.watch_picked_video(&game);
-        match self.watch_tab() {
-            DetailTab::Details => {
-                // The wheel follows the card's text, as the games' page does.
-                if matches!(pad, Pad::ScrollUp | Pad::ScrollDown) {
-                    let step = f32::from(u(120.));
-                    self.console.game.about.by(if pad == Pad::ScrollDown { step } else { -step });
-                    return true;
-                }
-                let rows = self.watch_rows(&game, details.as_deref(), locale);
-                match self.console.game.list.on_pad(pad, &rows) {
-                    Outcome::Activate(id) => {
-                        self.watch_press_row(&game, &id, cx);
+        // The details card scrolls with the right stick whichever side has the
+        // focus, and with ↑ ↓ while it holds the focus.
+        if self.watch_tab() == DetailTab::Details {
+            let step = f32::from(u(120.));
+            let on_card = self.watch_pane() == Pane::Card;
+            if matches!(pad, Pad::ScrollUp | Pad::ScrollDown) || (on_card && matches!(pad, Pad::Up | Pad::Down)) {
+                let down = matches!(pad, Pad::Down | Pad::ScrollDown);
+                self.console.game.about.by(if down { step } else { -step });
+                return true;
+            }
+        }
+        if self.watch_pane() == Pane::Card {
+            return match self.watch_tab() {
+                DetailTab::Details => match pad {
+                    Pad::Left => {
+                        self.watch_focus_pane(Pane::List);
                         cx.notify();
                         true
                     }
-                    Outcome::Changed(id, Value::Choice { index, .. }) if id.as_ref() == "season" => {
-                        if let Some(details) = self.watch_details(key) {
-                            self.watch_pick_season(&game.key, &details, index);
-                            self.watch_forget_streams();
+                    Pad::X => {
+                        self.watch_play_picked(&game, picked_video.as_deref(), cx);
+                        true
+                    }
+                    _ => false,
+                },
+                DetailTab::Streams => {
+                    self.watch_ensure_streams(&game, picked_video.as_deref(), cx);
+                    let rows = self.watch_stream_rows(&game, picked_video.as_deref());
+                    match self.watch_streams_nav().on_pad(pad, &rows) {
+                        Outcome::Activate(id) => {
+                            if let Some(index) = id.strip_prefix("stream:").and_then(|index| index.parse::<usize>().ok()) {
+                                self.watch_play_stream(&game, index, cx);
+                            }
                             cx.notify();
-                        }
-                        true
-                    }
-                    Outcome::Moved | Outcome::Edge(_) | Outcome::Changed(..) => {
-                        cx.notify();
-                        true
-                    }
-                    Outcome::Ignored => match pad {
-                        Pad::X => {
-                            self.watch_play_picked(&game, picked_video.as_deref(), cx);
                             true
                         }
-                        _ => false,
-                    },
-                }
-            }
-            DetailTab::Streams => {
-                self.watch_ensure_streams(&game, picked_video.as_deref(), cx);
-                let rows = self.watch_stream_rows(&game, picked_video.as_deref());
-                let outcome = self.watch_streams_nav().on_pad(pad, &rows);
-                match outcome {
-                    Outcome::Activate(id) => {
-                        if let Some(index) = id.strip_prefix("stream:").and_then(|index| index.parse::<usize>().ok()) {
-                            self.watch_play_stream(&game, index, cx);
-                        }
-                        cx.notify();
-                        true
-                    }
-                    Outcome::Moved | Outcome::Edge(_) | Outcome::Changed(..) => {
-                        cx.notify();
-                        true
-                    }
-                    Outcome::Ignored => match pad {
-                        Pad::X => {
-                            self.watch_play_picked(&game, picked_video.as_deref(), cx);
+                        // ◀ leaves the streams for the episode list.
+                        Outcome::Edge(Pad::Left) => {
+                            self.watch_focus_pane(Pane::List);
+                            cx.notify();
                             true
                         }
-                        _ => false,
-                    },
+                        Outcome::Moved | Outcome::Edge(_) | Outcome::Changed(..) => {
+                            cx.notify();
+                            true
+                        }
+                        Outcome::Ignored => match pad {
+                            Pad::X => {
+                                self.watch_play_picked(&game, picked_video.as_deref(), cx);
+                                true
+                            }
+                            _ => false,
+                        },
+                    }
                 }
+            };
+        }
+        // The list has the focus: it navigates, and ▶ reaches the card when the
+        // row has no value of its own (the season row keeps it for ◀ ▶).
+        let rows = self.watch_rows(&game, details.as_deref(), locale);
+        match self.console.game.list.on_pad(pad, &rows) {
+            Outcome::Activate(id) => {
+                self.watch_press_row(&game, &id, cx);
+                cx.notify();
+                true
             }
+            Outcome::Changed(id, Value::Choice { index, .. }) if id.as_ref() == "season" => {
+                if let Some(details) = self.watch_details(key) {
+                    self.watch_pick_season(&game.key, &details, index);
+                    self.watch_forget_streams();
+                    cx.notify();
+                }
+                true
+            }
+            Outcome::Edge(Pad::Right) => {
+                self.watch_focus_pane(Pane::Card);
+                cx.notify();
+                true
+            }
+            Outcome::Moved | Outcome::Edge(_) | Outcome::Changed(..) => {
+                cx.notify();
+                true
+            }
+            Outcome::Ignored => match pad {
+                Pad::X => {
+                    self.watch_play_picked(&game, picked_video.as_deref(), cx);
+                    true
+                }
+                _ => false,
+            },
         }
     }
 
     /// The page's hint bar: what A, the bumpers and X do on the card shown.
     pub(super) fn watch_page_hints(&self, key: &SharedString) -> Vec<Hint> {
         let primary = self.lib.as_ref().and_then(|lib| lib.get(key)).map(|game| self.primary_label(game)).unwrap_or(tr!("Play"));
-        let mut hints = vec![hint(Btn::A, tr!("Select")), hint(Btn::Bumpers, tr!("Tabs"))];
-        if self.watch_tab() == DetailTab::Details {
-            hints.push(hint(Btn::LeftRight, tr!("Change")));
-        }
+        let mut hints = vec![hint(Btn::A, tr!("Select")), hint(Btn::LeftRight, tr!("Panels")), hint(Btn::Bumpers, tr!("Tabs"))];
         hints.push(hint(Btn::X, primary));
         hints.push(hint(Btn::B, tr!("Back")));
         hints.push(hint(Btn::Start, tr!("Menu")));

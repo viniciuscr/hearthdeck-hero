@@ -40,6 +40,8 @@ pub(super) struct WatchPlayback {
     /// Which card the page shows beside the list: the title's details or its
     /// streams.
     tab: DetailTab,
+    /// Which side the pad drives: the title's list or the card.
+    pane: Pane,
     /// The focus of the card's stream list.
     streams_nav: ListNav,
     /// Play the first stream as soon as this title/episode's list arrives (A on
@@ -62,6 +64,15 @@ pub(super) enum DetailTab {
     #[default]
     Details,
     Streams,
+}
+
+/// Which side of the film page the pad drives: the title's list (Play, season,
+/// episodes) or the card beside it (the details to scroll, or the streams).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Pane {
+    #[default]
+    List,
+    Card,
 }
 
 /// The selection and the title it belongs to.
@@ -294,13 +305,23 @@ impl CollectionView {
         self.watch.tab
     }
 
-    /// LB / RB: the other card.
+    /// LB / RB: the other card, with the pad where that card expects it.
     pub(super) fn watch_switch_tab(&mut self) -> DetailTab {
         self.watch.tab = match self.watch.tab {
             DetailTab::Details => DetailTab::Streams,
             DetailTab::Streams => DetailTab::Details,
         };
+        self.watch.pane = tab_pane(self.watch.tab);
         self.watch.tab
+    }
+
+    /// Which side the pad drives (◀ ▶ move between them).
+    pub(super) fn watch_pane(&self) -> Pane {
+        self.watch.pane
+    }
+
+    pub(super) fn watch_focus_pane(&mut self, pane: Pane) {
+        self.watch.pane = pane;
     }
 
     /// The card's stream list, to render it and to route its presses.
@@ -575,6 +596,16 @@ fn default_selection(details: &TitleDetails, resume: Option<&str>) -> Selection 
     Selection { season, episode }
 }
 
+/// Where the pad goes when the card switches to `tab`: the stream list takes it
+/// for the streams, while the details open on the episode list (◀ ▶ reaches the
+/// card to scroll it).
+fn tab_pane(tab: DetailTab) -> Pane {
+    match tab {
+        DetailTab::Details => Pane::List,
+        DetailTab::Streams => Pane::Card,
+    }
+}
+
 /// The episode the picker shows: the chosen one of the chosen season.
 pub(super) fn picked_episode(details: &TitleDetails, selection: Selection) -> Option<&Episode> {
     let season = details.seasons().get(selection.season).copied()?;
@@ -707,6 +738,13 @@ mod tests {
         assert_eq!(default_selection(&details, Some("tt1:2:2")), Selection { season: 1, episode: 1 });
         assert_eq!(default_selection(&details, None), Selection::default(), "no progress: the first episode");
         assert_eq!(default_selection(&details, Some("tt9:1:1")), Selection::default(), "an episode this title does not list");
+    }
+
+    #[test]
+    fn the_card_takes_the_pad_for_the_streams_and_the_list_for_the_details() {
+        assert_eq!(tab_pane(DetailTab::Details), Pane::List);
+        assert_eq!(tab_pane(DetailTab::Streams), Pane::Card);
+        assert_eq!(Pane::default(), Pane::List);
     }
 
     #[test]
