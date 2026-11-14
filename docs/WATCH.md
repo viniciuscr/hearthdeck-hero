@@ -4,6 +4,21 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-14 — catalog sources, and TMDB as the second one.**
+> Browsing is its own contract. A **catalog source** (`WatchCatalogSource`)
+> declares the catalogs the Movies and Series tabs may page through — a name, a
+> kind, the orders it can serve, its filters, whether it takes a search and
+> `skip` — and answers a page; it plays nothing, owns no library and is never
+> asked for a stream, so `WatchProvider` no longer carries catalog methods.
+> Cinemeta became a catalog source of its own (`heronite-watch-catalogs`) and
+> TMDB (`heronite-watch-tmdb`) is the second: `discover` for films and series
+> with TMDB's real sorts and genres, every result resolved to its IMDb id
+> through `/external_ids`, and a title TMDB holds no IMDb id for is left out
+> because it could not be played. Settings → Watch → Catalogs turns sources on
+> and off and keeps the TMDB API key (credential store, 0600); a catalog decides
+> what is listed and never what plays. TMDB's own "watch providers" (Netflix, …)
+> are availability, not our streams: they belong to the metadata layer.
+>
 > **Revision 2026-11-14 — a film page of its own, and metadata sources.**
 > Films and series get a page built for them (`app/src/collection/console/
 > watch_page.rs`) instead of the games' page: provider, year, runtime, rating,
@@ -276,16 +291,26 @@ Envelope, source `stremio-core`:
 
 ### 3a. Browse-all catalogs (probed 2026-11-14)
 
-- A provider **declares** the catalogs the Movies and Series tabs browse
-  (`WatchProvider::catalogs`): each with a name, its kind, the orders it can page
-  by (a closed set: Popular, Rating, Newest, Title), its filters (id, label,
+- A **catalog source** declares the catalogs the Movies and Series tabs browse
+  (`WatchCatalogSource`): each with a name, its kind, the orders it can page by
+  (a closed set: Popular, Rating, Newest, Title), its filters (id, label,
   values, required) and whether it takes a search and `skip`. The panel draws
-  what the provider declares; a provider that declares none leaves the tabs with
-  what the rails carry.
+  what the enabled sources declare; with none enabled the tabs keep what the
+  rails carry. `WatchProvider` (titles, streams, playback) carries no catalog
+  method at all, so a catalogue that plays nothing cannot pretend to be one.
 - Cinemeta declares three per kind: `top` ("Popular"; filter `genre`; search;
   paging), `imdbRating` ("Featured"; order Rating; filter `genre`; paging) and
   `year` ("New"; order Newest; a **required** filter whose values are years and
   which travels in the protocol's `genre` slot).
+- TMDB declares one `discover` catalog per kind: sorts Popular
+  (`popularity.desc`), Rating (`vote_average.desc`, with a vote floor), Newest
+  (`primary_release_date.desc` / `first_air_date.desc`) and Title
+  (`original_title.asc` / `original_name.asc`), its genres from
+  `/genre/{movie,tv}/list` (remembered for the process) and a year; `search` uses
+  `/search/{movie,tv}`, and paging is TMDB's own `page` (twenty a page, so `skip`
+  becomes a page number). The API key is read from the credential store under
+  `tmdb` and sent as `api_key` (the transport carries no headers); without one
+  the source says where to put it.
 - Probed with redirects followed — every catalog answers **307** to
   `cinemeta-catalogs.strem.io/<id>/catalog/…`, which the transport follows:
   `top` 50; `imdbRating` 49, then 50 at `skip=50`; `year/genre=1999` 50, and 50

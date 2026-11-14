@@ -109,7 +109,7 @@ implementation rules live in `docs/WATCH.md`.
 | F-003 | `packaging/*`, `scripts/packages.sh`, `scripts/appimage.sh`, `scripts/install.sh`, `crates/update`, binary and package names | fork Linux/Arch packages, binaries, desktop identity and release channel | active (Linux/Arch; Flatpak/Windows pending) |
 | F-004 | `.github/workflows/fork-ci.yml` | fork verification gate (new file, no upstream conflict) | active |
 | F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" (app and i18n done; README/docs pending) | active |
-| F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs` | Collection `Space::Watch`, console space item and Watch Play action | active |
+| F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs`, `app/src/pages/settings/console.rs` (one dispatch line) | Collection `Space::Watch`, console space item, the Watch Play action and Settings → Watch's own sections | active |
 | F-007 | `crates/data/src/library.rs` | `stremio` source label | active |
 | F-008 | `app/src/console/{themes,theme_rows}.rs`, `app/src/collection/console/{sources,layouts/grid,filters}.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings registration, per-space prefs, editor lock, source/grid-filter helpers, filter panel and one-time migration of game-shaped Watch files | active |
 | F-009 | `.github/workflows/{release,flatpak,windows-packages}.yml` | upstream release workflows guarded to the upstream repository | active |

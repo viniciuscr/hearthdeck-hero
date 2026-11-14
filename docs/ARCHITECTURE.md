@@ -92,13 +92,20 @@ app (bin heronite-rs) ── GPUI UI, desktop integration
  │                                        → data, watch-core, watch-state,
  │                                          watch-player, watch-stremio
  ├─ heronite-watch-core Watch's domain: item and stream types, the
- │                      provider contract, the metadata-source contract,
- │                      transport, credentials, progress policy (no heronite-*)
+ │                      provider, catalog-source and metadata-source
+ │                      contracts, transport, credentials, progress policy
+ │                      (no heronite-*)
  ├─ heronite-watch-addon Stremio addon protocol: manifest, catalog,
  │                      meta, stream                            → watch-core
  ├─ heronite-watch-metadata what describes a title: the metadata sources
  │                      (Cinemeta) and their ordered registry
  │                                              → watch-core, watch-addon
+ ├─ heronite-watch-catalogs what there is to browse: the catalog sources
+ │                      (Cinemeta, TMDB) and their registry
+ │                                              → watch-core, watch-addon,
+ │                                                watch-tmdb
+ ├─ heronite-watch-tmdb TMDB discover as a catalog source
+ │                                                          → watch-core
  ├─ heronite-watch-player mpv discovery, arguments, IPC supervision
  │                                                              → data
  ├─ heronite-watch-state local watch files and the Heroic-format
@@ -972,14 +979,17 @@ text size) and applies it.
   a Windows game cannot start for lack of one.
 
 - **heronite-watch:** the Watch space's back end (fork-owned; `docs/WATCH-CRATES.md`
-  is the reference). `heronite-watch-core` holds the domain types and two
-  contracts: `WatchProvider` (catalogs, browse, streams, resolve, progress) for
-  where titles come from, and `WatchMetadataSource` (what a title *is*) for
-  their descriptions, with `Transport` and `Credentials` as injected ports and
-  no file or process access. `heronite-watch-addon` speaks the Stremio addon
+  is the reference). `heronite-watch-core` holds the domain types and three
+  contracts: `WatchProvider` (browse, streams, resolve, progress) for where
+  titles come from and how they play, `WatchCatalogSource` (what there is to
+  browse — sorts, filters, search, paging — and nothing about playback), and
+  `WatchMetadataSource` (what a title *is*) for their descriptions, with
+  `Transport` and `Credentials` as injected ports and no file or process access. `heronite-watch-addon` speaks the Stremio addon
   protocol for every provider that is an addon (Stremio, YouTube, OpenTV).
   `heronite-watch-metadata` is the metadata registry, Cinemeta first, and knows
-  no provider. `heronite-watch-stremio` is the first
+  no provider. `heronite-watch-catalogs` is the catalog registry — Cinemeta's
+  catalogue and `heronite-watch-tmdb`'s discover, switched on and off in
+  Settings → Watch → Catalogs. `heronite-watch-stremio` is the first
   provider: link-code account, `libraryItem` datastore with read-merge-write
   progress, Cinemeta catalogs, and the local Stremio Service that turns a torrent
   into an HTTP stream. `heronite-watch-state` owns `movies.json`,

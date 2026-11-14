@@ -26,6 +26,10 @@ app
     ├── heronite-watch-metadata the metadata sources: Cinemeta, in order
     │   └── heronite-watch-addon
     │       └── heronite-watch-core
+    ├── heronite-watch-catalogs what there is to browse: the sources, in order
+    │   ├── heronite-watch-tmdb   TMDB discover
+    │   └── heronite-watch-addon
+    │       └── heronite-watch-core
     ├── heronite-watch-state    local files + Collection projection
     ├── heronite-watch-player   mpv
     └── heronite-watch-core     domain types and ports
@@ -34,12 +38,14 @@ app
 | Crate | Responsibility | May depend on | Must not |
 |---|---|---|---|
 | `heronite-watch` | provider registry, `available()`, browse → synthetic `Library`, the single post-session progress write, the app's import surface | `heronite-watch-{core,state,player,stremio}`, `heronite-data` | GPUI, provider protocol code, file formats of its own |
-| `heronite-watch-core` | `WatchItem`, `StreamChoice`, `WatchProgress`, `PosterShape`, `AuthKey`, `WatchProvider`, `Ctx`, `Transport`, `Credentials`, `Throttle`, `finished` | serde, serde_json, anyhow, url, chrono, ureq | `heronite-*`, files, processes, provider names |
+| `heronite-watch-core` | `WatchItem`, `StreamChoice`, `WatchProgress`, `PosterShape`, `AuthKey`, `WatchProvider`, `WatchCatalogSource`, `Ctx`, `CatalogCtx`, `Transport`, `Credentials`, `Throttle`, `finished` | serde, serde_json, anyhow, url, chrono, ureq | `heronite-*`, files, processes, provider names |
 | `heronite-watch-addon` | Stremio addon protocol: manifest, catalog, meta, stream, `AddonClient`, size and seeders parsing | `heronite-watch-core` | account, datastore, endpoints, Cinemeta constants |
 | `heronite-watch-player` | mpv discovery, argument construction, IPC supervision, `PlaybackOutcome`, stream-origin policy | `heronite-data` (`proc`), url, serde_json, anyhow | protocol or provider types |
 | `heronite-watch-state` | `store` (movies, per-provider credentials) and `collection` (the Heroic-format projection) | `heronite-watch-core`, `heronite-data` | network, providers, GPUI |
 | `heronite-watch-metadata` | the metadata sources: `WatchMetadataSource`, the ordered registry and the Cinemeta source | `heronite-watch-{core,addon}` | media providers, accounts, playback, files, GPUI |
-| `heronite-watch-stremio` | endpoints, link code, `addonCollectionGet`, datastore and merge, Cinemeta catalogs, streaming server, `impl WatchProvider` | `heronite-watch-{core,addon}` | files, processes, `heronite-data` |
+| `heronite-watch-stremio` | endpoints, link code, `addonCollectionGet`, datastore and merge, streaming server, `impl WatchProvider` | `heronite-watch-{core,addon}` | files, processes, `heronite-data`, catalogs |
+| `heronite-watch-catalogs` | the catalog sources' registry (`sources`, `enabled`, `find`) and Cinemeta's catalogue | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, GPUI |
+| `heronite-watch-tmdb` | TMDB discover, genres and external ids as a catalog source; the key from the credential store | `heronite-watch-core` | accounts, playback, files, GPUI |
 
 A provider crate takes everything it needs from `Ctx`; it never opens a file or
 spawns a process. That is what keeps a provider testable on fixtures alone.
@@ -57,12 +63,20 @@ pub trait WatchProvider: Send + Sync {
     fn browse(&self, ctx: &Ctx<'_>) -> Result<Vec<Rail>>;  // every rail, in display order
     fn streams(&self, ctx: &Ctx<'_>, kind: &str, id: &str) -> Result<Vec<StreamChoice>>;
     fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<ResolvedStream>; // URL + origin
-    fn catalogs(&self, _: &Ctx<'_>) -> Result<Vec<CatalogDescriptor>> { Ok(Vec::new()) } // what the tabs may browse
-    fn catalog(&self, _: &Ctx<'_>, _: &CatalogRequest) -> Result<CatalogPage> { Ok(CatalogPage::default()) } // a page, and `more`
     fn write_progress(&self, _: &Ctx<'_>, _: &MovieProgress) -> Result<()> { Ok(()) }
 }
 
 pub struct Ctx<'a> { pub http: &'a dyn Transport, pub credentials: &'a dyn Credentials }
+
+/// Browsing: what there is to browse, never how to play it.
+pub trait WatchCatalogSource: Send + Sync {
+    fn descriptor(&self) -> &CatalogSourceDescriptor;                     // id, name: what Settings lists
+    fn catalogs(&self, ctx: &CatalogCtx<'_>) -> Result<Vec<CatalogDescriptor>>;
+    fn catalog(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest) -> Result<CatalogPage>; // a page, and `more`
+}
+
+/// A catalog source's own transport and credentials (TMDB's key; Cinemeta's nothing).
+pub struct CatalogCtx<'a> { pub http: &'a dyn Transport, pub credentials: &'a dyn Credentials }
 
 /// Opaque to core: each provider decodes its own credential type.
 pub trait Credentials: Send + Sync {
@@ -115,12 +129,12 @@ the app uses.
 |---|---|
 | `heronite_watch` | `available`, `Endpoints`, `UreqTransport`, `AuthKey`, `Transport`, `Result` |
 | `heronite_watch::account` | `create_link`, `read_link`, `LinkOffer`, `LinkPoll` |
-| `heronite_watch::store` | `read_auth`, `write_auth`, `clear_auth` |
+| `heronite_watch::store` | `read_auth`, `write_auth`, `clear_auth`, `read_tmdb_key`, `write_tmdb_key`, `clear_tmdb_key` |
 | `heronite_watch::collection` | `ROOT`, `library` |
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
 | `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider) |
-| `heronite_watch::catalog` | `catalogs`, `catalogs_with`, `page`, `page_with`, `more_with`, `replace_with`, `feed_key`, `CatalogRequest`, `CatalogSort` |
-| `heronite_watch::settings` | `read`, `write`, `Settings` (Settings → Watch) |
+| `heronite_watch::catalog` | `sources`, `enabled`, `catalogs`, `catalogs_with`, `page`, `page_with`, `more_with`, `replace_with`, `feed_key`, `CatalogRequest`, `CatalogSort`, `CatalogDescriptor`, `WatchCatalogSource` |
+| `heronite_watch::settings` | `read`, `write`, `Settings` (`catalogSources`, the service stop, Settings → Watch) |
 | `heronite_watch::service` | `launches`, `Launch` (headless runtime or launcher, each with its `command`), `is_up`, `PROBE`, `ATTEMPT`, `LAUNCHER_ENV` |
 | `heronite_watch::metadata` | `details`, `details_with`, `sources`, `TitleDetails`, `TitleRef` |
 | `heronite_watch::player` | `PlaybackOutcome` |
