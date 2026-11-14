@@ -274,6 +274,23 @@ Envelope, source `stremio-core`:
 - Never assume "localhost" is trusted: the service is a separate process, not
   our code.
 
+### 3a. Browse-all catalogs (probed 2026-11-14)
+
+- The Movies and Series tabs are the provider's catalog, not a filter over the
+  rails: they ask for one page, merge it into the Watch library (marked
+  `watchCatalog`, so a rails refresh keeps it) and reload, which is why cards,
+  covers, details and streams work unchanged.
+- Cinemeta's `top` catalog answers **50** items per page and pages deep
+  (`skip=100`, `skip=200`, … tested past 400). A `genre` filters it; a `search`
+  answers **one page of at most 20** (`skip=20` after a search is empty).
+- Extras are **path segments**: `catalog/{type}/{id}/skip=100&genre=Sci-Fi.json`.
+  A query string is ignored by Cinemeta and by the `cinemeta-catalogs` host it
+  redirects to; the path segment is percent-encoded, so a search with spaces or
+  an `&` cannot break it.
+- The app fetches the next page when the grid focus comes within 24 titles of
+  what is loaded; a search box with text replaces the tab's titles with the
+  search's own until it is cleared.
+
 ### 4a. Stream resolution
 
 - Read the session key, then `addonCollectionGet`; keep the addons whose
@@ -481,6 +498,12 @@ current crate map.
   `resources`, `types`, `catalogs` or `idPrefixes` as `null`; `serde(default)`
   does not cover that. Manifests now read `null` as an empty list (and a
   `null` addon list as no addons); an addon with no `transportUrl` is skipped.
+- **2026-11-14, Cinemeta catalogs.** `top` answers 50 items per page and honors
+  `skip` in the **path** (`catalog/movie/top/skip=100.json`); the query form and
+  the ordered form `?skip=300` are ignored. `genre=…` filters, `search=…` answers
+  one page of 20, `movie/year/genre=1999.json` and `movie/imdbRating.json` exist
+  as further catalogs. Requests redirect (307) to `cinemeta-catalogs.strem.io`,
+  which the transport follows.
 - **2026-11-14, the Stremio service, headless.** `stremio-service` (the packaged
   launcher) exits at once without a desktop session — `Failed to build tray
   icon: Read-only file system` — while `/usr/share/stremio-service/stremio-runtime

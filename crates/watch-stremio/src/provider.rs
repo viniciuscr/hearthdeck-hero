@@ -8,7 +8,7 @@ use url::Url;
 
 use heronite_watch_addon::addon::{AddonClient, StreamAnswer};
 use heronite_watch_core::auth::AuthKey;
-use heronite_watch_core::provider::{CatalogDescriptor, Ctx, Rail, ResolvedStream, StreamOrigin, WatchProvider};
+use heronite_watch_core::provider::{CatalogDescriptor, CatalogRequest, Ctx, Rail, ResolvedStream, StreamOrigin, WatchProvider};
 use heronite_watch_core::types::{MovieItem, MovieProgress, StreamChoice};
 
 use crate::account::addon_collection;
@@ -155,6 +155,40 @@ impl WatchProvider for Stremio {
         server.create(hash, &[]).context("The Stremio service refused the torrent")?;
         let url = StreamingServer::stream_url(&base, hash, stream.file_idx)?;
         Ok(ResolvedStream { url, origin: StreamOrigin::LocalService })
+    }
+
+    /// A page of Cinemeta's catalog: `top` with `skip` for paging, `genre` to
+    /// filter it and `search` to query it (one page: Cinemeta does not paginate
+    /// a search).
+    fn catalog(&self, ctx: &Ctx<'_>, request: &CatalogRequest) -> Result<Vec<MovieItem>> {
+        let endpoints = Endpoints::default();
+        endpoints.validate()?;
+        if !matches!(request.kind.as_str(), "movie" | "series") {
+            return Ok(Vec::new());
+        }
+        let addon = AddonClient::new(ctx.http, CINEMETA)?;
+        let skip = request.skip.to_string();
+        let mut extra: Vec<(&str, &str)> = Vec::new();
+        if request.skip > 0 {
+            extra.push(("skip", skip.as_str()));
+        }
+        if let Some(search) = request.search.as_deref().map(str::trim).filter(|search| !search.is_empty()) {
+            extra.push(("search", search));
+        }
+        if let Some(genre) = request.genre.as_deref().map(str::trim).filter(|genre| !genre.is_empty()) {
+            extra.push(("genre", genre));
+        }
+        let catalog = request.catalog.trim();
+        let catalog = if catalog.is_empty() { "top" } else { catalog };
+        Ok(addon
+            .catalog(&request.kind, catalog, &extra)?
+            .into_iter()
+            .map(|mut movie| {
+                movie.provider = ID.into();
+                movie.catalog = true;
+                movie
+            })
+            .collect())
     }
 
     /// Read-merge-write of the full record; a failed write is the caller's to

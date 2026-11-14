@@ -11,6 +11,31 @@ use crate::http::Transport;
 use crate::types::{MovieItem, MovieProgress, StreamChoice};
 use crate::Result;
 
+/// Which page of which catalog: what the Movies and Series tabs ask for.
+///
+/// The provider decides the page size (Cinemeta answers 50); `skip` is how many
+/// items of this catalog the caller already has.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CatalogRequest {
+    /// `movie` or `series`.
+    pub kind: String,
+    /// The provider's catalog id (`top`), empty for its default.
+    pub catalog: String,
+    /// Items to skip.
+    pub skip: u32,
+    /// A search of the provider's catalog; `None` for the plain catalog.
+    pub search: Option<String>,
+    /// One genre of the catalog; `None` for all of them.
+    pub genre: Option<String>,
+}
+
+impl CatalogRequest {
+    /// The first page of `kind`'s default catalog.
+    pub fn first(kind: &str) -> Self {
+        Self { kind: kind.to_owned(), ..Self::default() }
+    }
+}
+
 /// One home rail a provider contributes, in display order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CatalogDescriptor {
@@ -81,6 +106,13 @@ pub trait WatchProvider: Send + Sync {
 
     /// The URL the player opens for a picked stream, and where it points.
     fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<ResolvedStream>;
+
+    /// One page of a catalog, for browsing beyond the rails. An empty page
+    /// means the catalog has no more, and a provider that cannot browse
+    /// returns one always.
+    fn catalog(&self, _ctx: &Ctx<'_>, _request: &CatalogRequest) -> Result<Vec<MovieItem>> {
+        Ok(Vec::new())
+    }
 
     /// The provider's own record of where the title stopped. A provider
     /// without history returns `None`.

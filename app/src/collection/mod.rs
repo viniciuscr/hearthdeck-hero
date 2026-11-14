@@ -86,6 +86,7 @@ pub use load::{discard_preload, preload_library};
 pub use screenshots::screenshots_global;
 pub mod stage;
 mod vm;
+mod watch_catalog;
 mod watch_playback;
 mod watch_service;
 
@@ -319,6 +320,8 @@ pub struct CollectionView {
     watch: watch_playback::WatchPlayback,
     /// The Stremio service this app started, if any (`watch_service.rs`).
     watch_service: watch_service::WatchService,
+    /// The catalog feeds of the Movies and Series tabs (`watch_catalog.rs`).
+    watch_catalog: watch_catalog::WatchCatalog,
     /// Language the precomputed view models and the search placeholder were
     /// built in.
     lang: heronite_i18n::Lang,
@@ -583,6 +586,7 @@ impl CollectionView {
             console: Default::default(),
             watch: Default::default(),
             watch_service: Default::default(),
+            watch_catalog: Default::default(),
             lang: heronite_i18n::current(),
         };
         this.apply_start_view();

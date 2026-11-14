@@ -5,6 +5,7 @@
 //! Blocking, like every library crate here: the app calls these from a
 //! background thread. No GPUI.
 
+pub mod catalog;
 pub mod collection;
 pub mod metadata;
 pub mod playback;

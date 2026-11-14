@@ -37,6 +37,10 @@ pub struct MovieItem {
     /// Cinemeta's Top catalog membership, for the “Top movies” rail.
     #[serde(default)]
     pub top: bool,
+    /// Fetched from a catalog page (the Movies and Series tabs), not from a
+    /// rail: a rails refresh keeps these.
+    #[serde(default)]
+    pub catalog: bool,
     /// Stremio's last watch, for the “Continue watching” rail.
     #[serde(default)]
     pub last_watched: Option<String>,

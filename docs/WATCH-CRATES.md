@@ -57,6 +57,7 @@ pub trait WatchProvider: Send + Sync {
     fn browse(&self, ctx: &Ctx<'_>) -> Result<Vec<Rail>>;  // every rail, in display order
     fn streams(&self, ctx: &Ctx<'_>, kind: &str, id: &str) -> Result<Vec<StreamChoice>>;
     fn resolve(&self, ctx: &Ctx<'_>, stream: &StreamChoice) -> Result<ResolvedStream>; // URL + origin
+    fn catalog(&self, _: &Ctx<'_>, _: &CatalogRequest) -> Result<Vec<MovieItem>> { Ok(Vec::new()) } // a page for the tabs
     fn write_progress(&self, _: &Ctx<'_>, _: &MovieProgress) -> Result<()> { Ok(()) }
 }
 
@@ -117,6 +118,7 @@ the app uses.
 | `heronite_watch::collection` | `ROOT`, `library` |
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
 | `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider) |
+| `heronite_watch::catalog` | `page`, `page_with`, `more_with`, `CatalogRequest`, `PAGE` |
 | `heronite_watch::settings` | `read`, `write`, `Settings` (Settings → Watch) |
 | `heronite_watch::service` | `launches`, `Launch` (headless runtime or launcher, each with its `command`), `is_up`, `PROBE`, `ATTEMPT`, `LAUNCHER_ENV` |
 | `heronite_watch::metadata` | `details`, `details_with`, `sources`, `TitleDetails`, `TitleRef` |

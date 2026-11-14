@@ -373,6 +373,18 @@ impl CollectionView {
         let rail = self.grid_letters(tab);
         let cols = self.grid_cols(window, panel, rail);
         let keys = self.grid_keys(tab, spec);
+        // A catalog tab keeps its pages coming: the first, the next as the pad
+        // nears the end of what is loaded, or the search in the box.
+        if let Some(kind) = crate::collection::watch_catalog::feed_kind(&spec.source) {
+            let query = self.console.search.trim().to_owned();
+            let index = self.console.tab_navs.get(tab).map_or(0, |nav| nav.grid.index);
+            if query.is_empty() {
+                self.watch_feed_clear_search(kind);
+                self.watch_feed_touch(kind, keys.len(), index, cx);
+            } else {
+                self.watch_feed_search(kind, query, cx);
+            }
+        }
         let search = self.console.search.clone();
         let group = self.console.tab_navs.get(tab).map_or(0, |n| n.grid.filters.group);
         let group = group.checked_sub(1).and_then(|i| self.smart_groups.groups.get(i)).map(|g| g.name.clone());

@@ -164,7 +164,9 @@ impl CollectionView {
             "emulated" => self.game_extras.systems.contains_key(&g.key),
             "status" => status_is(lib, g, value),
             "category" => self.categories.contains(value, &g.runner, &g.app_name),
-            "type" => crate::fork::watch::sources::kind(g) == value,
+            "type" => {
+                crate::fork::watch::sources::kind(g) == value && self.watch_catalog.visible(value, crate::fork::watch::sources::id(g))
+            }
             "genre" => crate::fork::watch::sources::has_genre(g, value),
             "smart" => self.in_smart(value, g),
             "store" => g.source_label == value,

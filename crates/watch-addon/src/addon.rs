@@ -251,6 +251,19 @@ fn day_of(text: &str) -> Option<String> {
     (!day.is_empty()).then(|| day.to_owned())
 }
 
+/// A path segment's value: percent-encoded (not form-encoded: a space is
+/// `%20`), so a search with spaces or an `&` cannot break the extras.
+fn encode(text: &str) -> String {
+    let mut encoded = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => encoded.push(char::from(byte)),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 /// The names as the source lists them, without blanks.
 fn clean(names: Vec<String>) -> Vec<String> {
     names.into_iter().map(|name| name.trim().to_owned()).filter(|name| !name.is_empty()).collect()
@@ -327,19 +340,28 @@ impl<'a> AddonClient<'a> {
         Ok(manifest)
     }
 
+    /// A page of a catalog. Extras (`skip`, `search`, `genre`) go into the
+    /// path, as Stremio's protocol has them —
+    /// `catalog/{type}/{id}/skip=100&genre=Sci-Fi.json`; the query string is
+    /// ignored by Cinemeta, and by the catalogs it redirects to.
     pub fn catalog(&self, kind: &str, id: &str, extra: &[(&str, &str)]) -> Result<Vec<MovieItem>> {
-        let mut url = self.base.join(&format!("catalog/{kind}/{id}.json"))?;
-        if !extra.is_empty() {
-            let mut query = url.query_pairs_mut();
-            for (name, value) in extra {
-                query.append_pair(name, value);
-            }
-        }
-        let body = self.http.get(&url)?;
+        let body = self.http.get(&self.catalog_url(kind, id, extra)?)?;
         let value: Value = serde_json::from_slice(&body).context("addon catalog")?;
         let metas = value.get("metas").ok_or_else(|| anyhow!("addon catalog answered without metas"))?;
         let previews: Vec<MetaPreview> = serde_json::from_value(metas.clone()).context("addon catalog metas")?;
         Ok(previews.into_iter().map(|preview| preview.into_item(&self.id)).collect())
+    }
+
+    /// The URL [`catalog`](Self::catalog) asks.
+    pub fn catalog_url(&self, kind: &str, id: &str, extra: &[(&str, &str)]) -> Result<Url> {
+        let pairs: Vec<String> = extra
+            .iter()
+            .filter(|(name, value)| !name.is_empty() && !value.is_empty())
+            .map(|(name, value)| format!("{}={}", encode(name), encode(value)))
+            .collect();
+        let path =
+            if pairs.is_empty() { format!("catalog/{kind}/{id}.json") } else { format!("catalog/{kind}/{id}/{}.json", pairs.join("&")) };
+        Ok(self.base.join(&path)?)
     }
 
     /// What the addon knows about one title, or `None` when it does not serve
@@ -457,6 +479,20 @@ mod tests {
         assert_eq!(parse_size("Torrentio\n1080p\n👤 123 💾 1.5 GB"), Some(1_500_000_000));
         assert_eq!(parse_seeders("Torrentio\n1080p\n👤 123 💾 1.5 GB"), Some(123));
         assert_eq!(parse_size("no size"), None);
+    }
+
+    #[test]
+    fn catalog_extras_go_into_the_path_encoded() {
+        let transport = Stub(Answer::Body(r#"{"metas":[]}"#));
+        let mut client = AddonClient::new(&transport, "https://v3-cinemeta.strem.io/manifest.json").unwrap();
+        client.id = "addon".into();
+        let url = client.catalog_url("movie", "top", &[("skip", "100"), ("genre", "Sci-Fi")]).unwrap();
+        assert_eq!(url.as_str(), "https://v3-cinemeta.strem.io/catalog/movie/top/skip=100&genre=Sci-Fi.json");
+        let url = client.catalog_url("movie", "top", &[("search", "star wars")]).unwrap();
+        assert_eq!(url.as_str(), "https://v3-cinemeta.strem.io/catalog/movie/top/search=star%20wars.json");
+        let url = client.catalog_url("series", "top", &[("skip", "")]).unwrap();
+        assert_eq!(url.as_str(), "https://v3-cinemeta.strem.io/catalog/series/top.json", "an empty extra is left out");
+        assert!(client.catalog("movie", "top", &[("skip", "50")]).unwrap().is_empty());
     }
 
     #[test]

@@ -7,6 +7,7 @@
   "Choose what the Watch home shows. The console uses this theme; ☰ → Customize edits it in detail.": "Choisissez ce que l'accueil Watch affiche. La console utilise ce thème ; ☰ → Personnaliser le modifie en détail.",
   "Code {code}": "Code {code}",
   "Continue watching": "Reprendre la lecture",
+  "Could not load more titles: {error}": "Impossible de charger plus de titres : {error}",
   "Could not load streams: {error}": "Impossible de charger les sources : {error}",
   "Could not play: {error}": "Impossible de lire : {error}",
   "Could not start the Stremio service: {error}": "Impossible de démarrer le service Stremio : {error}",

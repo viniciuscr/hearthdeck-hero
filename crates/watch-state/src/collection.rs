@@ -15,13 +15,86 @@ use serde_json::{json, Map, Value};
 /// Where the proxy keeps its synthetic library.
 pub const ROOT: &str = "watch-library";
 
-/// Rewrites the root from the items `fetch` returns.
+/// The mark a catalog page leaves in its records, so a rails refresh keeps them.
+pub const CATALOG_KEY: &str = "watchCatalog";
+
+/// Rewrites the root from the items `fetch` returns, keeping the catalog pages
+/// fetched before: browsing deeper than the rails survives a refresh.
 pub fn refresh<F>(root: &Path, fetch: F) -> Result<()>
 where
     F: FnOnce() -> Result<Vec<MovieItem>>,
 {
-    let movies = fetch()?;
+    let mut movies = fetch()?;
+    for item in stored(root).into_iter().filter(|item| item.catalog) {
+        if !movies.iter().any(|movie| same(movie, &item)) {
+            movies.push(item);
+        }
+    }
     write_root(root, &movies)
+}
+
+/// Merges a page of a catalog into the root's library, leaving the rails and
+/// the pages before it as they are. Returns how many items were new.
+pub fn append(root: &Path, movies: &[MovieItem]) -> Result<usize> {
+    let mut all = stored(root);
+    let before = all.len();
+    for movie in movies {
+        if !all.iter().any(|seen| same(seen, movie)) {
+            all.push(movie.clone());
+        }
+    }
+    let added = all.len() - before;
+    if added > 0 {
+        write_root(root, &all)?;
+    }
+    Ok(added)
+}
+
+/// Whether two items are the same title (the id alone is not enough: a film and
+/// a series may share one).
+fn same(a: &MovieItem, b: &MovieItem) -> bool {
+    a.id == b.id && a.kind == b.kind
+}
+
+/// The items a root holds now, read back from the layouts [`write_root`] wrote.
+fn stored(root: &Path) -> Vec<MovieItem> {
+    let paths = DataPaths::at(root.to_path_buf());
+    let games: Value = json_store::read(&paths.sideload_library()).unwrap_or(Value::Null);
+    let metadata: Value = json_store::read(&paths.metadata()).unwrap_or(Value::Null);
+    let timestamps: Value = json_store::read(&paths.timestamps()).unwrap_or(Value::Null);
+    let Some(games) = games.get("games").and_then(Value::as_array) else { return Vec::new() };
+    games.iter().filter_map(|game| stored_item(game, &metadata, &timestamps)).collect()
+}
+
+fn stored_item(game: &Value, metadata: &Value, timestamps: &Value) -> Option<MovieItem> {
+    let extra = game.get("extra")?;
+    let id = extra.get("watchId")?.as_str()?.to_owned();
+    let runner = game.get("runner").and_then(Value::as_str).unwrap_or("stremio");
+    let app = game.get("app_name").and_then(Value::as_str)?;
+    let details = metadata.get("games").and_then(|games| games.get(format!("{runner}:{app}")));
+    let text = |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_owned);
+    let stamp = timestamps.get(app);
+    Some(MovieItem {
+        id,
+        kind: extra.get("stremioType").and_then(Value::as_str).unwrap_or("movie").to_owned(),
+        name: game.get("title").and_then(Value::as_str).unwrap_or_default().to_owned(),
+        year: text(details.and_then(|details| details.get("releaseDate"))),
+        poster: text(game.get("art_cover")),
+        background: text(game.get("art_background")),
+        logo: text(game.get("art_logo")).filter(|logo| !logo.is_empty()),
+        description: text(game.get("description")),
+        genres: details
+            .and_then(|details| details.get("genres"))
+            .and_then(Value::as_array)
+            .map(|genres| genres.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default(),
+        top: extra.get("stremioTop").and_then(Value::as_bool).unwrap_or(false),
+        catalog: extra.get(CATALOG_KEY).and_then(Value::as_bool).unwrap_or(false),
+        last_watched: text(stamp.and_then(|stamp| stamp.get("lastPlayed"))),
+        minutes_played: stamp.and_then(|stamp| stamp.get("totalPlayed")).and_then(Value::as_f64).unwrap_or(0.0),
+        provider: runner.to_owned(),
+        ..MovieItem::default()
+    })
 }
 
 /// Writes the exact layouts `Library::load_with` reads. Every other file is
@@ -98,6 +171,7 @@ fn game_json(movie: &MovieItem) -> Value {
         "extra": {
             "stremioType": kind,
             "stremioTop": movie.top,
+            CATALOG_KEY: movie.catalog,
             "provider": provider,
             "watchId": &movie.id,
         },
@@ -167,6 +241,44 @@ mod tests {
         assert_eq!(game.game.art_cover.as_deref(), Some("https://img/tt1/poster.jpg"));
         assert_eq!(game.metadata.as_deref().and_then(|m| m.description.as_deref()), Some("A plot"));
         assert_eq!(game.metadata.as_deref().map(|m| m.genres.clone()), Some(vec!["Drama".to_owned()]));
+    }
+
+    #[test]
+    fn a_catalog_page_is_merged_and_survives_a_rails_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_root(root, &[movie("tt1", "A Film")]).unwrap();
+
+        let mut page = movie("tt2", "Another Film");
+        page.catalog = true;
+        let added = append(root, &[page, movie("tt1", "A Film")]).unwrap();
+        assert_eq!(added, 1, "a title already there is not added again");
+
+        // A rails refresh replaces the rails and keeps the page.
+        refresh(root, || Ok(vec![movie("tt3", "New Film")])).unwrap();
+        let items = stored(root);
+        let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["tt3", "tt2"]);
+        assert!(items.iter().any(|item| item.id == "tt2" && item.catalog), "the page is still marked");
+        assert_eq!(items[1].year.as_deref(), Some("2026"), "the page keeps its metadata");
+    }
+
+    #[test]
+    fn a_merge_keeps_the_progress_of_what_is_already_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let mut watched = movie("tt1", "A Film");
+        watched.last_watched = Some("2026-11-12T20:00:00Z".into());
+        watched.minutes_played = 42.0;
+        write_root(root, &[watched]).unwrap();
+
+        let mut page = movie("tt2", "Another Film");
+        page.catalog = true;
+        append(root, &[page]).unwrap();
+        let items = stored(root);
+        let watched = items.iter().find(|item| item.id == "tt1").expect("the title is still there");
+        assert_eq!(watched.last_watched.as_deref(), Some("2026-11-12T20:00:00Z"));
+        assert_eq!(watched.minutes_played, 42.0);
     }
 
     #[test]
