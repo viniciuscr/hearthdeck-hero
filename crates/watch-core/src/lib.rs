@@ -5,15 +5,16 @@
 //! owns the boundary.
 
 pub mod auth;
+pub mod catalog;
 pub mod http;
 pub mod metadata;
 pub mod provider;
 pub mod types;
 
-pub use metadata::{Episode, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
-pub use provider::{
-    CatalogDescriptor, CatalogFilter, CatalogPage, CatalogSort, Credentials, Ctx, Rail, RailDescriptor, ResolvedStream, Secret,
-    StreamOrigin, WatchProvider,
+pub use catalog::{
+    CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
 };
+pub use metadata::{Episode, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
+pub use provider::{Credentials, Ctx, Rail, RailDescriptor, ResolvedStream, Secret, StreamOrigin, WatchProvider};
 
 pub type Result<T> = anyhow::Result<T>;

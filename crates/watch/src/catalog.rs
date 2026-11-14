@@ -1,7 +1,7 @@
-//! Browsing a provider's catalog a page at a time, into the Watch library.
+//! Browsing a catalog a page at a time, into the Watch library.
 //!
 //! The Movies and Series tabs are not a filter over the rails: they ask the
-//! provider for the next page of a catalog (`top`, a genre, a search) and merge
+//! catalog source for the next page of a catalog (`top`, a genre, a search) and
 //! it into the same projection the rest of the screens read, so cards, details,
 //! streams and progress keep working unchanged. Everything here is blocking:
 //! the app calls it from a background task.
@@ -9,30 +9,45 @@
 use anyhow::{anyhow, Result};
 use heronite_data::paths::AppPaths;
 
+use heronite_watch_core::catalog::CatalogCtx;
 use heronite_watch_core::http::{Transport, UreqTransport};
-use heronite_watch_core::provider::{CatalogPage, Ctx};
 use heronite_watch_state::collection;
 use heronite_watch_state::store::StoreCredentials;
 
-use crate::registry;
+pub use heronite_watch_core::catalog::{
+    CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
+};
 
-pub use heronite_watch_core::provider::{CatalogDescriptor, CatalogRequest, CatalogSort};
-
-/// How many items a page holds (Cinemeta answers 50; the provider decides).
+/// How many items a page holds (Cinemeta answers 50; a source decides its own).
 pub const PAGE: u32 = 50;
 
-/// The catalogs a provider offers the tabs: its manifest decides, so the screens
-/// render what it declares instead of assuming Cinemeta's.
+/// The catalog sources this build has, and which of them the person turned on.
+pub fn sources() -> &'static [&'static dyn WatchCatalogSource] {
+    heronite_watch_catalogs::sources()
+}
+
+/// The sources the settings turn on, in the order they are listed.
+pub fn enabled(ids: &[String]) -> Vec<&'static dyn WatchCatalogSource> {
+    heronite_watch_catalogs::enabled(ids)
+}
+
+/// The catalogs a source offers the tabs: its own manifest decides, so the
+/// screens render what it declares instead of assuming Cinemeta's.
 pub fn catalogs(app: &AppPaths, provider: &str) -> Result<Vec<CatalogDescriptor>> {
     let http = UreqTransport::new();
     catalogs_with(&http, app, provider)
 }
 
 /// [`catalogs`] with an injected transport, for tests.
-pub fn catalogs_with(http: &dyn Transport, app: &AppPaths, provider: &str) -> Result<Vec<CatalogDescriptor>> {
+pub fn catalogs_with(http: &dyn Transport, app: &AppPaths, source: &str) -> Result<Vec<CatalogDescriptor>> {
     let credentials = StoreCredentials::new(app);
-    let ctx = Ctx { http, credentials: &credentials };
-    registry::find(provider).ok_or_else(|| anyhow!("Unknown Watch provider: {provider}"))?.catalogs(&ctx)
+    let ctx = CatalogCtx { http, credentials: &credentials };
+    source_of(source)?.catalogs(&ctx)
+}
+
+/// The catalog source with `id`, or a fault naming it.
+fn source_of(id: &str) -> Result<&'static dyn WatchCatalogSource> {
+    heronite_watch_catalogs::find(id).ok_or_else(|| anyhow!("Unknown catalog source: {id}"))
 }
 
 /// The key a page's items carry: the catalog, order and filters that produced
@@ -46,16 +61,16 @@ pub fn feed_key(request: &CatalogRequest) -> String {
 }
 
 /// One page of a catalog, from the provider that owns it.
-pub fn page(app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<CatalogPage> {
+pub fn page(app: &AppPaths, source: &str, request: &CatalogRequest) -> Result<CatalogPage> {
     let http = UreqTransport::new();
-    page_with(&http, app, provider, request)
+    page_with(&http, app, source, request)
 }
 
 /// [`page`] with an injected transport, for tests.
-pub fn page_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<CatalogPage> {
+pub fn page_with(http: &dyn Transport, app: &AppPaths, source: &str, request: &CatalogRequest) -> Result<CatalogPage> {
     let credentials = StoreCredentials::new(app);
-    let ctx = Ctx { http, credentials: &credentials };
-    let mut page = registry::find(provider).ok_or_else(|| anyhow!("Unknown Watch provider: {provider}"))?.catalog(&ctx, request)?;
+    let ctx = CatalogCtx { http, credentials: &credentials };
+    let mut page = source_of(source)?.catalog(&ctx, request)?;
     let key = feed_key(request);
     for item in &mut page.items {
         item.catalog = Some(key.clone());
@@ -66,8 +81,8 @@ pub fn page_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: 
 /// Fetches the next page of `request` and merges it into the Watch library.
 /// Returns the page (its ids are what a search shows) and how many items were
 /// new; an empty page means the catalog has no more.
-pub fn more_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<(CatalogPage, usize)> {
-    let page = page_with(http, app, provider, request)?;
+pub fn more_with(http: &dyn Transport, app: &AppPaths, source: &str, request: &CatalogRequest) -> Result<(CatalogPage, usize)> {
+    let page = page_with(http, app, source, request)?;
     let root = app.cache.join(collection::ROOT);
     let added = collection::append(&root, &page.items)?;
     Ok((page, added))
@@ -76,8 +91,8 @@ pub fn more_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: 
 /// The first page of a feed, replacing whatever the previous catalog, order or
 /// filter had put in the library for that kind. Returns the page and how many
 /// items are new.
-pub fn replace_with(http: &dyn Transport, app: &AppPaths, provider: &str, request: &CatalogRequest) -> Result<(CatalogPage, usize)> {
-    let page = page_with(http, app, provider, request)?;
+pub fn replace_with(http: &dyn Transport, app: &AppPaths, source: &str, request: &CatalogRequest) -> Result<(CatalogPage, usize)> {
+    let page = page_with(http, app, source, request)?;
     let root = app.cache.join(collection::ROOT);
     let added = collection::replace(&root, &request.kind, &page.items)?;
     Ok((page, added))
@@ -142,10 +157,13 @@ mod tests {
             sort: CatalogSort::Popular,
             filters: vec![("genre".into(), "Sci-Fi".into())],
         };
-        let page = page_with(&fake, &app(dir.path()), "stremio", &request).unwrap();
+        let page = page_with(&fake, &app(dir.path()), "cinemeta", &request).unwrap();
         assert_eq!(page.items.len(), 2);
         assert!(page.more, "a full page says another may follow");
-        assert!(page.items.iter().all(|item| item.catalog.is_some() && item.provider == "stremio"), "a page's items carry their feed");
+        assert!(
+            page.items.iter().all(|item| item.catalog.is_some()) && page.items.iter().all(|item| item.provider == "stremio"),
+            "a page's items carry their feed and name who plays them"
+        );
         let seen = fake.seen.lock().unwrap().clone();
         assert_eq!(seen, ["https://v3-cinemeta.strem.io/catalog/movie/top/skip=100&genre=Sci-Fi.json"]);
     }
@@ -157,7 +175,7 @@ mod tests {
         let mut request = CatalogRequest::first("movie");
         request.sort = CatalogSort::Rating;
         request.filters = vec![("genre".into(), "Sci-Fi".into())];
-        page_with(&fake, &app(dir.path()), "stremio", &request).unwrap();
+        page_with(&fake, &app(dir.path()), "cinemeta", &request).unwrap();
         let seen = fake.seen.lock().unwrap().clone();
         assert_eq!(seen, ["https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Sci-Fi.json"], "the order picks the catalog");
     }
@@ -165,8 +183,26 @@ mod tests {
     #[test]
     fn an_empty_page_says_there_is_no_more() {
         let dir = tempfile::tempdir().unwrap();
-        let page = page_with(&Empty, &app(dir.path()), "stremio", &CatalogRequest::first("movie")).unwrap();
+        let page = page_with(&Empty, &app(dir.path()), "cinemeta", &CatalogRequest::first("movie")).unwrap();
         assert!(page.items.is_empty() && !page.more, "an empty page ends the feed");
+    }
+
+    #[test]
+    fn the_facade_lists_the_sources_and_only_the_ones_the_settings_name() {
+        let ids: Vec<&str> = sources().iter().map(|source| source.descriptor().id).collect();
+        assert_eq!(ids, ["cinemeta", "tmdb"], "the catalogue Watch ships with, then TMDB");
+
+        let on = enabled(&["tmdb".to_owned(), "gone".to_owned(), "cinemeta".to_owned()]);
+        assert_eq!(on.iter().map(|source| source.descriptor().id).collect::<Vec<_>>(), ["tmdb", "cinemeta"]);
+        assert!(enabled(&[]).is_empty(), "nothing on means nothing to browse by");
+    }
+
+    #[test]
+    fn an_unknown_source_is_a_fault_that_names_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let error =
+            page_with(&Fake { seen: Mutex::new(Vec::new()) }, &app(dir.path()), "nope", &CatalogRequest::first("movie")).unwrap_err();
+        assert!(format!("{error:#}").contains("Unknown catalog source: nope"), "{error:#}");
     }
 
     #[test]
@@ -192,7 +228,7 @@ mod tests {
         let fake = Fake { seen: Mutex::new(Vec::new()) };
         let root = app.cache.join(collection::ROOT);
 
-        let (page, _) = more_with(&fake, &app, "stremio", &CatalogRequest::first("movie")).unwrap();
+        let (page, _) = more_with(&fake, &app, "cinemeta", &CatalogRequest::first("movie")).unwrap();
         assert_eq!(page.items.len(), 2);
         // A rails item (no feed) has to survive the replacement.
         let rails = heronite_watch_core::types::MovieItem {
@@ -206,7 +242,7 @@ mod tests {
 
         let mut rated = CatalogRequest::first("movie");
         rated.sort = CatalogSort::Rating;
-        let (page, added) = replace_with(&fake, &app, "stremio", &rated).unwrap();
+        let (page, added) = replace_with(&fake, &app, "cinemeta", &rated).unwrap();
         assert_eq!(page.items.len(), 1);
         assert_eq!(added, 1);
 
@@ -223,7 +259,7 @@ mod tests {
         let app = app(dir.path());
         let fake = Fake { seen: Mutex::new(Vec::new()) };
         let request = CatalogRequest::first("movie");
-        let (page, added) = more_with(&fake, &app, "stremio", &request).unwrap();
+        let (page, added) = more_with(&fake, &app, "cinemeta", &request).unwrap();
         assert_eq!(page.items.len(), 2, "the page is what the tab shows");
         assert_eq!(added, 2, "and it is merged into the library");
         let library = Library::load_with(&DataPaths::at(app.cache.join(collection::ROOT)), true).unwrap();
@@ -231,7 +267,7 @@ mod tests {
         assert!(library.games.iter().any(|game| game.title == "The Matrix"));
 
         // The same page again adds nothing.
-        let (page, added) = more_with(&fake, &app, "stremio", &request).unwrap();
+        let (page, added) = more_with(&fake, &app, "cinemeta", &request).unwrap();
         assert_eq!(page.items.len(), 2);
         assert_eq!(added, 0);
     }

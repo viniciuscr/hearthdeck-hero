@@ -22,6 +22,12 @@ pub struct Settings {
     /// (one the person or their desktop session started is never stopped).
     #[serde(default = "stop_service_by_default")]
     pub stop_service_when_done: bool,
+    /// The catalog sources the Movies and Series tabs may browse, in the order
+    /// they are listed (Settings → Watch → Catalogs). A source this build does
+    /// not have is skipped by the registry, so a file from another version is
+    /// not a fault.
+    #[serde(default = "catalogs_by_default")]
+    pub catalog_sources: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -30,9 +36,14 @@ fn stop_service_by_default() -> bool {
     true
 }
 
+/// Cinemeta is the catalogue Watch ships with, so it is on to begin with.
+fn catalogs_by_default() -> Vec<String> {
+    vec!["cinemeta".to_owned()]
+}
+
 impl Default for Settings {
     fn default() -> Self {
-        Self { stop_service_when_done: true, extra: Map::new() }
+        Self { stop_service_when_done: true, catalog_sources: catalogs_by_default(), extra: Map::new() }
     }
 }
 
@@ -68,6 +79,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(read(&app(dir.path())).stop_service_when_done, "no file: the default stops what we started");
         assert!(Settings::default().stop_service_when_done);
+    }
+
+    #[test]
+    fn cinemeta_is_the_catalog_source_to_begin_with() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read(&app(dir.path())).catalog_sources, ["cinemeta"], "no file: the catalogue we ship with");
+        assert_eq!(Settings::default().catalog_sources, ["cinemeta"]);
+    }
+
+    #[test]
+    fn the_chosen_catalog_sources_round_trip_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let settings = Settings { catalog_sources: vec!["tmdb".to_owned(), "cinemeta".to_owned()], ..Settings::default() };
+        write(&app, &settings).unwrap();
+        assert_eq!(read(&app).catalog_sources, ["tmdb", "cinemeta"], "the order is the person's");
+        let stored: Value = json_store::read(&path(&app)).unwrap();
+        assert_eq!(stored["catalogSources"], Value::from(vec!["tmdb", "cinemeta"]), "{stored}");
     }
 
     #[test]

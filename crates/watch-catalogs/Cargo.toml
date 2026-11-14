@@ -1,0 +1,19 @@
+[package]
+name = "heronite-watch-catalogs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What Watch lets you browse: the catalog sources (Cinemeta, TMDB) and their registry"
+
+[dependencies]
+heronite-watch-core = { path = "../watch-core" }
+heronite-watch-addon = { path = "../watch-addon" }
+heronite-watch-tmdb = { path = "../watch-tmdb" }
+anyhow.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+url = "2"
+
+[lints]
+workspace = true

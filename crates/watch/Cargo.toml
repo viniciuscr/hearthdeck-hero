@@ -6,6 +6,7 @@ license.workspace = true
 description = "Watch: Stremio account, addon protocol, local streaming server and playback"
 
 [dependencies]
+heronite-watch-catalogs = { path = "../watch-catalogs" }
 heronite-watch-core = { path = "../watch-core" }
 heronite-watch-metadata = { path = "../watch-metadata" }
 heronite-watch-player = { path = "../watch-player" }

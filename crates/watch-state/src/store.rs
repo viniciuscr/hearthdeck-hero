@@ -140,6 +140,27 @@ pub fn clear_auth(app: &AppPaths) -> Result<()> {
     StoreCredentials::new(app).clear("stremio")
 }
 
+/// The TMDB API key (v3), written where the TMDB catalog source reads it and
+/// nowhere else. The credentials file is 0600, like the account's.
+pub fn write_tmdb_key(app: &AppPaths, api_key: &str) -> Result<()> {
+    StoreCredentials::new(app).set("tmdb", &Secret::new(serde_json::json!({"apiKey": api_key.trim()})))
+}
+
+/// The stored TMDB key, when there is one. A key that is only whitespace is no
+/// key at all.
+pub fn read_tmdb_key(app: &AppPaths) -> Result<Option<String>> {
+    let Some(secret) = StoreCredentials::new(app).get("tmdb")? else {
+        return Ok(None);
+    };
+    let value = secret.value();
+    let key = value.get("apiKey").and_then(Value::as_str).or_else(|| value.as_str()).unwrap_or_default().trim().to_owned();
+    Ok((!key.is_empty()).then_some(key))
+}
+
+pub fn clear_tmdb_key(app: &AppPaths) -> Result<()> {
+    StoreCredentials::new(app).clear("tmdb")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,5 +260,34 @@ mod tests {
             finished: false,
             video_id: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tmdb_key_tests {
+    use super::*;
+    use std::path::Path;
+
+    fn paths(root: &Path) -> AppPaths {
+        AppPaths { config: root.join("config"), cache: root.join("cache") }
+    }
+
+    #[test]
+    fn the_key_round_trips_and_is_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = paths(dir.path());
+        assert_eq!(read_tmdb_key(&app).unwrap(), None, "no key before one is written");
+        write_tmdb_key(&app, "  abc123  ").unwrap();
+        assert_eq!(read_tmdb_key(&app).unwrap().as_deref(), Some("abc123"), "typed spaces are not part of it");
+        clear_tmdb_key(&app).unwrap();
+        assert_eq!(read_tmdb_key(&app).unwrap(), None);
+    }
+
+    #[test]
+    fn a_blank_key_is_no_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = paths(dir.path());
+        write_tmdb_key(&app, "   ").unwrap();
+        assert_eq!(read_tmdb_key(&app).unwrap(), None);
     }
 }

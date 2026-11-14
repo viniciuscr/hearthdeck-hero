@@ -1,0 +1,17 @@
+[package]
+name = "heronite-watch-tmdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TMDB as a Watch catalog source: discover for films and series, keyed by IMDb id"
+
+[dependencies]
+heronite-watch-core = { path = "../watch-core" }
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+serde.workspace = true
+serde_json.workspace = true
+url = "2"
+
+[lints]
+workspace = true

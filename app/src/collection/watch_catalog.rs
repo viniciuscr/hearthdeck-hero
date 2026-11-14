@@ -21,7 +21,7 @@ use heronite_watch::catalog::{CatalogDescriptor, CatalogRequest, CatalogSort};
 use super::CollectionView;
 
 /// The provider the tabs browse.
-const PROVIDER: &str = "stremio";
+const PROVIDER: &str = "cinemeta";
 /// How many rows from the end the next page is asked for.
 const PREFETCH_ROWS: usize = 2;
 /// How long to wait after a failed page (a broken request must not spin the

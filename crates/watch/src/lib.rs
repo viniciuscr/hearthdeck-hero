@@ -31,7 +31,7 @@ pub mod player {
 
 /// The local watch state the settings screen reads and writes.
 pub mod store {
-    pub use heronite_watch_state::store::{clear_auth, read_auth, write_auth};
+    pub use heronite_watch_state::store::{clear_auth, clear_tmdb_key, read_auth, read_tmdb_key, write_auth, write_tmdb_key};
 }
 
 /// Settings → Watch: what the person chose beyond account, theme and rails.
