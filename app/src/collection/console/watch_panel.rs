@@ -57,10 +57,11 @@ impl CollectionView {
                 );
         let kinds: Vec<(SharedString, Option<usize>)> =
             [(tr!("All"), 0usize), (tr!("Movies"), 1), (tr!("Series"), 2)].into_iter().map(|(label, _)| (label.into(), None)).collect();
-        let sorts: Vec<(SharedString, Option<usize>)> = [(tr!("Title"), 0usize), (tr!("Year"), 1), (tr!("Recently watched"), 2)]
-            .into_iter()
-            .map(|(label, _)| (label.into(), None))
-            .collect();
+        let sorts: Vec<(SharedString, Option<usize>)> =
+            [(tr!("Popular"), 0usize), (tr!("Title"), 1), (tr!("Year"), 2), (tr!("Recently watched"), 3)]
+                .into_iter()
+                .map(|(label, _)| (label.into(), None))
+                .collect();
         let genre = f.genre.checked_sub(1).and_then(|i| genres.get(i)).cloned().unwrap_or_else(|| tr!("Any genre").to_string());
         let provider = f.provider.checked_sub(1).and_then(|i| providers.get(i)).cloned().unwrap_or_else(|| tr!("Any provider").to_string());
         let row = |item: Item, label: String, ic: Icon, value: AnyElement| {

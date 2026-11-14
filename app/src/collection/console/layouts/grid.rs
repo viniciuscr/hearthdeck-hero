@@ -373,14 +373,19 @@ impl CollectionView {
         let rail = self.grid_letters(tab);
         let cols = self.grid_cols(window, panel, rail);
         let keys = self.grid_keys(tab, spec);
-        // A catalog tab keeps its pages coming: the first, the next as the pad
-        // nears the end of what is loaded, or the search in the box.
+        // A catalog tab keeps its pages coming: the first, the next as the
+        // grid's last visible row nears the end of what is loaded (the wheel and
+        // the pad both move that), or the search in the box.
         if let Some(kind) = crate::collection::watch_catalog::feed_kind(&spec.source) {
             let query = self.console.search.trim().to_owned();
-            let index = self.console.tab_navs.get(tab).map_or(0, |nav| nav.grid.index);
             if query.is_empty() {
                 self.watch_feed_clear_search(kind);
-                self.watch_feed_touch(kind, keys.len(), index, cx);
+                let (_, th) = self.console_tile_size();
+                let line_h = th + GAP + label_room();
+                let rows_total = keys.len().div_ceil(cols.max(1));
+                let offset = self.tab_nav(tab).grid.scroll.handle().offset().y;
+                let seen = super::in_sight(offset, line_h, crate::ui::content_size(window).height);
+                self.watch_feed_advance(kind, *seen.end(), rows_total, cx);
             } else {
                 self.watch_feed_search(kind, query, cx);
             }
@@ -471,14 +476,16 @@ impl CollectionView {
         let body = if keys.is_empty() {
             kit::empty(Icon::FaSearch, tr!("No games match"), tr!("Change the filters above or the search (Y).")).into_any_element()
         } else {
+            let loading = crate::collection::watch_catalog::feed_kind(&spec.source).is_some_and(|kind| self.watch_feed_loading(kind));
             let scroller = self.grid_scroller(tab, &keys, cols, grid_focus, window);
             let current = game.as_ref().map_or('#', |g| letter_of(&g.title));
             div()
                 .flex()
+                .flex_col()
                 .flex_1()
                 .min_h_0()
-                .child(scroller.flex_1().min_w_0())
-                .when(rail, |d| d.child(letter_rail(current)))
+                .child(div().flex().flex_1().min_h_0().child(scroller.flex_1().min_w_0()).when(rail, |d| d.child(letter_rail(current))))
+                .children(loading.then(|| div().flex_none().px(u(SIDE)).pb(u(8.)).child(kit::caption(tr!("Loading more…")))))
                 .into_any_element()
         };
         let list = div().flex().flex_col().flex_1().min_w_0().child(div().flex_none().children(title_line)).child(body);

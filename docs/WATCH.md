@@ -287,9 +287,13 @@ Envelope, source `stremio-core`:
   A query string is ignored by Cinemeta and by the `cinemeta-catalogs` host it
   redirects to; the path segment is percent-encoded, so a search with spaces or
   an `&` cannot break it.
-- The app fetches the next page when the grid focus comes within 24 titles of
-  what is loaded; a search box with text replaces the tab's titles with the
-  search's own until it is cleared.
+- The app fetches the next page when the grid's last visible row comes within
+  two rows of the end (the wheel and the pad both move that), shows
+  "Loading more…" under the grid while a page is in flight, and retries a failed
+  page only after 20 s: asking again on every frame is what made the grid blink.
+- A catalog tab is ordered by what the provider sent — the Watch sort has
+  "Popular" first for that reason. Sorting by title while pages land would move
+  every row under the person scrolling; the other sorts stay available.
 
 ### 4a. Stream resolution
 
