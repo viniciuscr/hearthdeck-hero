@@ -108,7 +108,7 @@ implementation rules live in `docs/WATCH.md`.
 | F-002 | app identity: `app.heronite.Heronite`, data folder `heronite`, scheme `heronite` | fork identity from `fork-brand`, so both apps coexist | active (runtime; binary and packages: F-003) |
 | F-003 | `packaging/*`, `scripts/packages.sh`, `scripts/appimage.sh`, `scripts/install.sh`, `crates/update`, binary and package names | fork Linux/Arch packages, binaries, desktop identity and release channel | active (Linux/Arch; Flatpak/Windows pending) |
 | F-004 | `.github/workflows/fork-ci.yml` | fork verification gate (new file, no upstream conflict) | active |
-| F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" (app and i18n done; README/docs pending) | active |
+| F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" (app and i18n done; README/docs pending; `console_controls.json` in all four locales still carries upstream's two strings) | active |
 | F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs`, `app/src/pages/settings/console.rs` (one dispatch line) | Collection `Space::Watch`, console space item, the Watch Play action and Settings → Watch's own sections | active |
 | F-007 | `crates/data/src/library.rs` | `stremio` source label | active |
 | F-008 | `app/src/console/{themes,theme_rows}.rs`, `app/src/collection/console/{sources,layouts/grid,filters}.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings registration, per-space prefs, editor lock, source/grid-filter helpers, filter panel and one-time migration of game-shaped Watch files | active |
@@ -138,6 +138,38 @@ date, upstream commit, files, and resolution.
     strings are renamed. Every French key whose English text carried "Heronite"
     was renamed with its text ("Hearthdeck Hero"), and `fr/watch.json` is new
     for the Watch strings.
+
+- **2026-11-15, upstream `46441a4f`** (74 commits, v1.7.0: store media and
+  trailers, the quick launcher, the Controller settings page, Steam links,
+  MangoHud, console sounds). Ten files conflicted, again where the F-005 rename
+  and the fork's spaces met new upstream code:
+  - `app/src/collection/focus/mod.rs`: upstream's new Store media and Links
+    sections kept, and both hidden in the Watch space along with screenshots,
+    timeline, related and achievements — a film page carries the streams
+    instead (F-010).
+  - `app/src/console/themes.rs`: the fork's per-space prefs kept. Upstream's
+    controller-option installation is grafted onto the *Games* prefs, which own
+    the global controller options; a Watch update never writes them (F-008).
+  - `app/src/pages/settings/section.rs`: upstream's Controller and Quick
+    launcher sections merged into the App group, beside the fork's Watch group.
+    `GROUPS` stays 7 and `ALL` grows 24 → 26.
+  - `app/src/system/hub/launch.rs`: upstream's `exit_when_idle` branch (a quick
+    launcher instance stays, so it does not wait for the notice) with the
+    fork's notification title (F-005).
+  - `crates/i18n/locales/fr/{console_settings,dialogs,epic,overlay,settings_pages,stores_pages}.json`:
+    French is the fork's rebranded copy, so upstream's file was taken whole and
+    the rename re-applied rather than merged hunk by hunk. Upstream now ships
+    French for `quick_launch` too (new file, rebranded).
+  - Rebranded outside the conflicts, in Rust strings and locales together
+    (the coverage test matches them): the 12 keys upstream added in
+    `epic.json`, `quick_launch.json` and the Stores → Steam copy, plus
+    `de/es/pt-BR/quick_launch.json` and the new `epic.json` and
+    `stores_pages.json` keys.
+  - One new cross-file collision, resolved towards upstream because
+    `watch.json` is fork-owned: upstream's `dialogs.json` now translates
+    "Unlink" and "Not linked", so `watch.json` in de/fr/pt-BR takes upstream's
+    text (de "Verknüpfung entfernen", fr "Non associé", pt-BR "Desvincular" and
+    "Não vinculado").
 
 ## Releases
 

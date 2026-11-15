@@ -45,9 +45,35 @@ dialogs, drawers, pages, settings) follows the **Glass design system** below.
   `self.open_dialog(cx.new(|cx| V::new(ctx, window, cx)), cx)`.
   Emit `DialogEvent::Changed` after writing data, `Close` to close.
 - Settings: there is ONE place, the ☰ Settings page (`app/src/pages/settings/`, Ctrl ,). The left nav is grouped under captions
-  (`Section::GROUPS`): App (General, Appearance, Console mode), Games (Game defaults, Downloads, Other launchers),
+  (`Section::GROUPS`): App (General, Appearance, Console mode, Controller), Games (Game defaults, Downloads, Other launchers),
   Collection (Library, Metadata, Achievements), While playing (Overlay, Screenshots, Replay), Data (Storage, Saves,
-  Backups), System (Advanced, Logs, About). A section = title + lead (`Section::blurb`) +
+  Backups), System (Advanced, Logs, About). Under 1000px of window the list is a column of icons
+  (`SettingsPage::rail`, names in tooltips) and its search button, Ctrl F or typing opens the whole list over the page
+  until an item is picked (`nav_overlay`). A section lays its blocks out from `settings::room(window)` (the width its
+  column gets), never from the window's width: side columns go under (Replay), tables lose their columns (Controller,
+  Metadata's sources), grids lose a column (Achievements' emulators), and the Controller's drawing hides under 640px.
+  A `controls::row` wraps its control under the label when both do not fit (the label keeps 200px); hand-made rows
+  do the same with `flex_wrap` + a `flex_basis` on the text, and text beside something else gets `min_w_0()` so it
+  wraps instead of spilling. Check a section at 640px, ~780px and 1000px (`scripts/shot.sh` + a resize). Controller (`controls/`, `Section::Controls`): the controller found (looked
+  for again every 3 s while the page shows) with the layout its name says, then "Buttons drawn as" and "Confirm button",
+  the controller's options (`ConsolePrefs::controller`, not a theme's: console mode, the overlay and this page follow
+  them; mirrored in `ui-state.json` so the overlay never reads `console.json`). Both are automatic by default: the
+  drawing follows the controller in use (`look::glyphs_for_controller`), and a Nintendo drawing confirms with the east
+  button (its A) and goes back with the south one, in console mode (`console::input`), the overlay (`panel::pad_of`)
+  and every hint (`kit::glyph`). Then one tab at a time (In a game, Outside games, Overlay
+  open, Console mode): the drawn controller of the buttons in use (`pad/model.rs`: an Xbox Series controller, a DualSense or a Switch Pro Controller, from Zacksly's CC BY 3.0 drawings without the makers' logos: their geometry read once with `usvg` and painted as paths in the theme's colours, no picture rasterized or kept) with the tab's buttons lit and a callout per button in a column on its side
+  (Guide, View and Menu on top), joined by lines that never cross (`pad.rs`, tested; a click on a button or callout lights
+  it and its table row), then the tab's shortcuts in a table (`table.rs`: action, controller, keyboard). Every button is
+  drawn as the controller has it (✕ ○ □ △ and L1 / Options for PlayStation, B A Y X and ZL / + for Nintendo). Every shortcut
+  that changes is a chip with a chevron whose popover (one at a time) picks the screenshot's button, the button held for
+  console mode, records a key, or turns a fixed button's shortcut on or off; an off one is a dashed chip saying "Off".
+  Outside games Guide may both open the overlay (a tap) and enter console mode (a hold): one callout says both, no warning. In Overlay open
+  and Console mode the confirm and back rows open the confirm button's choice; Console mode's other rows come from its theme (read with
+  `themes::read`, not `look::theme`, which is Classic outside console mode): what A does on a cover (X does the other)
+  changes there, the rest is fixed. `HERONITE_DEBUG_CONTROLS=<tab>[:<popover>]` opens a tab
+  (`ingame`, `outside`, `overlay`, `console`) and a popover (`shot`, `replay`, `moment`, `volume`, `anywhere`,
+  `console-button`, `key-overlay`, `key-shot`, `key-replay`, `console-a`, `glyphs`, `confirm`). A section =
+  title + lead (`Section::blurb`) +
   captioned cards of rows. The Collection sections live in `app/src/pages/settings/<section>.rs`
   (`appearance`, `metadata/`, `screenshots`, `saves` + `backup/` for Backups: settings, what goes in, then the restore list
   with each backup's parts and an inline "Restore and restart" confirmation; `HERONITE_DEBUG_SETTINGS_ACTION=backup-now|backup-open:<n>|backup-confirm:<n>`) with `State::new(&PageCtx, &EffectiveSettings, …)`
@@ -158,6 +184,30 @@ what the Cover aspect asks for and the Cover shapes card counts it) and "Review 
   goes in the page's `palette.rs` (`pages::commands::PaletteCommands`: list it, even before the page exists, from the
   services or `CommandCtx`; run it; say when the page has a dialog open with `page_modal`). Something that cannot run
   now is listed with `disabled(Some(reason))`, not left out.
+  "Pick a random game" (`palette/random.rs`) picks from the games on screen (search, filters and categories in use),
+  the installed ones, the ones never played, the favourites, the whole Collection, or one category, manual or smart
+  (those only when something is typed); each entry says how many games it picks from and is dimmed when there are
+  none. The pick is focused in the Collection and the palette stays on it: "Pick another" first (Enter rolls again
+  from the same games), then the game's actions; Esc goes back to the main list. The last eight picks wait while
+  other games remain.
+  Game rows show the game's cover (22×30) where the other rows have an icon. Beside the list, when the window is
+  wide enough (the list and the pane, plus 48px), a 268px pane shows the selected item (`palette/view/preview.rs`): a
+  game (or one of its verbs) its cover, title, store and state (Installed, Not installed, Playing now) and its facts
+  (Played, Last played, Status); a page, a Settings section or an action its icon, what it does, why it is dimmed and
+  its shortcut. With the pane the list keeps its full height, so the panel does not change size while you type or
+  move.
+  The quick launcher (`app/src/quick_launch/`) is the same palette in a window of its own (`Mode::Launcher`): the
+  panel at its full size with the pane, no backdrop: the window is the panel, nothing is drawn around it (no shadow, which the window's edge would cut square), and it fades in without sliding. Its list
+  is the pages, Settings sections, global actions and games (no View menu, page commands or random pick: they are the
+  Collection's). Enter on a game plays it (stops it while it runs; one to install is shown in Heronite), Shift Enter
+  shows it in Heronite, → lists its actions (its verbs and "Show X in Heronite"). An item that opens Heronite has a
+  13px `OpenInNew` at the right of its row and "Opens Heronite" in the pane; the footer says what Enter does (play,
+  stop, run, open in Heronite). It closes on Esc, after running something and when it loses the keyboard.
+  Settings → Quick launcher (`pages/settings/quick_launch.rs`, in App after Controller) has a "How it works" card (the
+  shortcut's keys, Enter, Shift Enter and the ↗ mark, one line each) and an "Opening it" card: the keyboard shortcut
+  field (none unless set; refused with a line when the overlay, the screenshot or the replay has the keys, and the
+  replay's field refuses the launcher's), its registration status, the command to bind in the desktop's settings
+  (Linux, "Copy command") and "Open the quick launcher" to try it.
 
 ## Glass design system (menus, dialogs, pages, settings)
 
@@ -639,7 +689,10 @@ source…"), and again after a match is pinned and after "Search every source ag
   tooltip "Pinned: every update uses this game". A match the merge ignored because it is another game than the others
   found is amber and reads "(left out: another game)" (not while the game waits for review, where nothing is merged).
   A source asked only as a fallback (an extension such as VNDB or Wikipedia) that the others made unnecessary keeps
-  its row, "Not asked: the others found it", with "Search". The other sources not asked fold into one muted line per
+  its row, "Not asked: the others found it", with "Search". Steam, for a PC game that is not on it (a game added by hand,
+  a sideloaded one, one from another store; not an emulated game), keeps its row too: "Not linked" with "Link" (tooltip
+  "Pick this game's page to get its details from there."); once linked it reads like any match, with the pin and
+  "Change". The other sources not asked fold into one muted line per
   reason under the rows: "Not for this game: Lutris", "Off: …", "Needs a key: …", "Not asked: …". Above the rows: the offline line, the IGDB key hint with
   "Open Settings → Metadata" (closes the dialog), and, for a game that waits for review, "The sources are not sure which
   game this is: nothing is picked for you. Pick the values, or change a match." The refresh button below ("Search every
@@ -647,8 +700,16 @@ source…"), and again after a match is pinned and after "Search every source ag
 - **Change** replaces the column: a back arrow, "Which game of IGDB is it?", the hits of that source alone for the game's
   title (a search field, "Search this source", Enter searches again; a source may read a typed id or address as that
   entry, as the VNDB extension does with v17; each hit's year, its name in another script and platforms under it), the
-  one in use checked. A click pins that game and asks every source again; when the match is pinned, "Automatic" ("Let IGDB find the game by itself") comes first and
-  unpins it. A line says why there are no hits ("Nothing found for “zelda”.", "This source is off.", "This source needs a
+  one in use checked; a hit with a small cover shows it (30 × 40) at its left. A click pins that game and asks every source again; when the match is pinned, "Automatic" ("Let IGDB find the game by itself") comes first and
+  unpins it. For Steam on a game that is not on it, the search field says "Name, store address or app id": a store
+  address (`store.steampowered.com/app/620/…`, the community or SteamDB page) comes first as that game
+  (name, year, cover; a number alone is an app id too, listed after the games titled with it, as "2048" would be), then the games the Steam store finds by name (no year: the store search gives none); a link
+  pinned by hand, or a game Steam found by its exact name (the setting "Find games not on Steam by name", on by default;
+  its row reads like any match by name, with "Change"), has "Unlink" ("Take away the link to Steam") first instead of
+  "Automatic". Unlink means "this game is not on Steam": the row goes back to "Not linked" with "Link", and no later
+  update, the bulk and idle fills included, finds the game on Steam by name again until it is linked by hand. Apply
+  saves it even when no source answered. The link is the record's, never the game's own Steam id: the game keeps launching, installing and counting
+  playtime as it did, and Steam's details, tags, ProtonDB and links read the record's id. A line says why there are no hits ("Nothing found for “zelda”.", "This source is off.", "This source needs a
   key: add it in Settings → Metadata.", "Could not reach this source. Check your connection and try again."). Esc closes
   Change, then an open select, then the dialog.
 - **The fields** (right), in one list that scrolls, as two captioned cards like Settings' (`ui::controls::caption`). First
@@ -659,10 +720,10 @@ source…"), and again after a match is pinned and after "Search every source ag
   behind). Each value is a tile in the picture's own shape, every tile 60 px high so the rows stay low, with the
   sources' marks over its corner ("Now" when only the game has it); a click picks it (accent border and check), and
   the tile under the pointer shows its details beside the tiles: who has it ("· now" when the game has it), its size (read from the picture's first bytes,
-  `MetadataService::picture_sizes`, "…" while read) and badges: "Own shape" (green) or "Cropped: the picture is
+  `MetadataService::picture_sizes`, "…" while read; `heronite_metadata::picture_size::resolution_label` writes it as "1920 × 1080") and badges: "Own shape" (green) or "Cropped: the picture is
   square / wide / tall" (amber; a background is meant to be wide), "Low resolution" (amber: under 200 px on a cover's
   short side, under 960 px of a background's width), and "Set in Covers" (tooltip "Your picture from Covers is shown
-  instead") when a picture set by hand wins. The tiles are one row; those that do not fit scroll sideways, with a round ‹ or › over the end that has more (a click moves the row by most of what is in view). A tile whose size says it is cropped or low resolution has an amber warning in its corner. Then
+  instead") when a picture set by hand wins. The tiles are one row; those that do not fit scroll sideways, with a round ‹ or › over the end that has more (a click moves the row by most of what is in view). A tile whose size says it is cropped or low resolution has an amber warning in its corner. Under each picture its resolution is a dimmed caption ("1920 × 1080"; the line stays empty until it is read). Then
   the "Details" card: a header (Field, What will be saved, Source) and a row per other field that has a value now or from some
   source, in the usual order: the field's name, the value that will be saved (two lines at most, "Empty" when
   none), where it comes from, and the lock. Sources with the same value are
@@ -684,10 +745,13 @@ source…"), and again after a match is pinned and after "Search every source ag
 `HERONITE_DEBUG_DIALOG=metadata:<state>` opens the selected game's "Metadata" over a made-up preview: `fake` (a pinned
 match, a match left out, a locked field, a field picked from another source, a fallback source not asked), `fallback` (as
 `fake`, with that source found by name; `novels`, a made-up extension id, shows by its id and cannot be searched),
-`emulated` (an emulated game: Steam not for it, LaunchBox found by the dump's name, its line with the platform: a source of emulated games says which platform it matched on; libretro-thumbnails gives box art and, a
+`link` (a game that is not on Steam: Steam "Not linked" with "Link"), `link-change` (the same with "Change" open on Steam, whose
+made-up hits have covers) and `linked` (Steam pinned for it; the debug game must have no Steam id of its own, as a game
+added by hand), `emulated` (an emulated game: Steam not for it, LaunchBox found by the dump's name, its line with the platform: a source of emulated games says which platform it matched on; libretro-thumbnails gives box art and, a
 pictures source, has no row there), `change` (the same with "Change" open),
 `none` (no source found the game), `offline`, `nokey` (no IGDB key), `covers` (as `fake`, scrolled to the cover rows);
-plain `metadata` asks the sources for real.
+plain `metadata` asks the sources for real, and `HERONITE_DEBUG_METADATA_CHANGE=<source id>` (with it) opens "Change" on
+that source with the real search.
 `HERONITE_DEBUG_DIALOG=covers[:<state>]` opens the selected game's "Covers" over made-up searches (pictures the
 Collection already has; nothing asked or written): no state opens on the family the desktop draws, `tall`, `square`,
 `wide`, `background` on that slot, `none` (nothing found), `busy` (searching), `saving` (a picture being
@@ -737,7 +801,7 @@ family); the dot is green for a picture of its own, amber for a crop and grey fo
 slot. A click on a card picks the slot. Right: for the picked slot, "Square pictures found · 9 from 2 sources" (or
 "Backgrounds found") and a search field (the game's title; Enter searches), then, when more than one source found pictures, a pill per source with its mark and count after "All 90" (a click lists that source's pictures alone, without the one shown now; another slot lists all again), then the picture the slot shows now first,
 labelled "{source} · now" or "Cropped · now", and what SteamGridDB (first) and the web found for that shape, each with its
-source's mark and size ("1024×1024"), 15 at a time with "Load more"; a search already made is not asked again on the way
+source's mark, its name (LaunchBox: the region) and, dimmed under it, its resolution ("1024 × 1024"; the size the source gave, else read from the picture's first bytes, `art_images::PictureSizes`, and nothing while unknown; the picture shown now has it too), 15 at a time with "Load more"; a search already made is not asked again on the way
 back, "Searching…" shows while it runs, "No pictures found. Try another search." when nothing came, and a failure in red
 under the grid. A click picks a picture (a double click uses it). A slot that is not kept shows, in place of all this,
 "Square covers are not kept", why ("No view on this PC draws square covers, so updates do not download them. Keep the shape
@@ -746,6 +810,16 @@ shape keeps its own picture. A view asks for the shape it draws.", "Choose a fil
 for the picked slot), "Reset" (back to what the sources gave; only when the slot has a picture of the user's), Close and
 the primary "Use for Square" (Tall, Wide, Background; "Downloading…" while it saves), which needs a picture picked. Every
 change is saved at once and the Collection behind shows it; Esc closes the screenshot picker first.
+
+In console mode (`covers/console.rs`, in `console::registry`) the dialog fills the window: the slots are tabs on LB / RB, the picture
+the slot shows now is on the left (its shape, where it comes from, its resolution) and what was found is a grid of thumbnails the
+d-pad moves over, each with its source (or LaunchBox's region) and resolution. A uses the focused one ("Downloading…", then
+"Saved"; a slot that is not kept says so and A keeps the shape), Y types another search on the on-screen keyboard, X lists
+more (so does Down on the last row), Start opens Options ("Choose a file…" with the console browser, "Reset", and one source
+alone when more than one found pictures) and B closes. It opens from the game page's Manage › "Change pictures…" (any game; the Sheet page
+style has it under Full page) and from Game settings › Game › Images' "Change pictures…", where it sits over the page in its `Layer`. "From a
+screenshot…" is the desktop's alone. `HERONITE_DEBUG_DIALOG=covers[:<state>]` also opens it in console mode
+(`HERONITE_DEBUG_CONSOLE=1`).
 
 **Get more sources** (`dialogs/extensions/`: `mod.rs` the dialog and its two faces, `gallery.rs` the entries and the picked
 one's panel, `confirm.rs` the installer, `lists_manager.rs` "Lists…", `permissions.rs` "What it is allowed to do",
@@ -1157,6 +1231,13 @@ keeps its desktop render and, when `crate::console::active()`, returns its conso
   `ConsoleTheme` (with a default and `#[serde(default)]`, so old and new theme files keep loading), its rows in
   `theme_rows`, and its use. Nothing console-only may run, read files or allocate while console mode is off;
   no "HERONITE" wordmark in console screens (the theme's `interface.label` may add a text of its own).
+- Navigation sounds (`controls.sounds`, off by default; `console/sound.rs`): four short tones (move, confirm, back,
+  tab) written as WAV files in `cache/console-sounds` and played by `pw-play`, `paplay` or `aplay` from a worker thread
+  (Linux only). `controls.soundStyle` is `soft` (the default: ~320-590 Hz with a round start, quiet) or `classic` (the
+  first one: a 1150 Hz tick); `controls.soundVolume` is 10-100 % (a gain steeper than linear). Both sit under the
+  switch in the Controls card, and are off while the switch is. The file names hold the style, the volume and a
+  version (`VERSION`, bumped when a tone changes; files of other versions are deleted), so a change never plays a
+  stale file. Switching the sounds on or changing the style or the volume plays a preview.
 - Debug: `HERONITE_DEBUG_CONSOLE=1` (or `=game:<key>` for a game page, `=menu`, `=customize`, `=filters`) starts in console mode
   without saving it; `HERONITE_DEBUG_CONSOLE_PRESET=<theme id>` / `HERONITE_DEBUG_CONSOLE_LAYOUT=<layout>` start with
   that theme / every tab in that layout (not saved); `HERONITE_DEBUG_IDLE_SECS=<n>` shows the idle screen sooner;
@@ -1181,7 +1262,8 @@ controller connects" (Settings → Console mode → Startup) does nothing, enter
 bottom right corner of the screen (a layer-shell surface over every window, like the overlay's notices; a desktop
 notification without layer-shell) for 8 s, "Controller connected", the controller's name and "Hold Guide to enter
 console mode", a line at the bottom running out. "Button to enter console mode" (Off / Hold Guide / Hold Back + Start /
-Hold LB + RB; Guide on Linux and Back + Start on Windows unless changed, as XInput does not report Guide) held for a second
+Hold LB + RB; off unless chosen, as held during a game started elsewhere it would bring console mode over it; Ask asks
+for Guide on Linux and Back + Start on Windows, as XInput does not report Guide) held for a second
 enters it from anywhere, asked or not; while it is held the notice shows a ring filling around the controller, then
 "Opening console mode…" as the window comes out of the tray (or to the front: on Hyprland through `hyprctl`) in console
 mode. With that button off, Ask still asks for the system's button. Nothing happens while a game runs or while console
@@ -1335,6 +1417,41 @@ Replay controls, live Linux FPS controls and Bluetooth disconnect are hidden.
   < 40 %); icons, bars, pills and dates from `ui::achievements`.
 - `scripts/shot.sh` on a hidden workspace paints only the frames it captures: textures that arrive late (an
   achievement icon, the focus cover) show after a few more captures.
+
+## Store media and Links
+- Two game sections off until turned on in Settings → Appearance → Game sections (`Sections::DEFAULT` hides them,
+  and a stored order without them keeps them hidden). "Store media" (`collection/store_media/`, main column, under
+  Overview) is the store's trailers and screenshots of a game with a Steam app id: a 16:9 stage, at most 1100px
+  wide, with the picked item, and a strip of 128x72 thumbnails under it, the trailers first with a play mark; the
+  title row says "6 videos · 8 screenshots" and has a "Steam ↗" link to the store page. A trailer shows its still and
+  a 64px play button; playing (`heronite_media::stream`, ffmpeg at 480p and 30 fps, sound through PulseAudio /
+  PipeWire on Linux only), its name and a bar (play / pause, time, seek bar, sound) fade in while the pointer is over
+  the stage; paused they stay. On Windows without ffmpeg, the first click on play downloads it into `<data>/tools/ffmpeg`
+  (`heronite_launch::ffmpeg_install`, about 55 MB, once; the stage says "Downloading ffmpeg to play trailers…" with a
+  spinner) and the trailer starts when it is there (autoplay never starts that download); elsewhere the stage says
+  ffmpeg is not installed. Every trailer starts without sound (the sound button turns it on for that trailer, with a volume bar
+  beside it, 50% at first, changed live through ffmpeg's command keys) and loops once played;
+  "Show" (a sub-row of Store media, `storeMediaKinds`: Both, Videos or Screenshots) keeps one kind; with
+  Screenshots only, the rows about trailers are left out. "Autoplay trailers" (a sub-row of Store media, `videoAutoplay`, off by default) starts the focused game's
+  first trailer once the section is drawn. Arrows on the stage's sides step through the items. It stops when the game is no
+  longer focused, when the section is not drawn (another page, the drawer closed, the section off) and when a game
+  starts, or when the window has not drawn 1.5 s after a frame asked it to (minimized, another workspace). Frames wait in one slot and only
+  the newest becomes a texture when the window draws, so a slow or hidden window never piles them up. A failure says so
+  on the stage with "Watch on the store page".
+- Only the lists (3 days) and the first 15 s of the first trailer of the installed games visited are kept, under
+  `<cache>/store-media`, within "Video cache" (a sub-row of Store media: None, 25, 50 (default), 100 or 250 MB;
+  `videoCacheLimitMb` in `settings.json`), the least recently played going first. Turning the section off deletes
+  the folder and the copies of its pictures in the image cache (`store_media::clear_kept`, also at start while off).
+- "Links" (`collection/links.rs`, side column with Details) is a row of bare icons (18px, dimmed, a faint round hover that brightens them), one per store page or site
+  (`heronite_data::game_links`: the game's own store page, its Steam app id, its metadata's websites, SteamDB,
+  PCGamingWiki and, on Linux, ProtonDB); the hover names it (a site with no icon of its own by its host), a click
+  opens it in the browser. Its title is a menu like Details' (chevron on hover): "Add links…" opens "Links of <game>"
+  (`dialogs/game_links.rs`, `HERONITE_DEBUG_DIALOG=links`): a field for a web address (`https://` added when it has
+  none) with Add, then the game's own links (its metadata's websites) with a remove button and the ones found by
+  themselves with a "Found by itself" pill; each change is saved at once. A game without links shows "No links yet."
+  under the title.
+- `HERONITE_DEBUG_MEDIA=play|paused|paused-sound|pick:<n>` plays the first trailer without sound (`paused`: pauses it after 5 s; `paused-sound`: then shows its sound controls, without playing any)
+  or picks item `n` once the list is read.
 
 ## Verifying visually (mandatory for UI work)
 - Build: `cargo build -p heronite`.

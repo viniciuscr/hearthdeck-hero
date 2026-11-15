@@ -10,11 +10,13 @@
 //!
 //! [`update`] is the one way to change the theme in use: it also installs it
 //! in [`super::look`] while console mode is on, so the screen follows at once.
+//! The controller's options (`controller`) are installed in `look` whatever
+//! the mode, and mirrored in `ui-state.json` for the next start.
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
 
-use heronite_data::console_theme::{ConsolePrefs, ConsoleTheme, KeptFilters};
+use heronite_data::console_theme::{ConsolePrefs, ConsoleTheme, ControllerPrefs, KeptFilters};
 use heronite_data::paths::AppPaths;
 
 use crate::collection::Space;
@@ -59,6 +61,8 @@ fn load(app: &AppPaths, space: Space) -> ConsolePrefs {
         Space::Games => {
             let mut prefs = ConsolePrefs::load(app);
             prefs.theme = project(prefs.theme, Space::Games);
+            // The controller's options are global, and they live in this file.
+            install_controls(app, prefs.controller);
             prefs
         }
         Space::Watch => crate::fork::watch::prefs::load(app),
@@ -85,6 +89,18 @@ pub fn read_for<R>(app: &AppPaths, space: Space, f: impl FnOnce(&ConsolePrefs) -
 /// `f` over the prefs without copying them (it must be quick: it holds the lock).
 pub fn read<R>(app: &AppPaths, f: impl FnOnce(&ConsolePrefs) -> R) -> R {
     read_for(app, current_space(), f)
+}
+
+/// Installs the controller's options and mirrors them when they changed.
+fn install_controls(app: &AppPaths, c: ControllerPrefs) {
+    if super::look::set_controls(c) {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = heronite_data::ui_state::set_controller(&app, c) {
+                log::warn!("mirroring the controller options: {e:#}");
+            }
+        });
+    }
 }
 
 /// Keeps `tab` as the one console mode reopens on. Unlike [`update`] it leaves
@@ -139,6 +155,11 @@ pub fn update_for(app: &AppPaths, space: Space, change: impl FnOnce(&mut Console
     crate::dialogs::metadata_update::families::console_theme_changed(&before, &next.theme);
     if space == current_space() && super::active() {
         super::look::set(next.theme.clone());
+    }
+    // The controller's options are global and live in the Games prefs, so a
+    // Watch update never touches them.
+    if space == Space::Games {
+        install_controls(app, next.controller);
     }
     save(app, next.clone(), space);
     next

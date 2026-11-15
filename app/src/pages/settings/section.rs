@@ -10,6 +10,8 @@ use crate::icons::Icon;
 pub enum Section {
     General,
     Appearance,
+    /// The quick launcher's shortcut (`crate::quick_launch`).
+    QuickLauncher,
     /// Console mode's themes and options (also ☰ → Customize).
     ConsoleMode,
     /// The Stremio account and the service that plays torrents.
@@ -31,6 +33,9 @@ pub enum Section {
     Storage,
     /// Mods: the Nexus Mods account, the mod links, what applying mods needs.
     Mods,
+    /// What every controller button does, where, and what can change
+    /// (`controls`).
+    Controls,
     /// The in-game overlay (Guide button).
     Overlay,
     /// The replay buffer: the last seconds of a game, saved on request.
@@ -54,7 +59,7 @@ pub enum Section {
 impl Section {
     /// Left navigation: caption + sections (the caption is translated when drawn).
     pub const GROUPS: [(&'static str, &'static [Section]); 7] = [
-        (n_!("App"), &[Section::General, Section::Appearance, Section::ConsoleMode]),
+        (n_!("App"), &[Section::General, Section::Appearance, Section::ConsoleMode, Section::Controls, Section::QuickLauncher]),
         (crate::fork::watch::settings::watch_registration::GROUP.0, crate::fork::watch::settings::watch_registration::GROUP.1),
         (n_!("Games"), &[Section::GameDefaults, Section::Downloads, Section::Launchers, Section::Integrations, Section::Mods]),
         (n_!("Collection"), &[Section::Library, Section::Metadata, Section::Achievements]),
@@ -64,10 +69,12 @@ impl Section {
     ];
 
     /// Same order as [`Section::GROUPS`].
-    pub const ALL: [Section; 24] = [
+    pub const ALL: [Section; 26] = [
         Section::General,
         Section::Appearance,
         Section::ConsoleMode,
+        Section::Controls,
+        Section::QuickLauncher,
         crate::fork::watch::settings::watch_registration::SECTION,
         crate::fork::watch::settings::watch_registration::CATALOGS,
         crate::fork::watch::settings::watch_registration::METADATA,
@@ -115,6 +122,7 @@ impl Section {
         match self {
             Section::General => tr!("General"),
             Section::Appearance => tr!("Appearance"),
+            Section::QuickLauncher => tr!("Quick launcher"),
             Section::ConsoleMode => tr!("Console mode"),
             Section::Watch => crate::fork::watch::settings::watch_registration::label(),
             Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_label(),
@@ -127,6 +135,7 @@ impl Section {
             Section::Integrations => tr!("Integrations"),
             Section::Storage => tr!("Storage"),
             Section::Mods => tr!("Mods"),
+            Section::Controls => tr!("Controller"),
             Section::Overlay => tr!("Overlay"),
             Section::Replay => tr!("Replay"),
             Section::Metadata => tr!("Metadata"),
@@ -144,6 +153,7 @@ impl Section {
         match self {
             Section::General => Icon::Settings,
             Section::Appearance => Icon::Visibility,
+            Section::QuickLauncher => Icon::FaSearch,
             Section::ConsoleMode => Icon::Tv,
             Section::Watch => crate::fork::watch::settings::watch_registration::icon(),
             Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_icon(),
@@ -156,6 +166,7 @@ impl Section {
             Section::Integrations => Icon::Tv,
             Section::Storage => Icon::FaHardDrive,
             Section::Mods => Icon::CallMerge,
+            Section::Controls => Icon::SportsEsports,
             Section::Overlay => Icon::SportsEsports,
             Section::Replay => Icon::Videocam,
             Section::Metadata => Icon::TravelExplore,
@@ -174,6 +185,7 @@ impl Section {
         match self {
             Section::General => tr!("Language, folders, the tray, shortcuts and where Wine and Proton are looked for."),
             Section::Appearance => tr!("Profiles, the theme and its colours, menus and panels, the picture behind the Collection, covers, text and layout."),
+            Section::QuickLauncher => tr!("The command palette in a small window of its own: open it from anywhere with a key, type a few letters and press Enter to play, without opening Hearthdeck Hero."),
             Section::ConsoleMode => tr!("The controller-first TV mode: its themes, tabs and shelves, covers, background, interface and controls. Changes show at once; ☰ → Customize in console mode has the same options."),
             Section::Watch => crate::fork::watch::settings::watch_registration::blurb(),
             Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_blurb(),
@@ -189,6 +201,7 @@ impl Section {
             Section::Integrations => tr!("Sunshine keeps your games in its list, with their covers, so Moonlight can start them from a phone, a TV or another computer."),
             Section::Storage => tr!("What your games take on disk, and what can go."),
             Section::Mods => tr!("Your Nexus Mods account, the download buttons of the mod sites, and what Hearthdeck Hero needs to apply mods when a game starts. Each game's mods are managed from its own Mods."),
+            Section::Controls => tr!("What every button does, where it works, and what you can change."),
             Section::Overlay => crate::overlay::labels::section_blurb(),
             Section::Replay => tr!("The last seconds of a game kept in memory and saved as a moment with Guide + X, and the memory that takes."),
             Section::Metadata => tr!("Where the details and pictures of your games come from. Sources are asked from the top of each list down; a field stays with the first one that has it."),
@@ -207,6 +220,7 @@ impl Section {
         match self {
             Section::General => "general folders tray shortcuts wine proton language theme geral pastas bandeja atalhos idioma tema",
             Section::Appearance => "appearance background blur dim darkening saturation cover aspect grey uninstalled artwork glass opacity transparent transparency solid interface panels menus dialogs colour tint collection accent contrast zoom scale scaling size bigger smaller larger dpi hidpi 4k tv accessibility font density corners badges categories category tags ribbon strip bookmarks hover screenshot slideshow picture animations motion layout sections profile theme light dark mode system import export aparencia plano de fundo desfoque escurecer saturacao capa cinza nao instalados arte vidro opacidade transparente transparencia solido paineis cor colecao destaque contraste zoom escala tamanho maior menor ampliar aumentar diminuir acessibilidade fonte densidade cantos selos categorias categoria etiquetas fita faixa marcadores estrela animacoes movimento secoes perfil tema claro escuro modo sistema importar exportar imagem",
+            Section::QuickLauncher => "quick launcher launch run play search spotlight palette command global shortcut hotkey key anywhere tray lancador rapido iniciar jogar buscar paleta comando atalho global tecla",
             Section::ConsoleMode => "console mode tv couch controller gamepad theme themes tabs shelves layout covers background font scale clock accent colours glyphs hints menu startup customize export import preset modo console televisao sofa controle tema temas abas prateleiras capas fundo fonte tamanho relogio destaque cores botoes dicas menu personalizar exportar importar perfil",
             Section::Watch => crate::fork::watch::settings::watch_registration::KEYWORDS,
             Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::CATALOG_KEYWORDS,
@@ -219,6 +233,7 @@ impl Section {
             Section::Integrations => "integrations sunshine moonlight stream streaming remote play tv phone couch integracoes transmitir transmissao jogar remotamente celular sofa",
             Section::Storage => "storage disk space free up clean cleanup size prefixes proton cache leftovers uninstall armazenamento disco espaco liberar limpar limpeza tamanho prefixos sobras desinstalar",
             Section::Mods => "mods nexus thunderstore nxm ror2mm api key account premium links fuse overlayfs fomod mod manager modding mods conta chave link modificacoes gerenciador",
+            Section::Controls => "controls controller gamepad buttons shortcuts guide back start chord bindings console checks steam input conflict controles controle botoes atalhos conflito",
             Section::Overlay => "overlay guide button controller gamepad keyboard in-game volume screenshot shortcut botao guia controle teclado sobreposicao no jogo volume captura atalho",
             Section::Replay => "replay clip video record recording buffer last seconds guide gpu-screen-recorder memory ram vram vulkan nvenc vaapi encoder disk gravar gravacao clipe video ultimos segundos memoria codificador disco",
             Section::Achievements => "achievements trophies retroachievements retro emulator rom steam gog epic unlocked rare points hardcore web api key conquistas trofeus emulador desbloqueadas raras pontos chave",
@@ -245,6 +260,7 @@ impl Section {
         match s {
             "general" => Some(Section::General),
             "appearance" => Some(Section::Appearance),
+            "quick-launcher" | "quick-launch" => Some(Section::QuickLauncher),
             "console-mode" | "console" => Some(Section::ConsoleMode),
             "watch" | "movies" => crate::fork::watch::settings::watch_registration::parse(s),
             "advanced" => Some(Section::Advanced),
@@ -255,6 +271,7 @@ impl Section {
             "integrations" | "sunshine" => Some(Section::Integrations),
             "storage" | "disk" => Some(Section::Storage),
             "mods" | "nexus" => Some(Section::Mods),
+            "controls" | "shortcuts" | "controller" => Some(Section::Controls),
             "overlay" => Some(Section::Overlay),
             "replay" => Some(Section::Replay),
             "metadata" => Some(Section::Metadata),
@@ -292,6 +309,7 @@ mod tests {
         assert_eq!(Section::parse("mods"), Some(Section::Mods));
         assert_eq!(Section::parse("console-mode"), Some(Section::ConsoleMode));
         assert_eq!(Section::parse("sunshine"), Some(Section::Integrations));
+        assert_eq!(Section::parse("controls"), Some(Section::Controls));
         assert_eq!(Section::parse("nope"), None);
         assert_eq!(crate::pages::Page::from_debug("settings"), Some(crate::pages::Page::Settings));
         assert_eq!(crate::pages::Page::from_debug("settings:about"), Some(crate::pages::Page::Settings));
