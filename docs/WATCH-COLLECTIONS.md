@@ -300,6 +300,7 @@ Landed, each its own commit:
 | `aaff2d9b` | slice 3b-2: the Settings → Watch → Catalog providers rows (desktop and console), writing `settings.collections` |
 | `e4523e2b` | slice 3b-3: the four locales for those rows |
 | `9a338ac2` | slice 3b-4: `a_rail_is_its_rules_page`, end to end through a fake that answers `/discover` and `/external_ids` |
+| `40ed43d6`, `4a709b66` | the two reviews' fixes: a rail turned off (or no longer holding a title) leaves the library with it, nothing builds a transport on a render path, a corrupt `watch-personal.json` is kept as `.bak` |
 
 **Slice 3b is landed.** What the implementation settles, for the next slice:
 
