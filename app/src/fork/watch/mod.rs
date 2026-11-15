@@ -2,6 +2,7 @@
 
 pub mod filters;
 pub mod prefs;
+pub mod rails;
 pub mod settings;
 pub mod sources;
 pub mod space_theme;

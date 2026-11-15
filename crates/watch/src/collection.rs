@@ -7,6 +7,7 @@ use anyhow::Result;
 use heronite_data::paths::AppPaths;
 use heronite_data::{DataPaths, Library};
 use heronite_watch_core::catalog::{CatalogCtx, CatalogRequest, WatchCatalogSource};
+use heronite_watch_core::collections::mark;
 use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::provider::{Ctx, Rail, RailDescriptor};
 use heronite_watch_core::types::MovieItem;
@@ -54,7 +55,56 @@ fn items(http: &dyn Transport, app: &AppPaths) -> Result<Vec<MovieItem>> {
     if !kept.is_empty() {
         rails.push(Rail { catalog: RailDescriptor { id: "personal", kind: "" }, items: kept });
     }
-    Ok(assemble(rails))
+    let mut movies = assemble(rails);
+    // The collection rails the person turned on, marked on the titles they
+    // brought: the Shelf tab reads the mark back, so drawing a rail asks the
+    // provider nothing.
+    mark_collections(&mut movies, collection_rails(http, app));
+    Ok(movies)
+}
+
+/// One rail per enabled collection, in the person's order. A rule is a catalogue
+/// page asked of the source that declared it, so one rail costs what a tab page
+/// costs; a source that cannot answer (no key, an outage) costs that rail and
+/// nothing else.
+fn collection_rails(http: &dyn Transport, app: &AppPaths) -> Vec<(String, Vec<MovieItem>)> {
+    let mut rails = Vec::new();
+    for (source, descriptor) in crate::collections::enabled(app) {
+        match crate::collections::rail_with(http, app, &source, &descriptor) {
+            Ok(items) if !items.is_empty() => rails.push((descriptor.id, items)),
+            Ok(_) => {}
+            // The reason goes to the log only: a transport URL can carry a
+            // debrid key.
+            Err(error) => log::warn!("watch collection {}: {error:#}", descriptor.id),
+        }
+    }
+    rails
+}
+
+/// Marks the rails' titles in the library, adding the ones no other rail holds.
+/// The mark is the rail's (`collection:<id>`, see [`mark`]), which is what the
+/// Shelf tab reads back.
+///
+/// A collection is a membership, not a second copy: a title the rails already
+/// carry keeps their fields. A rail the person turned on outranks a catalogue
+/// page's own feed key (that page can be replaced; the rail cannot), and the
+/// first rail of the settings order names the title — this slice keeps one mark
+/// per title.
+fn mark_collections(movies: &mut Vec<MovieItem>, rails: Vec<(String, Vec<MovieItem>)>) {
+    for (id, items) in rails {
+        let rail_mark = mark(&id);
+        for item in items {
+            match movies.iter_mut().find(|movie| movie.id == item.id && movie.kind == item.kind) {
+                Some(movie) => {
+                    if movie.catalog.as_deref().is_some_and(|feed| feed.starts_with("collection:")) {
+                        continue;
+                    }
+                    movie.catalog = Some(rail_mark.clone());
+                }
+                None => movies.push(MovieItem { catalog: Some(rail_mark.clone()), ..item }),
+            }
+        }
+    }
 }
 
 /// One rail per enabled source and kind, from that source's first catalogue of
@@ -191,6 +241,56 @@ mod tests {
         let movies = assemble(vec![rail("top", vec![movie("tt1", true)]), rail("personal", vec![movie("tt2", false)])]);
         let ids: Vec<&str> = movies.iter().map(|movie| movie.id.as_str()).collect();
         assert_eq!(ids, ["tt1", "tt2"], "a kept title the rails did not carry is still in the library");
+    }
+
+    #[test]
+    fn a_collection_rail_marks_its_titles_and_adds_the_missing_ones() {
+        let mut movies = vec![movie("tt1", true)];
+        let mut held = movie("tt1", true);
+        held.catalog = Some("movie:tmdb:top:Popular".into());
+        let mut page = movie("tt2", false);
+        page.catalog = Some("movie:tmdb:top:Popular".into());
+        mark_collections(&mut movies, vec![("tmdb:top-rated:movie".into(), vec![held, page])]);
+
+        let marks: Vec<(&str, Option<&str>)> = movies.iter().map(|movie| (movie.id.as_str(), movie.catalog.as_deref())).collect();
+        assert_eq!(
+            marks,
+            [("tt1", Some("collection:tmdb:top-rated:movie")), ("tt2", Some("collection:tmdb:top-rated:movie"))],
+            "the rail that was already there gains the mark; the one only the rule brought joins the library"
+        );
+        assert!(movies[0].top, "a marked title keeps the fields the rails gave it");
+    }
+
+    #[test]
+    fn the_first_collection_of_the_settings_order_names_a_title() {
+        let mut movies = Vec::new();
+        let rail = |id: &str, movie: MovieItem| (id.to_owned(), vec![movie]);
+        mark_collections(
+            &mut movies,
+            vec![
+                rail("tmdb:popular:movie", movie("tt1", false)),
+                rail("tmdb:top-rated:movie", MovieItem { kind: "series".into(), ..movie("tt1", false) }),
+            ],
+        );
+        let marks: Vec<(&str, &str, Option<&str>)> =
+            movies.iter().map(|movie| (movie.id.as_str(), movie.kind.as_str(), movie.catalog.as_deref())).collect();
+        assert_eq!(
+            marks,
+            [("tt1", "movie", Some("collection:tmdb:popular:movie")), ("tt1", "series", Some("collection:tmdb:top-rated:movie")),],
+            "a title in two rails keeps the first, and the same id in another kind is another title"
+        );
+    }
+
+    #[test]
+    fn a_collection_whose_source_cannot_answer_costs_that_rail_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
+        // Turned on, but the credential store holds no TMDB key: the rule cannot
+        // be resolved, and that is a log line rather than a broken library.
+        let settings =
+            heronite_watch_state::settings::Settings { collections: vec!["tmdb:top-rated:movie".to_owned()], ..Default::default() };
+        heronite_watch_state::settings::write(&app, &settings).unwrap();
+        assert!(collection_rails(&NoNet, &app).is_empty(), "a keyless source is skipped, not fatal");
     }
 
     #[test]

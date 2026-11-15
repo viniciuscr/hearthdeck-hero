@@ -254,7 +254,8 @@ impl CollectionView {
     }
 
     /// The Shelf tab's rails, in order: where the person stopped, what they mean
-    /// to watch, what they like. A rail with nothing in it is not drawn.
+    /// to watch, what they like, and the collection rails they turned on. A rail
+    /// with nothing in it is not drawn.
     fn personal_shelves(&self, lib: &Library) -> Vec<Shelf> {
         let all: Vec<&CollectionGame> = lib.games.iter().map(|game| game.as_ref()).collect();
         let shelf = |kind: &str, title: String, games: Vec<&CollectionGame>| Shelf {
@@ -288,6 +289,16 @@ impl CollectionView {
                 .collect();
             shelves.push(shelf(kind, title.to_string(), games));
         }
+
+        // The collection rails the person turned on, in their order. The library
+        // carries their titles already — the refresh path resolved each rule and
+        // marked what it brought — so drawing one asks a provider nothing:
+        // declaring a rail is a saved query, not a request.
+        let enabled = heronite_watch::collections::enabled(&self.app_paths);
+        shelves.extend(collection_shelves(
+            &enabled,
+            all.iter().filter_map(|game| Some((crate::fork::watch::sources::rail_marker(game)?, game.key.as_str()))),
+        ));
         shelves.retain(|shelf| !shelf.keys.is_empty());
         shelves
     }
@@ -362,4 +373,77 @@ impl CollectionView {
 
 fn fxhash(s: &str) -> u64 {
     s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3))
+}
+
+/// The Shelf tab's collection rails: one per enabled collection, in the person's
+/// order, holding the library's titles that carry its mark. What an enabled rail
+/// nothing carries is left out, like every other empty rail.
+///
+/// `marked` is each title's `extra.watchCatalog` and its key: the membership was
+/// decided when the library was refreshed, so this is a grouping, not a request.
+fn collection_shelves<'a>(
+    enabled: &[(String, heronite_watch::collections::CollectionDescriptor)],
+    marked: impl Iterator<Item = (&'a str, &'a str)>,
+) -> Vec<Shelf> {
+    let marked: Vec<(&str, &str)> = marked.collect();
+    enabled
+        .iter()
+        .filter_map(|(_, descriptor)| {
+            let mark = heronite_watch::collections::mark(&descriptor.id);
+            let keys: Vec<SharedString> =
+                marked.iter().filter(|(marker, _)| **marker == mark).map(|(_, key)| SharedString::from(*key)).collect();
+            (!keys.is_empty()).then(|| Shelf {
+                title: SharedString::from(crate::fork::watch::rails::title(descriptor)),
+                total: keys.len(),
+                kind: SharedString::from(mark),
+                keys,
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // `gpui_kit::*` brings gpui's `test` macro into scope.
+    use core::prelude::v1::test;
+    use heronite_watch::catalog::CatalogRequest;
+
+    fn rail(id: &str) -> (String, heronite_watch::collections::CollectionDescriptor) {
+        let kind = id.rsplit(':').next().unwrap_or("movie");
+        (
+            "tmdb".to_owned(),
+            heronite_watch::collections::CollectionDescriptor {
+                id: id.to_owned(),
+                name: format!("{kind} · rail"),
+                kind: kind.to_owned(),
+                rule: CatalogRequest::first(kind),
+            },
+        )
+    }
+
+    #[test]
+    fn the_collection_rails_follow_the_settings_order_and_hide_what_is_empty() {
+        let enabled = vec![rail("tmdb:popular:movie"), rail("tmdb:top-rated:movie"), rail("tmdb:popular:series")];
+        let popular = heronite_watch::collections::mark("tmdb:popular:movie");
+        let top = heronite_watch::collections::mark("tmdb:top-rated:movie");
+        let marked = [(top.as_str(), "stremio:tt2"), (popular.as_str(), "stremio:tt1"), ("movie:tmdb:discover:Popular", "stremio:tt3")];
+
+        let shelves = collection_shelves(&enabled, marked.into_iter());
+        let titles: Vec<(&str, Vec<&str>)> =
+            shelves.iter().map(|shelf| (shelf.title.as_ref(), shelf.keys.iter().map(AsRef::as_ref).collect())).collect();
+        assert_eq!(titles.len(), 2, "the rail nothing carries is not drawn: {titles:?}");
+        assert_eq!(titles[0].1, ["stremio:tt1"], "the person's order decides which rail comes first");
+        assert_eq!(titles[0].0, crate::fork::watch::rails::title(&enabled[0].1));
+        assert_eq!(titles[1].1, ["stremio:tt2"]);
+        assert!(shelves.iter().all(|shelf| shelf.total == shelf.keys.len()), "a rail is not cut by the theme's shelf limit");
+        assert!(shelves.iter().all(|shelf| shelf.kind.starts_with("collection:")), "a rail says what it is");
+    }
+
+    #[test]
+    fn a_catalogue_pages_mark_is_not_a_rail() {
+        let enabled = vec![rail("tmdb:popular:movie")];
+        let marked = [("movie:tmdb:discover:Popular", "stremio:tt3")];
+        assert!(collection_shelves(&enabled, marked.into_iter()).is_empty(), "only a rail's own mark is membership");
+    }
 }

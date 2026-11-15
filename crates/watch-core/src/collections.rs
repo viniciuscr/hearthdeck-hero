@@ -43,3 +43,13 @@ pub trait WatchCollectionSource: Send + Sync {
     /// The rails it declares, in the order Settings lists them.
     fn collections(&self, ctx: &CatalogCtx<'_>) -> Result<Vec<CollectionDescriptor>>;
 }
+
+/// The mark a collection rail leaves on the titles it brought in — the
+/// `extra.watchCatalog` of their projection records: `collection:<id>`.
+///
+/// A title's mark says why it is in the library, so a rail the person turned on
+/// is what the shelves read back; a catalogue page's feed key is a page that can
+/// be replaced.
+pub fn mark(id: &str) -> String {
+    format!("collection:{id}")
+}

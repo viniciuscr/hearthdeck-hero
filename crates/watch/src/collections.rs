@@ -12,7 +12,7 @@ use heronite_watch_core::types::MovieItem;
 use heronite_watch_state::catalog_cache::CatalogIds;
 use heronite_watch_state::store::StoreCredentials;
 
-pub use heronite_watch_core::collections::{CollectionDescriptor, CollectionSourceDescriptor, WatchCollectionSource};
+pub use heronite_watch_core::collections::{mark, CollectionDescriptor, CollectionSourceDescriptor, WatchCollectionSource};
 
 /// Every rail the registered sources declare, with the source that answers it.
 pub fn descriptors(app: &AppPaths) -> Vec<(String, CollectionDescriptor)> {
