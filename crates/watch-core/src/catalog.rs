@@ -111,13 +111,28 @@ pub struct CatalogSourceDescriptor {
     pub name: &'static str,
 }
 
-/// What a catalog source is given: the transport, and its own credentials.
+/// A small cache a catalogue may keep between runs. TMDB's own ids are stable,
+/// and resolving one to an IMDb id costs a request: a page of twenty must not
+/// cost twenty requests on every visit.
+pub trait CatalogCache: Send + Sync {
+    /// The IMDb id kept for one of the source's titles: `Some(None)` means it
+    /// was asked before and has none, `None` that it was never asked.
+    fn imdb_id(&self, source: &str, kind: &str, id: u64) -> Option<Option<String>>;
+
+    /// Keeps (or remembers the absence of) one title's IMDb id.
+    fn keep_imdb_id(&self, source: &str, kind: &str, id: u64, imdb: Option<&str>);
+}
+
+/// What a catalog source is given: the transport, its own credentials, and the
+/// cache it may keep.
 ///
 /// TMDB needs an API key; Cinemeta needs none. A source reads only its own
 /// entry, and never sees a media provider's account.
 pub struct CatalogCtx<'a> {
     pub http: &'a dyn Transport,
     pub credentials: &'a dyn Credentials,
+    /// `None` in a test that does not care, or where the caller has no cache.
+    pub cache: Option<&'a dyn CatalogCache>,
 }
 
 /// A source of browsable catalogs.
@@ -191,7 +206,7 @@ mod tests {
     fn a_source_declares_what_it_browses_and_answers_a_page() {
         let http = Nothing;
         let credentials = NoCredentials;
-        let ctx = CatalogCtx { http: &http, credentials: &credentials };
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
 
         let catalogs = Stub.catalogs(&ctx).unwrap();
         assert_eq!(catalogs.len(), 1);

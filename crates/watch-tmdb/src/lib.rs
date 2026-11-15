@@ -12,7 +12,8 @@
 //! TMDB's own "watch providers" (Netflix, …) are *availability*, not streams, and
 //! belong to the metadata layer — this source never reports them.
 
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context, Result};
 use chrono::Datelike;
@@ -46,7 +47,7 @@ const DESCRIPTOR: CatalogSourceDescriptor = CatalogSourceDescriptor { id: "tmdb"
 /// TMDB, with its genre ids remembered for the process' life (they change
 /// rarely, and a page should not pay for the list every time).
 pub struct Tmdb {
-    genres: Mutex<Option<Genres>>,
+    genres: Mutex<Option<Arc<Genres>>>,
 }
 
 impl Tmdb {
@@ -75,7 +76,9 @@ impl WatchCatalogSource for Tmdb {
             .iter()
             .map(|kind| CatalogDescriptor {
                 id: "discover".into(),
-                name: "Discover".into(),
+                // The chip is the catalogue's name, not the endpoint's: `discover`
+                // is where the page comes from.
+                name: "TMDB".into(),
                 kind: (*kind).to_owned(),
                 sorts: vec![CatalogSort::Popular, CatalogSort::Rating, CatalogSort::Newest, CatalogSort::Title],
                 filters: vec![
@@ -124,15 +127,14 @@ impl WatchCatalogSource for Tmdb {
         url.query_pairs_mut().extend_pairs(query.iter().map(|(key, value)| (key.as_str(), value.as_str())));
         let body = ctx.http.get(&url)?;
         let found: Discover = serde_json::from_slice(&body).context("TMDB discover")?;
+        // TMDB ids mean nothing to our library, players or progress: an item
+        // without an IMDb id could not be played, so it is not shown. The ids
+        // are kept between runs, and the misses are fetched a few at a time.
+        let ids = self.imdb_ids(ctx, &key, kind, &found.results);
         let mut items = Vec::new();
         for result in &found.results {
-            // TMDB ids mean nothing to our library, players or progress: an item
-            // without an IMDb id could not be played, so it is not shown. One
-            // title whose ids cannot be fetched costs that card, not the page.
-            match imdb_id(ctx, &key, kind, result.id) {
-                Ok(Some(imdb)) => items.push(item(result, &imdb, watch_kind(kind))),
-                Ok(None) => {}
-                Err(error) => log::warn!("TMDB external ids for {} {}: {error:#}", kind, result.id),
+            if let Some(Some(imdb)) = ids.get(&result.id) {
+                items.push(item(result, imdb, watch_kind(kind)));
             }
         }
         // TMDB stops at page 500: beyond it the answer is an error, not an empty
@@ -144,10 +146,34 @@ impl WatchCatalogSource for Tmdb {
 }
 
 impl Tmdb {
+    /// The IMDb id of every title on a page: the cache answers most of them, and
+    /// the misses go out four at a time instead of twenty in a row.
+    fn imdb_ids(&self, ctx: &CatalogCtx<'_>, key: &str, kind: &str, results: &[Found]) -> HashMap<u64, Option<String>> {
+        let mut known: HashMap<u64, Option<String>> = HashMap::new();
+        let mut missing: Vec<u64> = Vec::new();
+        for result in results {
+            match ctx.cache.and_then(|cache| cache.imdb_id(DESCRIPTOR.id, kind, result.id)) {
+                Some(imdb) => {
+                    known.insert(result.id, imdb);
+                }
+                None => missing.push(result.id),
+            }
+        }
+        const WORKERS: usize = 4;
+        for chunk in missing.chunks(WORKERS) {
+            let answers: Vec<(u64, Option<String>)> = std::thread::scope(|scope| {
+                let handles: Vec<_> = chunk.iter().map(|id| scope.spawn(move || fetched(ctx, key, kind, *id))).collect();
+                handles.into_iter().filter_map(|handle| handle.join().ok()).collect()
+            });
+            known.extend(answers);
+        }
+        known
+    }
+
     /// TMDB's genre ids for both kinds, fetched once and remembered.
-    fn genres(&self, ctx: &CatalogCtx<'_>, key: &str) -> Result<Genres> {
-        if let Some(genres) = self.genres.lock().ok().and_then(|cached| cached.clone()) {
-            return Ok(genres);
+    fn genres(&self, ctx: &CatalogCtx<'_>, key: &str) -> Result<Arc<Genres>> {
+        if let Some(cached) = self.cached() {
+            return Ok(cached);
         }
         let mut genres = Genres::default();
         for kind in ["movie", "tv"] {
@@ -161,10 +187,25 @@ impl Tmdb {
                 _ => genres.tv = names,
             }
         }
-        if let Ok(mut cached) = self.genres.lock() {
-            *cached = Some(genres.clone());
-        }
+        let genres = Arc::new(genres);
+        self.remember(&genres);
         Ok(genres)
+    }
+
+    /// The genre lists already fetched, cloned as a pointer: a page must not
+    /// copy two vectors to read one name.
+    fn cached(&self) -> Option<Arc<Genres>> {
+        self.lock().as_ref().cloned()
+    }
+
+    fn remember(&self, genres: &Arc<Genres>) {
+        *self.lock() = Some(genres.clone());
+    }
+
+    /// The lock, recovering from a panic elsewhere: a poisoned mutex must not
+    /// silence the genre list for the rest of the run.
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Arc<Genres>>> {
+        self.genres.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -230,13 +271,34 @@ fn key(ctx: &CatalogCtx<'_>) -> Result<String> {
     Ok(key)
 }
 
-/// The IMDb id TMDB holds for one of its titles, when it holds one.
+/// The IMDb id TMDB holds for one of its titles, when it holds one, kept in the
+/// caller's cache so a page does not pay for it twice.
 fn imdb_id(ctx: &CatalogCtx<'_>, key: &str, kind: &str, id: u64) -> Result<Option<String>> {
+    if let Some(cache) = ctx.cache {
+        if let Some(known) = cache.imdb_id(DESCRIPTOR.id, kind, id) {
+            return Ok(known);
+        }
+    }
     let mut url = Url::parse(&format!("{API}/{kind}/{id}/external_ids"))?;
     url.query_pairs_mut().extend_pairs([("api_key", key)]);
     let body = ctx.http.get(&url)?;
     let ids: ExternalIds = serde_json::from_slice(&body).context("TMDB external ids")?;
-    Ok(ids.imdb_id.map(|imdb| imdb.trim().to_owned()).filter(|imdb| !imdb.is_empty()))
+    let imdb = ids.imdb_id.map(|imdb| imdb.trim().to_owned()).filter(|imdb| !imdb.is_empty());
+    if let Some(cache) = ctx.cache {
+        cache.keep_imdb_id(DESCRIPTOR.id, kind, id, imdb.as_deref());
+    }
+    Ok(imdb)
+}
+
+/// One title's IMDb id, fetched: a failure costs that card, not the page.
+fn fetched(ctx: &CatalogCtx<'_>, key: &str, kind: &str, id: u64) -> (u64, Option<String>) {
+    match imdb_id(ctx, key, kind, id) {
+        Ok(imdb) => (id, imdb),
+        Err(error) => {
+            log::warn!("TMDB external ids for {kind} {id}: {error:#}");
+            (id, None)
+        }
+    }
 }
 
 /// One discover result as a Watch item, keyed by its IMDb id.
@@ -334,6 +396,7 @@ pub fn secret(api_key: &str) -> Secret {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use heronite_watch_core::catalog::CatalogCache;
     use heronite_watch_core::http::Transport;
     use heronite_watch_core::provider::Credentials;
     use std::collections::HashMap;
@@ -395,7 +458,7 @@ mod tests {
     }
 
     fn ctx_with<'a>(http: &'a Fake, credentials: &'a Keyed) -> CatalogCtx<'a> {
-        CatalogCtx { http, credentials }
+        CatalogCtx { http, credentials, cache: None }
     }
 
     #[test]
@@ -468,6 +531,49 @@ mod tests {
         Tmdb::new().catalog(&ctx_with(&http, &credentials), &by_year).unwrap();
         let asked = http.seen.lock().unwrap().clone();
         assert!(asked.iter().any(|url| url.contains("discover/tv") && url.contains("first_air_date_year=2008")), "{asked:?}");
+    }
+
+    /// A cache in memory, so a test can see what was asked and what was kept.
+    #[derive(Default)]
+    struct Cache {
+        ids: Mutex<HashMap<(String, String, u64), Option<String>>>,
+    }
+
+    impl CatalogCache for Cache {
+        fn imdb_id(&self, source: &str, kind: &str, id: u64) -> Option<Option<String>> {
+            self.ids.lock().unwrap().get(&(source.to_owned(), kind.to_owned(), id)).cloned()
+        }
+        fn keep_imdb_id(&self, source: &str, kind: &str, id: u64, imdb: Option<&str>) {
+            self.ids.lock().unwrap().insert((source.to_owned(), kind.to_owned(), id), imdb.map(str::to_owned));
+        }
+    }
+
+    #[test]
+    fn a_page_pays_for_its_imdb_ids_once() {
+        let http = Fake::new();
+        let credentials = Keyed(Some("test-key"));
+        let cache = Cache::default();
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: Some(&cache) };
+        let tmdb = Tmdb::new();
+
+        let first = tmdb.catalog(&ctx, &CatalogRequest::first("movie")).unwrap();
+        assert_eq!(first.items.len(), 1);
+        let asked = |seen: &Mutex<Vec<String>>| seen.lock().unwrap().iter().filter(|url| url.contains("external_ids")).count();
+        assert_eq!(asked(&http.seen), 2, "the two titles of the page, once each");
+        assert_eq!(cache.imdb_id("tmdb", "movie", 603), Some(Some("tt0133093".to_owned())));
+        assert_eq!(cache.imdb_id("tmdb", "movie", 604), Some(None), "and the one with no id is remembered as such");
+
+        let second = tmdb.catalog(&ctx, &CatalogRequest::first("movie")).unwrap();
+        assert_eq!(second.items.len(), 1, "the same page, from the cache");
+        assert_eq!(asked(&http.seen), 2, "no id asked twice");
+    }
+
+    #[test]
+    fn the_catalogue_is_named_after_the_site() {
+        let http = Fake::new();
+        let credentials = Keyed(Some("test-key"));
+        let catalogs = Tmdb::new().catalogs(&ctx_with(&http, &credentials)).unwrap();
+        assert_eq!(catalogs[0].name, "TMDB", "`discover` is the endpoint, not the catalogue");
     }
 
     #[test]

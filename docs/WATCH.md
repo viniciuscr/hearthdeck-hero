@@ -310,7 +310,13 @@ Envelope, source `stremio-core`:
   `/search/{movie,tv}`, and paging is TMDB's own `page` (twenty a page, so `skip`
   becomes a page number). The API key is read from the credential store under
   `tmdb` and sent as `api_key` (the transport carries no headers); without one
-  the source says where to put it.
+  the source says where to put it. Its chip is called **TMDB**: `discover` is the
+  endpoint, not the catalogue.
+- TMDB answers TMDB ids, and the rest of Watch keys everything by IMDb id, so
+  each discover result costs one `/external_ids`. Those answers never change, so
+  they are kept under `<cache>/watch-catalog/ids/` (delete-safe), and the misses
+  of a page go out four at a time instead of twenty in a row; a title TMDB has no
+  IMDb id for is remembered as such and never asked again.
 - Probed with redirects followed — every catalog answers **307** to
   `cinemeta-catalogs.strem.io/<id>/catalog/…`, which the transport follows:
   `top` 50; `imdbRating` 49, then 50 at `skip=50`; `year/genre=1999` 50, and 50

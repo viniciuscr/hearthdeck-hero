@@ -12,7 +12,8 @@ pub mod provider;
 pub mod types;
 
 pub use catalog::{
-    CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
+    CatalogCache, CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor,
+    WatchCatalogSource,
 };
 pub use metadata::{Episode, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
 pub use provider::{Credentials, Ctx, Rail, RailDescriptor, ResolvedStream, Secret, StreamOrigin, WatchProvider};

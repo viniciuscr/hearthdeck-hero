@@ -30,12 +30,16 @@ pub struct State {
     busy: bool,
     offer: Option<LinkOffer>,
     notice: Option<SharedString>,
+    /// Whether a TMDB key is stored: read once, because Settings must not touch
+    /// the credential file on every frame, and updated when it changes.
+    pub tmdb_key: bool,
 }
 
 impl State {
     pub fn new(ctx: &PageCtx) -> Self {
         let linked = heronite_watch::store::read_auth(&ctx.app).ok().flatten().is_some();
-        Self { linked, busy: false, offer: None, notice: None }
+        let tmdb_key = heronite_watch::store::read_tmdb_key(&ctx.app).ok().flatten().is_some();
+        Self { linked, busy: false, offer: None, notice: None, tmdb_key }
     }
 }
 
@@ -188,7 +192,7 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
         .collect();
     let sources = card(source_rows);
 
-    let keyed = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().is_some();
+    let keyed = d.watch.tmdb_key;
     let key_buttons = {
         let mut buttons = div().flex().items_center().gap(px(8.));
         buttons = buttons.child(action_button(
@@ -302,6 +306,7 @@ fn save_tmdb_key(d: &mut SettingsPage, text: &str, cx: &mut Context<SettingsPage
     }
     match heronite_watch::store::write_tmdb_key(&d.ctx.app, key) {
         Ok(()) => {
+            d.watch.tmdb_key = true;
             d.watch.notice = Some(tr!("The TMDB API key was saved.").into());
             crate::collection::watch_catalog::catalogs_changed();
         }
@@ -317,6 +322,7 @@ fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     if let Err(error) = heronite_watch::store::clear_tmdb_key(&d.ctx.app) {
         log::warn!("clearing the TMDB key: {error:#}");
     }
+    d.watch.tmdb_key = false;
     crate::collection::watch_catalog::catalogs_changed();
     cx.notify();
 }
@@ -456,7 +462,7 @@ pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
             on,
         ));
     }
-    let keyed = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().is_some();
+    let keyed = d.watch.tmdb_key;
     rows.push(Row::info("watch-tmdb-key", tr!("TMDB API key"), if keyed { tr!("Set") } else { tr!("Not set") }));
     rows.push(Row::action("watch-tmdb-key-paste", tr!("Paste the key from the clipboard")));
     rows.push(Row::action("watch-tmdb-key-set", tr!("Type it instead")));

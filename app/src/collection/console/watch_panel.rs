@@ -101,7 +101,8 @@ impl CollectionView {
                 .iter()
                 .map(|(id, catalog)| {
                     let name = catalog_name(&catalog.id, &catalog.name);
-                    let label = if several { format!("{} · {name}", self.watch_source_name(id)) } else { name.to_string() };
+                    let source = self.watch_source_name(id);
+                    let label = if several && source != name { format!("{source} · {name}") } else { name.to_string() };
                     SharedString::from(label)
                 })
                 .collect();
@@ -119,13 +120,13 @@ impl CollectionView {
                         to(Item::Sort, &pointer::along(at, k, Pad::Left, Pad::Right))
                     }));
                 }
-                if let Some(filter) = descriptor.filters.first() {
+                for (index, filter) in descriptor.filters.iter().enumerate() {
                     let chosen_value = self.watch_feed_filters(kind).into_iter().find(|(id, _)| *id == filter.id).map(|(_, value)| value);
                     let at = chosen_value.as_ref().and_then(|value| filter.values.iter().position(|v| v == value)).map_or(0, |i| i + 1);
                     let text = chosen_value.unwrap_or_else(|| tr!("All").to_string());
-                    let on = focus == Item::Filter;
+                    let on = focus == Item::Filter(index);
                     body = body.child(row(
-                        Item::Filter,
+                        Item::Filter(index),
                         filter_label(&filter.id, &filter.label).to_string(),
                         Icon::GridView,
                         kit::choice_clickable(
@@ -134,8 +135,8 @@ impl CollectionView {
                             at > 0,
                             at < filter.values.len(),
                             140.,
-                            to(Item::Filter, &[Pad::Left]),
-                            to(Item::Filter, &[Pad::Right]),
+                            to(Item::Filter(index), &[Pad::Left]),
+                            to(Item::Filter(index), &[Pad::Right]),
                         )
                         .into_any_element(),
                     ));

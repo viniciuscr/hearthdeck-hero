@@ -38,7 +38,8 @@ pub fn catalogs(app: &AppPaths, provider: &str) -> Result<Vec<CatalogDescriptor>
 /// [`catalogs`] with an injected transport, for tests.
 pub fn catalogs_with(http: &dyn Transport, app: &AppPaths, source: &str) -> Result<Vec<CatalogDescriptor>> {
     let credentials = StoreCredentials::new(app);
-    let ctx = CatalogCtx { http, credentials: &credentials };
+    let ids = heronite_watch_state::catalog_cache::CatalogIds::at(app);
+    let ctx = CatalogCtx { http, credentials: &credentials, cache: Some(&ids) };
     source_of(source)?.catalogs(&ctx)
 }
 
@@ -68,7 +69,8 @@ pub fn page(app: &AppPaths, source: &str, request: &CatalogRequest) -> Result<Ca
 /// [`page`] with an injected transport, for tests.
 pub fn page_with(http: &dyn Transport, app: &AppPaths, source: &str, request: &CatalogRequest) -> Result<CatalogPage> {
     let credentials = StoreCredentials::new(app);
-    let ctx = CatalogCtx { http, credentials: &credentials };
+    let ids = heronite_watch_state::catalog_cache::CatalogIds::at(app);
+    let ctx = CatalogCtx { http, credentials: &credentials, cache: Some(&ids) };
     let mut page = source_of(source)?.catalog(&ctx, request)?;
     let key = feed_key(source, request);
     for item in &mut page.items {

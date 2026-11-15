@@ -75,8 +75,18 @@ pub trait WatchCatalogSource: Send + Sync {
     fn catalog(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest) -> Result<CatalogPage>; // a page, and `more`
 }
 
-/// A catalog source's own transport and credentials (TMDB's key; Cinemeta's nothing).
-pub struct CatalogCtx<'a> { pub http: &'a dyn Transport, pub credentials: &'a dyn Credentials }
+/// What a source may keep between runs: TMDB's ids resolved to IMDb ids once.
+pub trait CatalogCache: Send + Sync {
+    fn imdb_id(&self, source: &str, kind: &str, id: u64) -> Option<Option<String>>; // Some(None): asked, has none
+    fn keep_imdb_id(&self, source: &str, kind: &str, id: u64, imdb: Option<&str>);
+}
+
+/// A catalog source's own transport, credentials and cache (TMDB's key; Cinemeta's nothing).
+pub struct CatalogCtx<'a> {
+    pub http: &'a dyn Transport,
+    pub credentials: &'a dyn Credentials,
+    pub cache: Option<&'a dyn CatalogCache>,
+}
 
 /// Opaque to core: each provider decodes its own credential type.
 pub trait Credentials: Send + Sync {
@@ -162,6 +172,9 @@ module and a re-export cannot share a name (`collection` is the case).
 - `heronite-watch-state::settings` owns `<config>/watch-settings.json`: the
   choices that are neither theme, account nor rails (today: whether the service
   this app started is stopped when a session ends). Unknown fields are kept.
+- `heronite-watch-state::catalog_cache` owns `<cache>/watch-catalog/ids/**`: the
+  IMDb id TMDB holds for its own ids, one file each, kept between runs because
+  they never change. Safe to delete; the source asks again.
 - `heronite-watch-state::details` owns `<cache>/watch-details/**`: one file per
   `(provider, kind, id)` holding a fetch time and the `TitleDetails` a metadata
   source answered. Fresh for seven days, served stale when no source can be

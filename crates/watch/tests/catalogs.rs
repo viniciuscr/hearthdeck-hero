@@ -124,7 +124,7 @@ impl WatchCatalogSource for Stub {
 fn a_source_of_its_own_is_all_the_screens_need() {
     let http = Fake { seen: Mutex::new(Vec::new()) };
     let credentials = NoCredentials;
-    let ctx = CatalogCtx { http: &http, credentials: &credentials };
+    let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
 
     let catalogs = Stub.catalogs(&ctx).unwrap();
     assert_eq!(catalogs.len(), 1);

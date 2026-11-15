@@ -195,7 +195,7 @@ mod tests {
     fn the_manifest_decides_the_catalogs_and_their_controls() {
         let http = Fake { seen: Mutex::new(Vec::new()) };
         let credentials = NoCredentials;
-        let ctx = CatalogCtx { http: &http, credentials: &credentials };
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
         let catalogs = Cinemeta::builtin().catalogs(&ctx).unwrap();
         let kinds: Vec<(&str, &str)> = catalogs.iter().map(|catalog| (catalog.kind.as_str(), catalog.id.as_str())).collect();
         assert_eq!(
@@ -214,7 +214,7 @@ mod tests {
     fn a_page_marks_the_provider_that_plays_it_and_asks_for_the_extras() {
         let http = Fake { seen: Mutex::new(Vec::new()) };
         let credentials = NoCredentials;
-        let ctx = CatalogCtx { http: &http, credentials: &credentials };
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
         let mut request = CatalogRequest::first("movie");
         request.sort = CatalogSort::Rating;
         request.filters = vec![("genre".into(), "Sci-Fi".into())];

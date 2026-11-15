@@ -38,8 +38,8 @@ pub(super) enum Item {
     Search,
     /// The provider's catalogs (a catalog tab).
     Catalog,
-    /// One filter the provider declares (a catalog tab).
-    Filter,
+    /// One of the filters the source declares (a catalog tab), by index.
+    Filter(usize),
     Show,
     Sort,
     Favourites,
@@ -112,8 +112,10 @@ impl CollectionView {
                     if descriptor.as_ref().is_some_and(|(_, descriptor)| descriptor.sorts.len() > 1) {
                         v.push(Item::Sort);
                     }
-                    if descriptor.as_ref().is_some_and(|(_, descriptor)| !descriptor.filters.is_empty()) {
-                        v.push(Item::Filter);
+                    if let Some((_, descriptor)) = descriptor.as_ref() {
+                        for index in 0..descriptor.filters.len() {
+                            v.push(Item::Filter(index));
+                        }
                     }
                 }
                 return v;
@@ -175,7 +177,7 @@ impl CollectionView {
             if let Some(kind) = crate::collection::watch_catalog::feed_kind(&spec.source) {
                 let cycling = matches!(pad, Pad::Left | Pad::Right | Pad::A);
                 let catalogs = self.watch_catalogs_of(kind);
-                if cycling && !catalogs.is_empty() && matches!(items[i], Item::Catalog | Item::Sort | Item::Filter) {
+                if cycling && !catalogs.is_empty() && matches!(items[i], Item::Catalog | Item::Sort | Item::Filter(_)) {
                     let source = self.watch_feed_source(kind);
                     let current = self.watch_feed_catalog(kind);
                     let sort = self.watch_feed_sort(kind);
@@ -217,8 +219,8 @@ impl CollectionView {
                                 return true;
                             }
                         }
-                        Item::Filter => {
-                            if let Some(filter) = descriptor.and_then(|(_, descriptor)| descriptor.filters.into_iter().next()) {
+                        Item::Filter(index) => {
+                            if let Some(filter) = descriptor.as_ref().and_then(|(_, descriptor)| descriptor.filters.get(index)).cloned() {
                                 let chosen = filters.iter().find(|(id, _)| *id == filter.id).map(|(_, value)| value.clone());
                                 let at =
                                     chosen.as_ref().and_then(|value| filter.values.iter().position(|v| v == value)).map_or(0, |i| i + 1);
