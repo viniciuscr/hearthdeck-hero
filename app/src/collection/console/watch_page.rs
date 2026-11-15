@@ -24,6 +24,7 @@ use heronite_i18n::tr;
 use heronite_images::{ImageRef, Variant};
 use heronite_watch::metadata::{Episode, Fact, TitleDetails};
 
+use super::super::watch_personal::Flag;
 use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection};
 use super::super::CollectionView;
 use super::game::facts_table;
@@ -354,9 +355,9 @@ impl CollectionView {
         let mut rows = vec![Row::action("primary", label).icon(icon)];
         // The person's two flags: local, instant, and the label is the state.
         let item = crate::fork::watch::sources::personal_item(game);
-        let (watchlisted, favourited) = self.watch_personal_flags(&item);
-        rows.push(Row::toggle("watch-watchlist", if watchlisted { tr!("In watchlist") } else { tr!("Add to watch") }, watchlisted));
-        rows.push(Row::toggle("watch-favourite", if favourited { tr!("In favourites") } else { tr!("Add to favourites") }, favourited));
+        for (flag, on) in self.watch_personal_states(&item) {
+            rows.push(Row::toggle(flag.row(), flag.label(on), on));
+        }
         // A film's streams are the card's second tab, not rows of the list.
         let Some(details) = details.filter(|details| !details.episodes.is_empty()) else { return rows };
         let selection = self.watch_ensure_selection(&game.key, details);
@@ -489,6 +490,15 @@ impl CollectionView {
                     self.watch_pick_season(&game.key, &details, index);
                     self.watch_forget_streams();
                     cx.notify();
+                }
+                true
+            }
+            // A on one of the person's two flags: a local write, and the row is
+            // rebuilt from the file on the next paint, its label the new state.
+            Outcome::Changed(id, Value::Toggle(_)) => {
+                match Flag::of(&id) {
+                    Some(flag) => self.watch_toggle_personal(&game, flag, cx),
+                    None => cx.notify(),
                 }
                 true
             }
