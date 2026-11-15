@@ -301,6 +301,7 @@ Landed, each its own commit:
 | `e4523e2b` | slice 3b-3: the four locales for those rows |
 | `9a338ac2` | slice 3b-4: `a_rail_is_its_rules_page`, end to end through a fake that answers `/discover` and `/external_ids` |
 | `40ed43d6`, `4a709b66` | the two reviews' fixes: a rail turned off (or no longer holding a title) leaves the library with it, nothing builds a transport on a render path, a corrupt `watch-personal.json` is kept as `.bak` |
+| `9723587e` | **fix:** pressing *Add to watch* / *Add to favourites* on the film page wrote nothing — the page's handler swallowed `Outcome::Changed`, and the `watch-` arm it was believed to reach belonged to the games' page. The row id now lives in one `Flag` (drawn by the page, read back by the press), and a test walks row → A → flag → write |
 
 **Slice 3b is landed.** What the implementation settles, for the next slice:
 
