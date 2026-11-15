@@ -14,6 +14,17 @@ use heronite_watch_state::store::StoreCredentials;
 
 pub use heronite_watch_core::collections::{mark, CollectionDescriptor, CollectionSourceDescriptor, WatchCollectionSource};
 
+/// The collection sources this build has, in the order Settings lists them.
+pub fn sources() -> &'static [&'static dyn WatchCollectionSource] {
+    heronite_watch_catalogs::collection_sources()
+}
+
+/// How Settings names the source `id` (`tmdb` → TMDB), or the id when this build
+/// does not have it.
+pub fn source_name(id: &str) -> String {
+    sources().iter().find(|source| source.descriptor().id == id).map_or_else(|| id.to_owned(), |source| source.descriptor().name.to_owned())
+}
+
 /// Every rail the registered sources declare, with the source that answers it.
 pub fn descriptors(app: &AppPaths) -> Vec<(String, CollectionDescriptor)> {
     let http = UreqTransport::new();
@@ -101,6 +112,14 @@ mod tests {
         assert_eq!(ids, ["tmdb:top-rated:movie", "tmdb:popular:movie", "tmdb:top-rated:series", "tmdb:popular:series"]);
         assert_eq!(rails[0].0, "tmdb", "the source that answers it");
         assert!(fake.seen.lock().unwrap().is_empty(), "declaring costs nothing");
+    }
+
+    #[test]
+    fn settings_can_name_a_source_by_its_id() {
+        let ids: Vec<&str> = sources().iter().map(|source| source.descriptor().id).collect();
+        assert_eq!(ids, ["tmdb"]);
+        assert_eq!(source_name("tmdb"), "TMDB");
+        assert_eq!(source_name("gone"), "gone", "an id this build does not have is its own name");
     }
 
     #[test]

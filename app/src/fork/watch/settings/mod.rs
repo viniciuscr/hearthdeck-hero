@@ -313,6 +313,20 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
             .child(key_buttons),
     );
 
+    // The collection rails: the source order is the rail order, and the ids are
+    // the sources' own, so a settings file stays readable.
+    let collections: Vec<AnyElement> = heronite_watch::collections::descriptors(&d.ctx.app)
+        .into_iter()
+        .map(|(source, rail)| {
+            let on = settings.collections.contains(&rail.id);
+            let note = rail_note(d, &source);
+            let label = SharedString::from(crate::fork::watch::rails::title(&rail));
+            toggle_row(format!("watch-collection-{}", rail.id), label, Some(note.as_str()), on)
+                .on_click(cx.listener(move |d, _, _, cx| set_collection(d, &rail.id, !on, cx)))
+                .into_any_element()
+        })
+        .collect();
+
     let mut column = div()
         .flex()
         .flex_col()
@@ -323,6 +337,12 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
         ))))
         .child(sources)
         .child(key);
+    if !collections.is_empty() {
+        column = column
+            .child(caption(tr!("Collections")))
+            .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!("Rails the Shelf tab draws, in this order."))))
+            .child(card(collections));
+    }
     if let Some(notice) = &d.watch.notice {
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
     }
@@ -331,6 +351,51 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
 
 fn rail_on(prefs: &ConsolePrefs, kind: &str) -> bool {
     prefs.theme.shelves.iter().any(|shelf| shelf.kind == kind && shelf.on)
+}
+
+/// Whether the app can see that a collection source has its key. A source whose
+/// key the app does not track is taken as keyed: its rows say nothing.
+fn source_keyed(d: &SettingsPage, source: &str) -> bool {
+    match source {
+        "tmdb" => d.watch.tmdb_key,
+        _ => true,
+    }
+}
+
+/// What a collection row says under its name: where the rail is drawn, or the key
+/// its source still needs.
+fn rail_note(d: &SettingsPage, source: &str) -> String {
+    if source_keyed(d, source) {
+        return tr!("Shown in the Shelf tab.").to_string();
+    }
+    let name = heronite_watch::collections::source_name(source);
+    tr!("{source} has no key yet: add it above, or this rail stays empty.", source = name).to_string()
+}
+
+/// Turns a collection rail on or off. The list is also the rail order: a rail
+/// turned on joins at the end, so a new one is drawn last. The rails are resolved
+/// with the library, so the Collection looks again.
+fn set_collection(d: &mut SettingsPage, id: &str, on: bool, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    toggled(&mut settings.collections, id, on);
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    cx.emit(crate::pages::PageEvent::LibraryChanged);
+    cx.notify();
+}
+
+/// The enabled rails after a toggle: a rail turned on joins at the end (the list
+/// is the rail order), and one already there keeps its place — a press must not
+/// reorder the tab.
+fn toggled(collections: &mut Vec<String>, id: &str, on: bool) {
+    if on {
+        if !collections.iter().any(|rail| rail == id) {
+            collections.push(id.to_owned());
+        }
+    } else {
+        collections.retain(|rail| rail != id);
+    }
 }
 
 /// Turns a catalog source on or off. A catalog decides what the tabs list; it
@@ -385,6 +450,9 @@ fn save_tmdb_key(d: &mut SettingsPage, text: &str, cx: &mut Context<SettingsPage
             d.watch.tmdb_key = true;
             d.watch.notice = Some(tr!("The TMDB API key was saved.").into());
             crate::collection::watch_catalog::catalogs_changed();
+            // The collection rails are resolved with the library: the ones that
+            // were waiting for this key are drawn from now on.
+            cx.emit(crate::pages::PageEvent::LibraryChanged);
         }
         Err(error) => {
             log::warn!("saving the TMDB key: {error:#}");
@@ -400,6 +468,9 @@ fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     }
     d.watch.tmdb_key = false;
     crate::collection::watch_catalog::catalogs_changed();
+    // What that key was resolving (the collection rails, TMDB's catalogs) is no
+    // longer there to draw.
+    cx.emit(crate::pages::PageEvent::LibraryChanged);
     cx.notify();
 }
 
@@ -545,6 +616,18 @@ pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
     if keyed {
         rows.push(Row::action("watch-tmdb-key-remove", tr!("Remove the TMDB API key")));
     }
+    // The collection rails: one row each, in the order they are drawn.
+    let collections = heronite_watch::collections::descriptors(&d.ctx.app);
+    if !collections.is_empty() {
+        rows.push(Row::header(tr!("Collections")));
+        for (source, rail) in collections {
+            let on = settings.collections.contains(&rail.id);
+            let title = SharedString::from(crate::fork::watch::rails::title(&rail));
+            let note = rail_note(d, &source);
+            rows.push(Row::toggle(SharedString::from(format!("watch-collection:{}", rail.id)), title, on).desc(note));
+        }
+        rows.push(Row::info("watch-collections-note", tr!("Collections"), tr!("Rails the Shelf tab draws, in this order.")));
+    }
     rows.push(Row::info("watch-catalogs-note", tr!("Catalogs"), tr!("A catalog decides what is listed; it never changes what plays.")));
     rows
 }
@@ -562,6 +645,10 @@ pub(crate) fn catalog_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-catalog:") => {
             let source = id.trim_start_matches("watch-catalog:").to_owned();
             set_catalog_source(d, &source, on, cx);
+        }
+        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-collection:") => {
+            let rail = id.trim_start_matches("watch-collection:").to_owned();
+            set_collection(d, &rail, on, cx);
         }
         _ => {}
     }
@@ -608,4 +695,27 @@ fn set_rail(d: &mut SettingsPage, kind: &str, on: bool, cx: &mut Context<Setting
         }
     });
     cx.notify();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // `gpui_kit::*` brings gpui's `test` macro into scope.
+    use core::prelude::v1::test;
+
+    #[test]
+    fn a_rail_joins_the_end_of_the_order_and_leaves_it() {
+        let mut collections = vec!["tmdb:top-rated:movie".to_owned()];
+        toggled(&mut collections, "tmdb:popular:movie", true);
+        assert_eq!(collections, ["tmdb:top-rated:movie", "tmdb:popular:movie"], "a new rail is drawn last");
+
+        toggled(&mut collections, "tmdb:popular:movie", true);
+        assert_eq!(collections.len(), 2, "pressing it on twice does not move it");
+
+        toggled(&mut collections, "tmdb:top-rated:movie", false);
+        assert_eq!(collections, ["tmdb:popular:movie"], "the one left keeps its place");
+
+        toggled(&mut collections, "gone", false);
+        assert_eq!(collections, ["tmdb:popular:movie"], "an id the build does not have is not a fault");
+    }
 }
