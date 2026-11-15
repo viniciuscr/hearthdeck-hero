@@ -147,6 +147,7 @@ the app uses.
 | `heronite_watch::catalog` | `sources`, `enabled`, `catalogs`, `catalogs_with`, `page`, `page_with`, `more_with`, `replace_with`, `feed_key`, `CatalogRequest`, `CatalogSort`, `CatalogDescriptor`, `WatchCatalogSource` |
 | `heronite_watch::settings` | `read`, `write`, `Settings` (`catalogSources`, `metadataSources`, the service stop, Settings → Watch) |
 | `heronite_watch::service` | `launches`, `Launch` (headless runtime or launcher, each with its `command`), `is_up`, `PROBE`, `ATTEMPT`, `LAUNCHER_ENV` |
+| `heronite_watch::personal` | `read`, `write`, `toggle_watchlist`, `toggle_favourite`, `PersonalLibrary`, `PersonalList`, `same_title` (the person keeps it; TMDB mirrors it later) |
 | `heronite_watch::metadata` | `details`, `details_with`, `sources`, `enabled`, `TitleDetails` (with open `Fact` extras), `TitleRef` |
 | `heronite_watch::player` | `PlaybackOutcome` |
 | `heronite_watch::types` | `StreamChoice` |
@@ -173,6 +174,11 @@ module and a re-export cannot share a name (`collection` is the case).
 - `heronite-watch-state::settings` owns `<config>/watch-settings.json`: the
   choices that are neither theme, account nor rails (today: whether the service
   this app started is stopped when a session ends). Unknown fields are kept.
+- `heronite-watch-state::personal` owns `<config>/watch-personal.json`: the
+  person's watchlist, favourites and lists. **User data**, not cache — a library
+  refresh never touches it, a cache wipe never loses it, it is hand-editable, its
+  writes are atomic, unknown fields are kept, and an unreadable file is an empty
+  shelf warned about once.
 - `heronite-watch-state::catalog_cache` owns `<cache>/watch-catalog/ids/**`: the
   IMDb id TMDB holds for its own ids, one file each, kept between runs because
   they never change. Safe to delete; the source asks again.

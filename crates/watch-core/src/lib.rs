@@ -8,6 +8,7 @@ pub mod auth;
 pub mod catalog;
 pub mod http;
 pub mod metadata;
+pub mod personal;
 pub mod provider;
 pub mod types;
 
@@ -16,6 +17,7 @@ pub use catalog::{
     WatchCatalogSource,
 };
 pub use metadata::{Episode, Fact, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
+pub use personal::{same_title, PersonalLibrary, PersonalList};
 pub use provider::{Credentials, Ctx, Rail, RailDescriptor, ResolvedStream, Secret, StreamOrigin, WatchProvider};
 
 pub type Result<T> = anyhow::Result<T>;
