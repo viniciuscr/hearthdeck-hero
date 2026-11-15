@@ -176,6 +176,82 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
     column.into_any_element()
 }
 
+/// Settings → Watch → Metadata providers: what describes a title, asked in the
+/// order they are listed.
+pub fn render_metadata(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let rows: Vec<AnyElement> = heronite_watch::metadata::sources()
+        .iter()
+        .map(|source| {
+            let descriptor = source.descriptor();
+            let on = settings.metadata_sources.iter().any(|id| id == descriptor.id);
+            toggle_row(format!("watch-metadata-{}", descriptor.id), SharedString::from(descriptor.name.to_owned()), None, on)
+                .on_click(cx.listener(move |d, _, _, cx| set_metadata_source(d, descriptor.id, !on, cx)))
+                .into_any_element()
+        })
+        .collect();
+    let mut column = div()
+        .flex()
+        .flex_col()
+        .gap(px(14.))
+        .child(caption(tr!("Metadata providers")))
+        .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!(
+            "What describes a film or a series on its page. They are asked in this order: the first answer for a field wins, the next fills what is still empty."
+        ))))
+        .child(card(rows));
+    if let Some(notice) = &d.watch.notice {
+        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
+    }
+    column.into_any_element()
+}
+
+/// Settings → Watch → Metadata providers, as rows.
+pub(crate) fn metadata_rows(d: &SettingsPage) -> Vec<Row> {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let mut rows = vec![Row::header(tr!("Metadata providers"))];
+    for source in heronite_watch::metadata::sources() {
+        let descriptor = source.descriptor();
+        let on = settings.metadata_sources.iter().any(|id| id == descriptor.id);
+        rows.push(Row::toggle(
+            SharedString::from(format!("watch-metadata:{}", descriptor.id)),
+            SharedString::from(descriptor.name.to_owned()),
+            on,
+        ));
+    }
+    rows.push(Row::info(
+        "watch-metadata-order",
+        tr!("Order"),
+        tr!("The first answer for a field wins; the next fills what is still empty."),
+    ));
+    rows
+}
+
+/// The metadata page's rows: the source toggles.
+pub(crate) fn metadata_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
+    if let Outcome::Changed(id, Value::Toggle(on)) = outcome {
+        if let Some(source) = id.strip_prefix("watch-metadata:") {
+            set_metadata_source(d, source, on, cx);
+        }
+    }
+}
+
+/// Turns a metadata source on or off. The list is also the priority order, so a
+/// source turned on joins at the end — behind the one that answers first.
+fn set_metadata_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    if on {
+        if !settings.metadata_sources.iter().any(|id| id == source) {
+            settings.metadata_sources.push(source.to_owned());
+        }
+    } else {
+        settings.metadata_sources.retain(|id| id != source);
+    }
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    cx.notify();
+}
+
 /// Settings → Watch → Catalog providers: what the Movies and Series tabs may
 /// browse. Nothing here can change how a title plays.
 pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {

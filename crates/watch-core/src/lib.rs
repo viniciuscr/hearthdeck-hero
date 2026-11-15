@@ -15,7 +15,7 @@ pub use catalog::{
     CatalogCache, CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor,
     WatchCatalogSource,
 };
-pub use metadata::{Episode, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
+pub use metadata::{Episode, Fact, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
 pub use provider::{Credentials, Ctx, Rail, RailDescriptor, ResolvedStream, Secret, StreamOrigin, WatchProvider};
 
 pub type Result<T> = anyhow::Result<T>;

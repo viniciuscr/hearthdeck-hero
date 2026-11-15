@@ -190,6 +190,7 @@ fn section_help(s: Section) -> &'static str {
         Section::ConsoleMode => tr!("Themes, tabs, covers and controls of the TV mode"),
         Section::Watch => tr!("The Stremio account and the service that plays torrents"),
         Section::WatchCatalogs => tr!("What the Movies and Series tabs may browse"),
+        Section::WatchMetadata => tr!("What describes a film or a series on its page"),
         Section::Advanced => tr!("Folders, cache, copy settings"),
         Section::GameDefaults => tr!("Values new games start with"),
         Section::Downloads => tr!("Store downloads and updates"),

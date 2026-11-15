@@ -38,7 +38,7 @@ use crate::theme;
 /// One label / value line of the page's card.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DetailLine {
-    label: &'static str,
+    label: SharedString,
     value: String,
 }
 
@@ -76,30 +76,30 @@ fn names(values: &[String]) -> Option<String> {
 /// source had none (or could not be asked).
 fn detail_lines(details: Option<&TitleDetails>, library_genres: &[String], locale: DateLocale) -> Vec<DetailLine> {
     let mut lines: Vec<DetailLine> = Vec::new();
-    let mut push = |label: &'static str, value: Option<String>| {
+    let mut push = |label: SharedString, value: Option<String>| {
         if let Some(value) = value.map(|value| value.trim().to_owned()).filter(|value| !value.is_empty()) {
             lines.push(DetailLine { label, value });
         }
     };
     if let Some(details) = details {
-        push(tr!("Directed by"), names(&details.directors));
-        push(tr!("Written by"), names(&details.writers));
-        push(tr!("Starring"), names(&details.cast));
+        push(tr!("Directed by").into(), names(&details.directors));
+        push(tr!("Written by").into(), names(&details.writers));
+        push(tr!("Starring").into(), names(&details.cast));
         push(
-            tr!("Released"),
+            tr!("Released").into(),
             details.released.as_deref().map(|at| heronite_data::text::format_timestamp(at, locale)).filter(|at| !at.trim().is_empty()),
         );
-        push(tr!("Runtime"), details.runtime.clone());
-        push(tr!("Rating"), details.rating.clone());
-        push(tr!("Genres"), names(&details.genres));
-        push(tr!("Country"), names(&details.countries));
-        push(tr!("Awards"), details.awards.clone());
-        push(tr!("Status"), details.series_status.clone());
-        push(tr!("Seasons"), (details.season_count() > 0).then(|| details.season_count().to_string()));
-        push(tr!("Episodes"), (details.episode_count() > 0).then(|| details.episode_count().to_string()));
+        push(tr!("Runtime").into(), details.runtime.clone());
+        push(tr!("Rating").into(), details.rating.clone());
+        push(tr!("Genres").into(), names(&details.genres));
+        push(tr!("Country").into(), names(&details.countries));
+        push(tr!("Awards").into(), details.awards.clone());
+        push(tr!("Status").into(), details.series_status.clone());
+        push(tr!("Seasons").into(), (details.season_count() > 0).then(|| details.season_count().to_string()));
+        push(tr!("Episodes").into(), (details.episode_count() > 0).then(|| details.episode_count().to_string()));
     }
     if details.is_none_or(|details| details.genres.is_empty()) {
-        push(tr!("Genres"), names(library_genres));
+        push(tr!("Genres").into(), names(library_genres));
     }
     lines
 }
@@ -276,8 +276,7 @@ impl CollectionView {
                     );
                 }
                 if !lines.is_empty() {
-                    let table: Vec<(SharedString, String)> =
-                        lines.iter().map(|line| (SharedString::from(line.label), line.value.clone())).collect();
+                    let table: Vec<(SharedString, String)> = lines.iter().map(|line| (line.label.clone(), line.value.clone())).collect();
                     about = about.child(div().h(px(1.)).flex_none().bg(kit::ink(0.08))).child(facts_table(&table, columns));
                 }
                 if failed {
@@ -539,7 +538,7 @@ mod tests {
     #[test]
     fn the_card_lists_the_films_people_and_no_game_row() {
         let lines = detail_lines(Some(&matrix()), &[], DateLocale::En);
-        let labels: Vec<&str> = lines.iter().map(|line| line.label).collect();
+        let labels: Vec<&str> = lines.iter().map(|line| line.label.as_ref()).collect();
         assert_eq!(labels, ["Directed by", "Written by", "Starring", "Released", "Runtime", "Rating", "Genres", "Country", "Awards"]);
         assert_eq!(lines[0].value, "Lana Wachowski, Lilly Wachowski");
         assert_eq!(lines[3].value, "3/31/1999", "the released date follows the library's locale");
@@ -621,7 +620,7 @@ mod tests {
     #[test]
     fn without_a_source_the_library_genres_stand_in() {
         let lines = detail_lines(None, &["Drama".into()], DateLocale::En);
-        assert_eq!(lines, [DetailLine { label: "Genres", value: "Drama".into() }]);
+        assert_eq!(lines, [DetailLine { label: "Genres".into(), value: "Drama".into() }]);
         assert!(detail_lines(None, &[], DateLocale::En).is_empty());
     }
 

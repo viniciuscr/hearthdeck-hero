@@ -147,6 +147,25 @@ pub struct TitleDetails {
     pub background: Option<String>,
     #[serde(default)]
     pub logo: Option<String>,
+    /// Display-only facts a source knows and the page shows as they come: a
+    /// tagline, a budget, a network, where it can be watched. A source that knows
+    /// more adds more rows without the page changing.
+    #[serde(default)]
+    pub extras: Vec<Fact>,
+}
+
+/// One display-only fact: a label and its value, and the source that gave it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fact {
+    /// Stable id (`tagline`, `budget`, `network`): the first source to give one
+    /// keeps it, and the screens may order or localize the ids they know.
+    pub id: String,
+    /// How the row is named when the screens do not know the id.
+    pub label: String,
+    pub value: String,
+    /// The source's id (`tmdb`), for provenance.
+    #[serde(default)]
+    pub source: String,
 }
 
 /// One episode of a series: what the picker row and the stream request need.
@@ -182,6 +201,50 @@ impl Episode {
 }
 
 impl TitleDetails {
+    /// Fills what this answer has not got from `other`: the first source to fill
+    /// a field keeps it, a later one fills only what is still empty, and extras
+    /// are joined with the first of each id winning. `source` stays the first
+    /// source that answered — the extras carry their own.
+    pub fn merge(&mut self, other: TitleDetails) {
+        fn fill(mine: &mut Option<String>, theirs: Option<String>) {
+            let blank = mine.as_deref().is_none_or(|value| value.trim().is_empty());
+            if blank {
+                *mine = theirs;
+            }
+        }
+        fill(&mut self.year, other.year);
+        fill(&mut self.released, other.released);
+        fill(&mut self.runtime, other.runtime);
+        fill(&mut self.rating, other.rating);
+        fill(&mut self.description, other.description);
+        fill(&mut self.awards, other.awards);
+        fill(&mut self.series_status, other.series_status);
+        fill(&mut self.poster, other.poster);
+        fill(&mut self.background, other.background);
+        fill(&mut self.logo, other.logo);
+        for (mine, theirs) in [
+            (&mut self.genres, other.genres),
+            (&mut self.directors, other.directors),
+            (&mut self.writers, other.writers),
+            (&mut self.cast, other.cast),
+            (&mut self.countries, other.countries),
+        ] {
+            if mine.is_empty() {
+                *mine = theirs;
+            }
+        }
+        // One source's episode list is what the picker pages through, not two
+        // half-lists stitched together.
+        if self.episodes.is_empty() {
+            self.episodes = other.episodes;
+        }
+        for fact in other.extras {
+            if !self.extras.iter().any(|kept| kept.id == fact.id) {
+                self.extras.push(fact);
+            }
+        }
+    }
+
     /// The source's description, or the library's when it has none.
     pub fn description_or<'a>(&'a self, fallback: Option<&'a str>) -> Option<&'a str> {
         self.description.as_deref().filter(|d| !d.trim().is_empty()).or(fallback)
@@ -212,5 +275,56 @@ impl TitleDetails {
     /// The episode with this video id, when the source lists it.
     pub fn episode_with_id(&self, id: &str) -> Option<&Episode> {
         self.episodes.iter().find(|episode| episode.id == id)
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn fact(id: &str, value: &str, source: &str) -> Fact {
+        Fact { id: id.into(), label: id.into(), value: value.into(), source: source.into() }
+    }
+
+    #[test]
+    fn a_merge_keeps_the_first_answer_and_fills_the_gaps() {
+        let mut first = TitleDetails {
+            source: "tmdb".into(),
+            id: "tt0133093".into(),
+            kind: "movie".into(),
+            name: "The Matrix".into(),
+            runtime: Some("136 min".into()),
+            cast: vec!["Keanu Reeves".into()],
+            extras: vec![fact("tagline", "Free your mind", "tmdb")],
+            ..TitleDetails::default()
+        };
+        let second = TitleDetails {
+            source: "cinemeta".into(),
+            id: "tt0133093".into(),
+            kind: "movie".into(),
+            name: "The Matrix".into(),
+            runtime: Some("2h 16m".into()),
+            rating: Some("8.7".into()),
+            directors: vec!["Lana Wachowski".into(), "Lilly Wachowski".into()],
+            extras: vec![fact("tagline", "Welcome to the real world", "cinemeta"), fact("awards", "4 Oscars", "cinemeta")],
+            ..TitleDetails::default()
+        };
+
+        first.merge(second);
+
+        assert_eq!(first.source, "tmdb", "the record keeps where it came from");
+        assert_eq!(first.runtime.as_deref(), Some("136 min"), "the first answer keeps the field");
+        assert_eq!(first.rating.as_deref(), Some("8.7"), "and the second fills what was empty");
+        assert_eq!(first.directors.len(), 2, "a list the first source lacked is taken whole");
+        assert_eq!(first.cast.len(), 1, "a list the first source gave is not replaced");
+        let extras: Vec<(&str, &str)> = first.extras.iter().map(|fact| (fact.id.as_str(), fact.source.as_str())).collect();
+        assert_eq!(extras, [("tagline", "tmdb"), ("awards", "cinemeta")], "extras are joined, the first of each id winning");
+    }
+
+    #[test]
+    fn a_blank_field_counts_as_empty() {
+        let mut first = TitleDetails { runtime: Some("  ".into()), ..TitleDetails::default() };
+        first.merge(TitleDetails { runtime: Some("136 min".into()), ..TitleDetails::default() });
+        assert_eq!(first.runtime.as_deref(), Some("136 min"));
     }
 }

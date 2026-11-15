@@ -81,7 +81,7 @@ fn an_answer_is_cached_and_the_next_open_asks_nothing() {
     let second = details_with(&http, &app, &movie()).unwrap().expect("the cache answers");
     assert_eq!(second, first);
     assert_eq!(http.asked(), 1, "a fresh answer is not asked for again");
-    assert!(details::read(&app.cache.join(details::ROOT), &movie()).is_some());
+    assert!(details::read(&app.cache.join(details::ROOT), &movie(), "cinemeta").is_some());
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn a_stale_answer_is_served_when_the_source_cannot_be_asked() {
     let app = app(dir.path());
     let cached = TitleDetails { id: "tt0133093".into(), kind: "movie".into(), name: "The Matrix".into(), ..TitleDetails::default() };
     let fetched = chrono::Utc::now() - chrono::Duration::days(30);
-    details::write(&app.cache.join(details::ROOT), &movie(), &cached, fetched).unwrap();
+    details::write(&app.cache.join(details::ROOT), &movie(), "cinemeta", &cached, fetched).unwrap();
 
     let http = Fake::new(vec![Answer::Fault]);
     let answer = details_with(&http, &app, &movie()).unwrap().expect("the stale answer is kept");
@@ -104,12 +104,12 @@ fn an_answer_without_a_cache_is_refreshed_and_written() {
     let app = app(dir.path());
     let old = TitleDetails { id: "tt0133093".into(), kind: "movie".into(), name: "Old name".into(), ..TitleDetails::default() };
     let fetched = chrono::Utc::now() - chrono::Duration::days(30);
-    details::write(&app.cache.join(details::ROOT), &movie(), &old, fetched).unwrap();
+    details::write(&app.cache.join(details::ROOT), &movie(), "cinemeta", &old, fetched).unwrap();
 
     let http = Fake::new(vec![Answer::Body(META)]);
     let answer = details_with(&http, &app, &movie()).unwrap().expect("the source answers");
     assert_eq!(answer.name, "The Matrix", "a stale answer is replaced");
-    let cached = details::read(&app.cache.join(details::ROOT), &movie()).expect("the new answer was written");
+    let cached = details::read(&app.cache.join(details::ROOT), &movie(), "cinemeta").expect("the new answer was written");
     assert!(cached.is_fresh(chrono::Utc::now()));
 }
 
@@ -119,7 +119,7 @@ fn a_title_no_source_knows_is_no_details_and_is_not_cached() {
     let app = app(dir.path());
     let http = Fake::new(vec![Answer::Status(404)]);
     assert!(details_with(&http, &app, &movie()).unwrap().is_none());
-    assert!(details::read(&app.cache.join(details::ROOT), &movie()).is_none());
+    assert!(details::read(&app.cache.join(details::ROOT), &movie(), "cinemeta").is_none());
 }
 
 #[test]

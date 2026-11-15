@@ -4,6 +4,20 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-15 — metadata sources you choose, merged field by field.**
+> What describes a title is a **metadata source**, and which ones answer is the
+> person's choice: `metadataSources` in `watch-settings.json` (Settings → Watch →
+> Metadata providers), in priority order, with **TMDB first and Cinemeta as the
+> fallback** — nothing is built around Cinemeta being the one that answers, and it
+> can be turned off. The sources are asked in that order and the answers are
+> **merged**: the first to fill a field keeps it, a later one fills only what is
+> still empty, and the open facts (`extras`: a tagline, a budget, a network,
+> where to watch) are joined with the first of each id winning. `TitleDetails`
+> therefore renders as "everything the chosen sources know": a source that knows
+> more adds rows to the card, one that knows less cannot take away what another
+> gave. The cache remembers the set that answered, so toggling a source never
+> serves the old merge for a week.
+>
 > **Revision 2026-11-14 — catalog sources, and TMDB as the second one.**
 > Browsing is its own contract. A **catalog source** (`WatchCatalogSource`)
 > declares the catalogs the Movies and Series tabs may page through — a name, a
@@ -406,11 +420,19 @@ Envelope, source `stremio-core`:
   media provider (`WatchProvider`: Stremio, YouTube) owns titles, streams and
   progress; a metadata source (`WatchMetadataSource`) owns what a title *is*.
   They are different traits, crates (`heronite-watch-stremio` vs
-  `heronite-watch-metadata`), registries and, later, settings. A media provider
-  is never asked to describe a title.
+  `heronite-watch-metadata`), registries and settings. A media provider is never
+  asked to describe a title.
 - The answer is `TitleDetails`: name, year (`releaseInfo`), released date,
   runtime, rating, description, genres, directors, writers, cast, countries,
-  awards, a series' status, its season and episode counts, and art.
+  awards, a series' status, its season and episode counts, and art — plus
+  `extras`, the open facts (`Fact { id, label, value, source }`) a source knows
+  and the page shows as they come, which is how a source that knows more changes
+  the card without the page changing.
+- Which sources answer is the settings' `metadataSources`, in priority order
+  (TMDB first, Cinemeta as the fallback). The registry asks them in that order
+  and merges: the first answer for a field wins, the next fills what is still
+  empty, extras are joined with the first of each id winning. An id this build
+  does not have is skipped, so the order is already right when a source lands.
 - Sources answer through the addon protocol: `GET {transport}/meta/{type}/{id}.json`.
   Cinemeta is the first source (`https://v3-cinemeta.strem.io/manifest.json`);
   a second one later is another addon's manifest, added to the registry, with no
@@ -422,10 +444,11 @@ Envelope, source `stremio-core`:
 - `meta` sends `null` for what it does not know, lists included. `videos` holds
   a series' episodes: season 0 is the specials, counted neither as a season nor
   as an episode.
-- The answer is cached per `(provider, kind, id)` under
-  `<cache>/watch-details/**` (`heronite-watch-state::details`), fresh for seven
-  days; a stale answer is served when no source can be reached. The files are
-  disposable: delete them and they are fetched again.
+- The merged answer is cached per `(provider, kind, id)` **and the set of sources
+  that answered** under `<cache>/watch-details/**`
+  (`heronite-watch-state::details`), fresh for seven days; a stale answer is
+  served when no source can be reached. The files are disposable: delete them and
+  they are fetched again.
 - The film page shows the source's facts and none of the games' rows (installed
   state, playtime, status, folders, HowLongToBeat). Play and its stream rows stay
   the provider's.

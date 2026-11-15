@@ -16,6 +16,8 @@ pub enum Section {
     Watch,
     /// The catalog sources the Movies and Series tabs browse.
     WatchCatalogs,
+    /// The sources that describe a title on its page.
+    WatchMetadata,
     Advanced,
     GameDefaults,
     Downloads,
@@ -62,12 +64,13 @@ impl Section {
     ];
 
     /// Same order as [`Section::GROUPS`].
-    pub const ALL: [Section; 23] = [
+    pub const ALL: [Section; 24] = [
         Section::General,
         Section::Appearance,
         Section::ConsoleMode,
         crate::fork::watch::settings::watch_registration::SECTION,
         crate::fork::watch::settings::watch_registration::CATALOGS,
+        crate::fork::watch::settings::watch_registration::METADATA,
         Section::GameDefaults,
         Section::Downloads,
         Section::Launchers,
@@ -115,6 +118,7 @@ impl Section {
             Section::ConsoleMode => tr!("Console mode"),
             Section::Watch => crate::fork::watch::settings::watch_registration::label(),
             Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_label(),
+            Section::WatchMetadata => crate::fork::watch::settings::watch_registration::metadata_label(),
             Section::Advanced => tr!("Advanced"),
             Section::GameDefaults => tr!("Game defaults"),
             Section::Downloads => tr!("Downloads"),
@@ -143,6 +147,7 @@ impl Section {
             Section::ConsoleMode => Icon::Tv,
             Section::Watch => crate::fork::watch::settings::watch_registration::icon(),
             Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_icon(),
+            Section::WatchMetadata => crate::fork::watch::settings::watch_registration::metadata_icon(),
             Section::Advanced => Icon::Build,
             Section::GameDefaults => Icon::Tune,
             Section::Downloads => Icon::Download,
@@ -172,6 +177,7 @@ impl Section {
             Section::ConsoleMode => tr!("The controller-first TV mode: its themes, tabs and shelves, covers, background, interface and controls. Changes show at once; ☰ → Customize in console mode has the same options."),
             Section::Watch => crate::fork::watch::settings::watch_registration::blurb(),
             Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_blurb(),
+            Section::WatchMetadata => crate::fork::watch::settings::watch_registration::metadata_blurb(),
             Section::Advanced => tr!("Logs, folders and cache."),
             Section::GameDefaults => tr!("What new games start with. To change a game you already have, open its own settings."),
             Section::Downloads => tr!("Downloads and updates of Epic Games, GOG and Amazon Games games."),
@@ -204,6 +210,7 @@ impl Section {
             Section::ConsoleMode => "console mode tv couch controller gamepad theme themes tabs shelves layout covers background font scale clock accent colours glyphs hints menu startup customize export import preset modo console televisao sofa controle tema temas abas prateleiras capas fundo fonte tamanho relogio destaque cores botoes dicas menu personalizar exportar importar perfil",
             Section::Watch => crate::fork::watch::settings::watch_registration::KEYWORDS,
             Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::CATALOG_KEYWORDS,
+            Section::WatchMetadata => crate::fork::watch::settings::watch_registration::METADATA_KEYWORDS,
             Section::Advanced => "advanced cache folders copy settings avancado pastas copiar configuracoes",
             Section::GameDefaults => "game defaults wine proton version prefix dxvk nvapi esync fsync sync wayland wow64 gpu performance fps gamescope launch options new games padroes dos jogos versao prefixo desempenho opcoes de inicializacao novos jogos",
             Section::Downloads => "downloads epic updates install atualizacoes instalar baixar",

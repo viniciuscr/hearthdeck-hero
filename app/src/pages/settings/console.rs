@@ -47,7 +47,7 @@ const GROUPS: [(&str, &[CSec]); 5] = [
             CSec::Extras,
         ],
     ),
-    (n_!("Watch"), &[CSec::Rows(Section::Watch), CSec::Rows(Section::WatchCatalogs)]),
+    (n_!("Watch"), &[CSec::Rows(Section::Watch), CSec::Rows(Section::WatchCatalogs), CSec::Rows(Section::WatchMetadata)]),
     (
         n_!("Games"),
         &[
@@ -180,6 +180,7 @@ impl SettingsPage {
             CSec::Rows(Section::Logs) => logs::console_rows(self),
             CSec::Rows(Section::Watch) => watch::console_rows(self),
             CSec::Rows(Section::WatchCatalogs) => watch::catalog_rows(self),
+            CSec::Rows(Section::WatchMetadata) => watch::metadata_rows(self),
             CSec::Rows(Section::Appearance) => appearance::console_rows(self),
             CSec::Rows(Section::ConsoleMode) => console_mode::console_rows(self),
             CSec::Rows(Section::Metadata) => metadata::console_rows(self, cx),
@@ -203,6 +204,7 @@ impl SettingsPage {
             CSec::Rows(Section::Logs) => logs::console_apply(self, outcome, cx),
             CSec::Rows(Section::Watch) => watch::console_apply(self, outcome, window, cx),
             CSec::Rows(Section::WatchCatalogs) => watch::catalog_apply(self, outcome, window, cx),
+            CSec::Rows(Section::WatchMetadata) => watch::metadata_apply(self, outcome, window, cx),
             CSec::Rows(Section::Appearance) => appearance::console_apply(self, outcome, window, cx),
             CSec::Rows(Section::ConsoleMode) => console_mode::send(self, outcome, window, cx),
             CSec::Rows(Section::Metadata) => metadata::console_apply(self, outcome, window, cx),

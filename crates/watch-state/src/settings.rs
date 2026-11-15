@@ -28,6 +28,13 @@ pub struct Settings {
     /// not a fault.
     #[serde(default = "catalogs_by_default")]
     pub catalog_sources: Vec<String>,
+    /// The metadata sources the details page may ask, in priority order
+    /// (Settings → Watch → Metadata providers): the first to fill a field keeps
+    /// it, the next fills what is still empty. TMDB leads and Cinemeta is the
+    /// fallback — a source this build does not have is skipped, so the order is
+    /// already right when it lands.
+    #[serde(default = "metadata_by_default")]
+    pub metadata_sources: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -41,9 +48,20 @@ fn catalogs_by_default() -> Vec<String> {
     vec!["cinemeta".to_owned()]
 }
 
+/// TMDB first, Cinemeta as the fallback: the richer source decides the card, and
+/// nothing is built around Cinemeta being the one that answers.
+fn metadata_by_default() -> Vec<String> {
+    vec!["tmdb".to_owned(), "cinemeta".to_owned()]
+}
+
 impl Default for Settings {
     fn default() -> Self {
-        Self { stop_service_when_done: true, catalog_sources: catalogs_by_default(), extra: Map::new() }
+        Self {
+            stop_service_when_done: true,
+            catalog_sources: catalogs_by_default(),
+            metadata_sources: metadata_by_default(),
+            extra: Map::new(),
+        }
     }
 }
 
@@ -86,6 +104,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read(&app(dir.path())).catalog_sources, ["cinemeta"], "no file: the catalogue we ship with");
         assert_eq!(Settings::default().catalog_sources, ["cinemeta"]);
+    }
+
+    #[test]
+    fn tmdb_leads_the_metadata_sources_and_cinemeta_follows() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read(&app(dir.path())).metadata_sources, ["tmdb", "cinemeta"], "no file: TMDB first, Cinemeta as the fallback");
+        assert_eq!(Settings::default().metadata_sources, ["tmdb", "cinemeta"]);
     }
 
     #[test]

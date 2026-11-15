@@ -144,9 +144,9 @@ the app uses.
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
 | `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider) |
 | `heronite_watch::catalog` | `sources`, `enabled`, `catalogs`, `catalogs_with`, `page`, `page_with`, `more_with`, `replace_with`, `feed_key`, `CatalogRequest`, `CatalogSort`, `CatalogDescriptor`, `WatchCatalogSource` |
-| `heronite_watch::settings` | `read`, `write`, `Settings` (`catalogSources`, the service stop, Settings → Watch) |
+| `heronite_watch::settings` | `read`, `write`, `Settings` (`catalogSources`, `metadataSources`, the service stop, Settings → Watch) |
 | `heronite_watch::service` | `launches`, `Launch` (headless runtime or launcher, each with its `command`), `is_up`, `PROBE`, `ATTEMPT`, `LAUNCHER_ENV` |
-| `heronite_watch::metadata` | `details`, `details_with`, `sources`, `TitleDetails`, `TitleRef` |
+| `heronite_watch::metadata` | `details`, `details_with`, `sources`, `enabled`, `TitleDetails` (with open `Fact` extras), `TitleRef` |
 | `heronite_watch::player` | `PlaybackOutcome` |
 | `heronite_watch::types` | `StreamChoice` |
 
@@ -176,9 +176,10 @@ module and a re-export cannot share a name (`collection` is the case).
   IMDb id TMDB holds for its own ids, one file each, kept between runs because
   they never change. Safe to delete; the source asks again.
 - `heronite-watch-state::details` owns `<cache>/watch-details/**`: one file per
-  `(provider, kind, id)` holding a fetch time and the `TitleDetails` a metadata
-  source answered. Fresh for seven days, served stale when no source can be
-  reached, and safe to delete.
+  `(provider, kind, id)` **and set of sources** holding a fetch time and the
+  merged `TitleDetails`. Keying by the set is what keeps a toggled source from
+  serving the old merge for a week. Fresh for seven days, served stale when no
+  source can be reached, and safe to delete.
 - There is no watch data crate: it would duplicate atomic and secret-safe writes
   that `heronite-data` already owns (`docs/WATCH.md` rule 10).
 - An upstream change to those primitives fails the fork's gate at compile time,

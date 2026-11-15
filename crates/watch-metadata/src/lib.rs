@@ -26,25 +26,43 @@ pub fn sources() -> &'static [&'static dyn WatchMetadataSource] {
 }
 
 /// The sources that can answer for titles of `provider`, in that order.
-pub fn sources_for(provider: &str) -> impl Iterator<Item = &'static dyn WatchMetadataSource> + '_ {
-    sources().iter().copied().filter(move |source| source.descriptor().covers(provider))
+pub fn sources_for(sources: &[&'static dyn WatchMetadataSource], provider: &str) -> Vec<&'static dyn WatchMetadataSource> {
+    sources.iter().copied().filter(|source| source.descriptor().covers(provider)).collect()
 }
 
-/// The first answer for `title`, `None` when no source knows it.
+/// The sources named by `enabled`, in the order given.
 ///
-/// A source that could not be asked (a timeout, a server error) is kept aside
-/// and the next one is tried: a broken source must not hide the others. When
-/// none answers, the first failure is what the caller sees.
-pub fn details(ctx: &MetaCtx<'_>, title: &TitleRef) -> Result<Option<TitleDetails>> {
+/// An id this build does not have is skipped, so a settings file from another
+/// version is not a fault — and a source that is off is never asked at all.
+pub fn enabled(ids: &[String]) -> Vec<&'static dyn WatchMetadataSource> {
+    ids.iter().filter_map(|id| sources().iter().copied().find(|source| source.descriptor().id == id.as_str())).collect()
+}
+
+/// The merged answer for `title` from `sources`, asked in order.
+///
+/// The first source to fill a field keeps it, a later one fills only what is
+/// still empty, and the extras are joined with the first of each id winning — so
+/// a source that knows more adds to the card, and one that knows less cannot take
+/// away what another gave. A source that could not be asked (a timeout, a server
+/// error) is set aside and the next is tried: a broken source must not hide the
+/// others. When none answers, the first failure is what the caller sees.
+pub fn details(sources: &[&'static dyn WatchMetadataSource], ctx: &MetaCtx<'_>, title: &TitleRef) -> Result<Option<TitleDetails>> {
     if !title.is_complete() {
         return Ok(None);
     }
+    let mut merged: Option<TitleDetails> = None;
     let mut failure = None;
-    for source in sources_for(&title.provider) {
+    for source in sources_for(sources, &title.provider) {
         match source.details(ctx, title) {
             Ok(Some(mut details)) => {
                 details.source = source.descriptor().id.to_owned();
-                return Ok(Some(details));
+                merged = Some(match merged.take() {
+                    Some(mut kept) => {
+                        kept.merge(details);
+                        kept
+                    }
+                    None => details,
+                });
             }
             Ok(None) => {}
             Err(error) => {
@@ -52,9 +70,12 @@ pub fn details(ctx: &MetaCtx<'_>, title: &TitleRef) -> Result<Option<TitleDetail
             }
         }
     }
-    match failure {
-        Some(error) => Err(error),
-        None => Ok(None),
+    match merged {
+        Some(details) => Ok(Some(details)),
+        None => match failure {
+            Some(error) => Err(error),
+            None => Ok(None),
+        },
     }
 }
 
@@ -112,7 +133,7 @@ mod tests {
     #[test]
     fn cinemeta_asks_its_own_meta_resource() {
         let fake = Fake::new(Answer::Body(r#"{"meta":{"id":"tt0133093","type":"movie","name":"The Matrix","imdbRating":"8.7"}}"#));
-        let details = details(&MetaCtx::new(&fake), &movie()).unwrap().expect("the fixture answers");
+        let details = details(sources(), &MetaCtx::new(&fake), &movie()).unwrap().expect("the fixture answers");
         assert_eq!(
             fake.asked(),
             ["https://v3-cinemeta.strem.io/meta/movie/tt0133093.json"],
@@ -126,16 +147,16 @@ mod tests {
     #[test]
     fn a_title_no_source_knows_is_none() {
         let fake = Fake::new(Answer::Status(404));
-        assert_eq!(details(&MetaCtx::new(&fake), &movie()).unwrap(), None);
+        assert_eq!(details(sources(), &MetaCtx::new(&fake), &movie()).unwrap(), None);
     }
 
     #[test]
     fn a_source_that_could_not_be_asked_is_an_error() {
         let fake = Fake::new(Answer::Status(503));
-        let error = details(&MetaCtx::new(&fake), &movie()).unwrap_err();
+        let error = details(sources(), &MetaCtx::new(&fake), &movie()).unwrap_err();
         assert_eq!(heronite_watch_core::http::http_status(&error), Some(503));
         let fake = Fake::new(Answer::Fault);
-        assert!(details(&MetaCtx::new(&fake), &movie()).is_err());
+        assert!(details(sources(), &MetaCtx::new(&fake), &movie()).is_err());
     }
 
     #[test]
@@ -143,7 +164,7 @@ mod tests {
         let fake = Fake::new(Answer::Body(r#"{"meta":null}"#));
         let mut title = movie();
         title.id.clear();
-        assert_eq!(details(&MetaCtx::new(&fake), &title).unwrap(), None);
+        assert_eq!(details(sources(), &MetaCtx::new(&fake), &title).unwrap(), None);
         assert!(fake.asked().is_empty());
     }
 
@@ -151,10 +172,76 @@ mod tests {
     fn the_registry_names_its_sources_and_what_they_cover() {
         let ids: Vec<&str> = sources().iter().map(|source| source.descriptor().id).collect();
         assert_eq!(ids, ["cinemeta"]);
-        assert!(sources_for("stremio").count() == 1);
-        assert!(sources_for("youtube").count() == 1, "an empty applies_to covers every media provider");
+        assert_eq!(sources_for(sources(), "stremio").len(), 1);
+        assert_eq!(sources_for(sources(), "youtube").len(), 1, "an empty applies_to covers every media provider");
         let descriptor = MetaDescriptor { id: "x", name: "X", applies_to: &["stremio"] };
         assert!(descriptor.covers("stremio"));
         assert!(!descriptor.covers("youtube"));
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+    use heronite_watch_core::metadata::{Episode, Fact};
+
+    struct Fixed(&'static str, TitleDetails);
+
+    impl WatchMetadataSource for Fixed {
+        fn descriptor(&self) -> &'static heronite_watch_core::metadata::MetaDescriptor {
+            // Leaked on purpose: the registry holds sources for the process' life.
+            Box::leak(Box::new(heronite_watch_core::metadata::MetaDescriptor { id: self.0, name: self.0, applies_to: &[] }))
+        }
+
+        fn details(&self, _: &MetaCtx<'_>, _: &TitleRef) -> Result<Option<TitleDetails>> {
+            Ok(Some(self.1.clone()))
+        }
+    }
+
+    #[test]
+    fn two_sources_fill_one_card() {
+        let rich: &'static dyn WatchMetadataSource = Box::leak(Box::new(Fixed(
+            "rich",
+            TitleDetails {
+                id: "tt1".into(),
+                kind: "series".into(),
+                name: "A Series".into(),
+                runtime: Some("50m".into()),
+                episodes: vec![Episode { id: "tt1:1:1".into(), season: 1, number: 1, ..Episode::default() }],
+                extras: vec![Fact { id: "network".into(), label: "Network".into(), value: "HBO".into(), source: "rich".into() }],
+                ..TitleDetails::default()
+            },
+        )));
+        let thin: &'static dyn WatchMetadataSource = Box::leak(Box::new(Fixed(
+            "thin",
+            TitleDetails {
+                id: "tt1".into(),
+                kind: "series".into(),
+                name: "A Series".into(),
+                runtime: Some("0m".into()),
+                cast: vec!["Someone".into()],
+                extras: vec![Fact { id: "tagline".into(), label: "Tagline".into(), value: "Oh".into(), source: "thin".into() }],
+                ..TitleDetails::default()
+            },
+        )));
+        let sources = vec![rich, thin];
+
+        let merged = details(&sources, &MetaCtx::new(&NoNet), &TitleRef::new("stremio", "tt1", "series")).unwrap().expect("answered");
+        assert_eq!(merged.source, "rich", "the record came from the first source that answered");
+        assert_eq!(merged.runtime.as_deref(), Some("50m"), "the first answer keeps its field");
+        assert_eq!(merged.cast, ["Someone"], "and the second fills what was empty");
+        assert_eq!(merged.episodes.len(), 1, "one source's episode list, not two halves");
+        assert_eq!(merged.extras.len(), 2, "both extras, the first of each id winning");
+    }
+
+    struct NoNet;
+
+    impl heronite_watch_core::http::Transport for NoNet {
+        fn get(&self, _: &url::Url) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+        fn post_json(&self, _: &url::Url, _: &serde_json::Value) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
     }
 }

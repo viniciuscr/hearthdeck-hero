@@ -16,9 +16,15 @@ use heronite_watch_state::details as cache;
 
 pub use heronite_watch_core::metadata::{Episode, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
 
-/// The metadata sources Watch ships with, in the order they are asked.
+/// The metadata sources Watch ships with, in registry order.
 pub fn sources() -> &'static [&'static dyn WatchMetadataSource] {
     heronite_watch_metadata::sources()
+}
+
+/// The sources the settings turn on, in their priority order: the first to fill
+/// a field keeps it, the next fills what is still empty.
+pub fn enabled(ids: &[String]) -> Vec<&'static dyn WatchMetadataSource> {
+    heronite_watch_metadata::enabled(ids)
 }
 
 /// The details of `title`, from the cache or the sources.
@@ -29,14 +35,18 @@ pub fn details(app: &AppPaths, title: &TitleRef) -> Result<Option<TitleDetails>>
 
 /// [`details`] with an injected transport, for tests.
 pub fn details_with(http: &dyn Transport, app: &AppPaths, title: &TitleRef) -> Result<Option<TitleDetails>> {
+    // The sources the person turned on, in their order: TMDB first by default,
+    // Cinemeta as the fallback. The cache remembers which set answered.
+    let enabled = heronite_watch_metadata::enabled(&heronite_watch_state::settings::read(app).metadata_sources);
+    let sources = enabled.iter().map(|source| source.descriptor().id).collect::<Vec<_>>().join("+");
     let root = app.cache.join(cache::ROOT);
-    let cached = cache::read(&root, title);
+    let cached = cache::read(&root, title, &sources);
     if cached.as_ref().is_some_and(|cached| cached.is_fresh(Utc::now())) {
         return Ok(cached.map(|cached| cached.details));
     }
-    match heronite_watch_metadata::details(&MetaCtx::new(http), title) {
+    match heronite_watch_metadata::details(&enabled, &MetaCtx::new(http), title) {
         Ok(Some(answer)) => {
-            if let Err(error) = cache::write(&root, title, &answer, Utc::now()) {
+            if let Err(error) = cache::write(&root, title, &sources, &answer, Utc::now()) {
                 log::warn!("watch details: {error:#}");
             }
             Ok(Some(answer))

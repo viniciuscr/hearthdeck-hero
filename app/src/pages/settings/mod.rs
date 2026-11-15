@@ -788,6 +788,7 @@ impl SettingsPage {
             Section::ConsoleMode => console_mode::render(self, window, cx),
             Section::Watch => watch::render(self, window, cx),
             Section::WatchCatalogs => watch::render_catalogs(self, window, cx),
+            Section::WatchMetadata => watch::render_metadata(self, window, cx),
             Section::Logs => self.logs_section(cx),
             Section::About => self.about_section(cx).into_any_element(),
         }
