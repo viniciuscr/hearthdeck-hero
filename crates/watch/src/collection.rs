@@ -46,6 +46,14 @@ fn items(http: &dyn Transport, app: &AppPaths) -> Result<Vec<MovieItem>> {
     let catalog_ctx = CatalogCtx { http, credentials: &credentials, cache: Some(&ids) };
     let enabled = heronite_watch_state::settings::read(app).catalog_sources;
     rails.extend(catalog_rails(&heronite_watch_catalogs::enabled(&enabled), &catalog_ctx));
+    // The person's own shelf travels with the library: a title they kept opens
+    // like any other, even on a refresh where no rail carried it.
+    let shelf = crate::personal::read(app);
+    let mut kept = shelf.watchlist;
+    kept.extend(shelf.favourites);
+    if !kept.is_empty() {
+        rails.push(Rail { catalog: RailDescriptor { id: "personal", kind: "" }, items: kept });
+    }
     Ok(assemble(rails))
 }
 
@@ -176,6 +184,13 @@ mod tests {
 
     fn rail(id: &'static str, items: Vec<MovieItem>) -> Rail {
         Rail { catalog: RailDescriptor { id, kind: "movie" }, items }
+    }
+
+    #[test]
+    fn a_personal_title_rides_along_after_the_rails() {
+        let movies = assemble(vec![rail("top", vec![movie("tt1", true)]), rail("personal", vec![movie("tt2", false)])]);
+        let ids: Vec<&str> = movies.iter().map(|movie| movie.id.as_str()).collect();
+        assert_eq!(ids, ["tt1", "tt2"], "a kept title the rails did not carry is still in the library");
     }
 
     #[test]
