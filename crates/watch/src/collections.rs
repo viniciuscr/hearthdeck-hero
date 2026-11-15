@@ -87,12 +87,14 @@ mod tests {
     impl Transport for Fake {
         fn get(&self, url: &Url) -> Result<Vec<u8>> {
             self.seen.lock().unwrap().push(url.as_str().to_owned());
-            // A catalogue page, and the id TMDB holds for the title on it: without
-            // the second, the source drops the result (it could not be played).
+            // The IMDb id TMDB holds for the title on the page: without it the
+            // source drops the result (it could not be played).
             if url.path().contains("external_ids") {
                 return Ok(br#"{"id":603,"imdb_id":"tt0133093"}"#.to_vec());
             }
-            Ok(br#"{"metas":[{"id":"603","type":"movie","name":"The Matrix"}]}"#.to_vec())
+            // `discover` answers `results`, not Cinemeta's `metas`: a `metas` body
+            // parses as an empty page, which is what a naive fixture gets.
+            Ok(br#"{"page":1,"total_pages":1,"results":[{"id":603,"title":"The Matrix","release_date":"1999-03-31"}]}"#.to_vec())
         }
         fn post_json(&self, _: &Url, _: &Value) -> Result<Vec<u8>> {
             Ok(b"{}".to_vec())
@@ -112,6 +114,31 @@ mod tests {
         assert_eq!(ids, ["tmdb:top-rated:movie", "tmdb:popular:movie", "tmdb:top-rated:series", "tmdb:popular:series"]);
         assert_eq!(rails[0].0, "tmdb", "the source that answers it");
         assert!(fake.seen.lock().unwrap().is_empty(), "declaring costs nothing");
+    }
+
+    #[test]
+    fn a_rail_is_its_rules_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        // Answering a rule needs the source's key; declaring one did not.
+        heronite_watch_state::store::write_tmdb_key(&app, "test-key").unwrap();
+        let fake = Fake::new();
+        let (source, rail) =
+            descriptors_with(&fake, &app).into_iter().find(|(_, rail)| rail.id == "tmdb:top-rated:movie").expect("TMDB declares it");
+
+        let items = rail_with(&fake, &app, &source, &rail).unwrap();
+        assert_eq!(items.len(), 1, "the page's title, kept because TMDB holds an IMDb id for it");
+        assert_eq!(items[0].id, "tt0133093", "the id the rest of Watch resolves a title by");
+        assert_eq!(items[0].name, "The Matrix");
+        assert_eq!(items[0].kind, "movie");
+        assert_eq!(items[0].provider, "stremio", "TMDB describes; Stremio plays");
+        assert!(items[0].catalog.is_some(), "a page's items carry the feed they came from");
+
+        let asked = fake.seen.lock().unwrap().clone();
+        let discover = asked.iter().find(|url| url.contains("/discover/movie")).expect("the rule is a discover page");
+        assert!(discover.contains("sort_by=vote_average.desc"), "“Top rated” is TMDB's rating order: {discover}");
+        assert!(discover.contains("vote_count.gte=200"), "an order over the whole catalogue needs a floor: {discover}");
+        assert!(asked.iter().any(|url| url.contains("external_ids")), "and each title is resolved to its IMDb id: {asked:?}");
     }
 
     #[test]
