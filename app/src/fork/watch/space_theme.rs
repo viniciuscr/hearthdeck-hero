@@ -40,15 +40,30 @@ pub fn project(mut theme: ConsoleTheme, space: Space) -> ConsoleTheme {
                 if matches!(tab.source.as_str(), "all" | "type:movie" | "type:series") {
                     continue;
                 }
-                if (matches!(tab.source.as_str(), "favourites") || tab.source.starts_with("genre:") || tab.source.starts_with("store:"))
+                if tab.source == "favourites" {
+                    // Favourites is not a place of its own any more: the tab is the
+                    // Shelf, and it is drawn as rows of covers whatever the theme's
+                    // layout for the old tab was.
+                    if !tabs.iter().any(|existing| existing.source == "shelf") {
+                        tabs.push(TabSpec::new(tr!("Shelf"), Layout::Shelves, "shelf"));
+                    }
+                    continue;
+                }
+                if (tab.source.starts_with("genre:") || tab.source.starts_with("store:"))
                     && !tabs.iter().any(|existing| existing.source == tab.source)
                 {
                     tabs.push(tab.clone());
                 }
             }
+            if !tabs.iter().any(|tab| tab.source == "shelf") {
+                tabs.push(TabSpec::new(tr!("Shelf"), Layout::Shelves, "shelf"));
+            }
             theme.tabs = tabs;
             for tab in &mut theme.tabs {
-                if tab.source == "all" {
+                if tab.source == "shelf" {
+                    tab.name = tr!("Shelf").to_string();
+                    tab.layout = Layout::Shelves;
+                } else if tab.source == "all" {
                     tab.name = tr!("Watch").to_string();
                 } else if tab.source == "type:movie" {
                     tab.name = tr!("Movies").to_string();
@@ -58,7 +73,7 @@ pub fn project(mut theme: ConsoleTheme, space: Space) -> ConsoleTheme {
             }
 
             theme.shelves.retain(|shelf| {
-                matches!(shelf.kind.as_str(), "recent" | "favourites")
+                matches!(shelf.kind.as_str(), "recent")
                     || shelf.kind.starts_with("genre:")
                     || shelf.kind.starts_with("store:")
                     || shelf.kind.starts_with("provider:")

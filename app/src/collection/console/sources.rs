@@ -71,6 +71,7 @@ fn day_number(date: &str) -> Option<i64> {
 }
 
 use chrono::Datelike as _;
+use heronite_i18n::tr;
 
 /// Today, as a [`day_number`].
 fn today() -> i64 {
@@ -214,6 +215,11 @@ impl CollectionView {
     }
 
     fn build_shelves(&self, lib: &Library, source: &str) -> Vec<Shelf> {
+        // The person's own shelf is not a theme shelf: it is Continue watching,
+        // the watchlist and the favourites, and its rails hide when empty.
+        if source == "shelf" {
+            return self.personal_shelves(lib);
+        }
         let theme = crate::console::look::theme();
         let games = self.cached_games(source);
         let games: Vec<&CollectionGame> = games.iter().map(|g| g.as_ref()).collect();
@@ -245,6 +251,50 @@ impl CollectionView {
                 })
             })
             .collect()
+    }
+
+    /// The Shelf tab's rails, in order: where the person stopped, what they mean
+    /// to watch, what they like. A rail with nothing in it is not drawn.
+    fn personal_shelves(&self, lib: &Library) -> Vec<Shelf> {
+        let all: Vec<&CollectionGame> = lib.games.iter().map(|game| game.as_ref()).collect();
+        let shelf = |kind: &str, title: String, games: Vec<&CollectionGame>| Shelf {
+            title: SharedString::from(title),
+            total: games.len(),
+            kind: SharedString::from(kind),
+            keys: games.iter().map(|game| SharedString::from(game.key.clone())).collect(),
+        };
+        let mut shelves = Vec::new();
+
+        // Continue watching: the provider's own record of where the person stopped.
+        let resumed: Vec<&CollectionGame> = all.iter().copied().filter(|game| game.last_played.is_some()).collect();
+        shelves.push(shelf("shelf:continue", tr!("Continue watching").to_string(), by_last_played(resumed)));
+
+        // The two flags: the shelf's snapshots, resolved against this library. A
+        // title the projection no longer holds is not drawn (it still is in the
+        // file; opening those is the next slice).
+        for (kind, title, items) in [
+            ("shelf:watchlist", tr!("Watchlist"), &self.watch_personal.watchlist),
+            ("shelf:favourites", tr!("Favourites"), &self.watch_personal.favourites),
+        ] {
+            let games: Vec<&CollectionGame> = items
+                .iter()
+                .filter_map(|item| {
+                    all.iter().copied().find(|game| {
+                        crate::fork::watch::sources::id(game) == item.id
+                            && crate::fork::watch::sources::kind(game) == item.kind
+                            && game.runner == item.provider
+                    })
+                })
+                .collect();
+            shelves.push(shelf(kind, title.to_string(), games));
+        }
+        shelves.retain(|shelf| !shelf.keys.is_empty());
+        shelves
+    }
+
+    /// Drops the Shelf tab's cached rails, so a toggle shows at once.
+    pub(crate) fn forget_personal_shelves(&mut self) {
+        self.console.sources.borrow_mut().shelves.remove("shelf");
     }
 
     fn shelf_games<'a>(&self, lib: &Library, games: &[&'a CollectionGame], kind: &str) -> Vec<&'a CollectionGame> {

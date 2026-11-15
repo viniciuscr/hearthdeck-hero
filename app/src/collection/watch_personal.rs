@@ -39,9 +39,11 @@ impl CollectionView {
         };
         match result {
             Ok(_) => {
-                // The file is the truth, and it is small: one read per press.
+                // The file is the truth, and it is small: one read per press, and
+                // the Shelf tab's rails are rebuilt from it.
                 self.watch_personal = personal::read(&self.app_paths);
                 self.watch_personal_ready = true;
+                self.forget_personal_shelves();
                 cx.notify();
             }
             Err(error) => {

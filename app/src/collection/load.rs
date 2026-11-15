@@ -144,6 +144,11 @@ impl CollectionView {
 
     fn apply_loaded(&mut self, l: Loaded, cx: &mut Context<Self>) {
         let first = self.lib.is_none();
+        // The person's shelf is not part of the library: read it with it, and let
+        // its rails be rebuilt against what just loaded.
+        self.watch_personal = heronite_watch::personal::read(&self.app_paths);
+        self.watch_personal_ready = true;
+        self.forget_personal_shelves();
         let s = &l.lib.settings;
         let bg = &s.background;
         self.scrim = stage::Scrim { dim: bg.dimming.get() as f32 / 100., scrim: bg.scrim.get() as f32 / 100. };

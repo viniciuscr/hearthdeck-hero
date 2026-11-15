@@ -14,6 +14,9 @@ pub fn watch_theme() -> ConsoleTheme {
         TabSpec::new(tr!("Home"), Layout::Shelves, "all"),
         TabSpec::new(tr!("Movies"), Layout::Grid, "type:movie"),
         TabSpec::new(tr!("Series"), Layout::Grid, "type:series"),
+        // Where the person keeps things: their watchlist, their favourites and
+        // where they stopped, drawn as shelves.
+        TabSpec::new(tr!("Shelf"), Layout::Shelves, "shelf"),
     ];
     theme.shelves = vec![
         ShelfSpec { kind: "recent".into(), on: true, title: tr!("Continue watching").to_string() },
