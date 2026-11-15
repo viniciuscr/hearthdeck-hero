@@ -159,14 +159,15 @@ impl Tmdb {
                 None => missing.push(result.id),
             }
         }
-        const WORKERS: usize = 4;
-        for chunk in missing.chunks(WORKERS) {
-            let answers: Vec<(u64, Option<String>)> = std::thread::scope(|scope| {
-                let handles: Vec<_> = chunk.iter().map(|id| scope.spawn(move || fetched(ctx, key, kind, *id))).collect();
-                handles.into_iter().filter_map(|handle| handle.join().ok()).collect()
-            });
-            known.extend(answers);
-        }
+        // One request per title is the only way TMDB gives an IMDb id (there is no
+        // batch endpoint), and the page itself is the bound: twenty at most here,
+        // so they go out together and a cold page costs one round trip. The cache
+        // above is what keeps this from happening twice for the same title.
+        let answers: Vec<(u64, Option<String>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = missing.iter().map(|id| scope.spawn(move || fetched(ctx, key, kind, *id))).collect();
+            handles.into_iter().filter_map(|handle| handle.join().ok()).collect()
+        });
+        known.extend(answers);
         known
     }
 
