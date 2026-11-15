@@ -134,41 +134,6 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
     .on_click(cx.listener(|d, _, _, cx| toggle_service(d, cx)))
     .into_any_element()]);
 
-    let catalog_rows: Vec<AnyElement> = heronite_watch::catalog::sources()
-        .iter()
-        .map(|source| {
-            let descriptor = source.descriptor();
-            let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
-            toggle_row(format!("watch-catalog-{}", descriptor.id), SharedString::from(descriptor.name.to_owned()), None, on)
-                .on_click(cx.listener(move |d, _, _, cx| set_catalog_source(d, descriptor.id, !on, cx)))
-                .into_any_element()
-        })
-        .collect();
-    let catalogs = card(catalog_rows);
-    let keyed = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().is_some();
-    let tmdb_key = card_box().py(px(12.)).child(
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.))
-                    .child(div().text_size(px(14.)).child(tr!("TMDB API key")))
-                    .child(meta_text(tr!("Needed to browse TMDB's catalogs."))),
-            )
-            .child(action_button(
-                "watch-tmdb-key",
-                ButtonKind::Glass,
-                if keyed { tr!("Replace") } else { tr!("Set") },
-                true,
-                cx.listener(|d, _, window, cx| set_tmdb_key(d, window, cx)),
-            )),
-    );
-
     let reset = action_button(
         "watch-reset",
         ButtonKind::Glass,
@@ -200,13 +165,84 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
         .child(rails)
         .child(caption(tr!("Stremio service")))
         .child(service)
-        .child(caption(tr!("Catalogs")))
-        .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!(
-            "What the Movies and Series tabs may browse. Streams do not change: a catalog only decides what is listed."
-        ))))
-        .child(catalogs)
-        .child(tmdb_key)
         .child(div().flex().items_center().gap(px(8.)).child(reset));
+    if let Some(notice) = &d.watch.notice {
+        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
+    }
+    column.into_any_element()
+}
+
+/// Settings → Watch → Catalog providers: what the Movies and Series tabs may
+/// browse. Nothing here can change how a title plays.
+pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let source_rows: Vec<AnyElement> = heronite_watch::catalog::sources()
+        .iter()
+        .map(|source| {
+            let descriptor = source.descriptor();
+            let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
+            toggle_row(format!("watch-catalog-{}", descriptor.id), SharedString::from(descriptor.name.to_owned()), None, on)
+                .on_click(cx.listener(move |d, _, _, cx| set_catalog_source(d, descriptor.id, !on, cx)))
+                .into_any_element()
+        })
+        .collect();
+    let sources = card(source_rows);
+
+    let keyed = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().is_some();
+    let key_buttons = {
+        let mut buttons = div().flex().items_center().gap(px(8.));
+        buttons = buttons.child(action_button(
+            "watch-tmdb-key-paste",
+            ButtonKind::Primary,
+            tr!("Paste the key"),
+            true,
+            cx.listener(|d, _, _, cx| paste_tmdb_key(d, cx)),
+        ));
+        buttons = buttons.child(action_button(
+            "watch-tmdb-key",
+            ButtonKind::Glass,
+            tr!("Type it instead"),
+            true,
+            cx.listener(|d, _, window, cx| set_tmdb_key(d, window, cx)),
+        ));
+        if keyed {
+            buttons = buttons.child(action_button(
+                "watch-tmdb-key-remove",
+                ButtonKind::Ghost,
+                tr!("Remove"),
+                true,
+                cx.listener(|d, _, _, cx| clear_tmdb_key(d, cx)),
+            ));
+        }
+        buttons
+    };
+    let key = card_box().py(px(12.)).child(
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(div().text_size(px(14.)).child(tr!("TMDB API key")))
+                    .child(meta_text(tr!("Needed to browse TMDB's catalogs. Copy it on another device and paste it here: no typing."))),
+            )
+            .child(key_buttons),
+    );
+
+    let mut column = div()
+        .flex()
+        .flex_col()
+        .gap(px(14.))
+        .child(caption(tr!("Catalog providers")))
+        .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!(
+            "What the Movies and Series tabs may browse. A catalog decides what is listed; it never changes what plays."
+        ))))
+        .child(sources)
+        .child(key);
     if let Some(notice) = &d.watch.notice {
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
     }
@@ -235,20 +271,46 @@ fn set_catalog_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Con
     cx.notify();
 }
 
+/// The keyboard, for a key typed by hand. It opens empty: the stored key is a
+/// secret and this screen is a television.
 fn set_tmdb_key(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<SettingsPage>) {
-    let current = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().unwrap_or_default();
-    layers::open_osk(d.layer_mut(), tr!("TMDB API key"), &current, window, cx, |d, text, _, cx| {
-        let key = text.trim().to_owned();
-        if key.is_empty() {
-            return;
-        }
-        if let Err(error) = heronite_watch::store::write_tmdb_key(&d.ctx.app, &key) {
-            log::warn!("saving the TMDB key: {error:#}");
-            return;
-        }
-        crate::collection::watch_catalog::catalogs_changed();
-        cx.notify();
+    layers::open_osk(d.layer_mut(), tr!("TMDB API key"), "", window, cx, |d, text, _, cx| {
+        save_tmdb_key(d, &text, cx);
     });
+}
+
+/// The key from the clipboard: no typing, which is the only workable way with a
+/// gamepad. A person copies the token on their phone or computer and pastes it
+/// here.
+fn paste_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    let text = cx.read_from_clipboard().and_then(|item| item.text()).map(|text| text.to_owned()).unwrap_or_default();
+    if text.trim().is_empty() {
+        d.watch.notice = Some(tr!("The clipboard has no text: copy the key first, then paste it here.").into());
+        cx.notify();
+        return;
+    }
+    save_tmdb_key(d, &text, cx);
+}
+
+/// Stores a pasted or typed key and says what happened.
+fn save_tmdb_key(d: &mut SettingsPage, text: &str, cx: &mut Context<SettingsPage>) {
+    let key = text.trim();
+    if key.is_empty() {
+        d.watch.notice = Some(tr!("That key is empty.").into());
+        cx.notify();
+        return;
+    }
+    match heronite_watch::store::write_tmdb_key(&d.ctx.app, key) {
+        Ok(()) => {
+            d.watch.notice = Some(tr!("The TMDB API key was saved.").into());
+            crate::collection::watch_catalog::catalogs_changed();
+        }
+        Err(error) => {
+            log::warn!("saving the TMDB key: {error:#}");
+            d.watch.notice = Some(tr!("The TMDB API key could not be saved.").into());
+        }
+    }
+    cx.notify();
 }
 
 fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
@@ -378,7 +440,13 @@ pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
     rows.push(Row::header(tr!("Stremio service")));
     let settings = heronite_watch::settings::read(&d.ctx.app);
     rows.push(Row::toggle("watch-service-stop", tr!("Stop the Stremio service after watching"), settings.stop_service_when_done));
-    rows.push(Row::header(tr!("Catalogs")));
+    rows
+}
+
+/// Settings → Watch → Catalog providers, as rows.
+pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let mut rows = vec![Row::header(tr!("Catalog providers"))];
     for source in heronite_watch::catalog::sources() {
         let descriptor = source.descriptor();
         let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
@@ -390,21 +458,39 @@ pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
     }
     let keyed = heronite_watch::store::read_tmdb_key(&d.ctx.app).ok().flatten().is_some();
     rows.push(Row::info("watch-tmdb-key", tr!("TMDB API key"), if keyed { tr!("Set") } else { tr!("Not set") }));
-    rows.push(Row::action("watch-tmdb-key-set", tr!("Set the TMDB API key")));
+    rows.push(Row::action("watch-tmdb-key-paste", tr!("Paste the key from the clipboard")));
+    rows.push(Row::action("watch-tmdb-key-set", tr!("Type it instead")));
     if keyed {
         rows.push(Row::action("watch-tmdb-key-remove", tr!("Remove the TMDB API key")));
     }
+    rows.push(Row::info("watch-catalogs-note", tr!("Catalogs"), tr!("A catalog decides what is listed; it never changes what plays.")));
     rows
 }
 
-pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut Window, cx: &mut Context<SettingsPage>) {
+/// The catalog page's rows: the source toggles and the key.
+pub(crate) fn catalog_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut Window, cx: &mut Context<SettingsPage>) {
+    match outcome {
+        Outcome::Activate(id) => match id.as_ref() {
+            // A copied key needs one press: no typing on a couch.
+            "watch-tmdb-key-paste" => paste_tmdb_key(d, cx),
+            "watch-tmdb-key-set" => set_tmdb_key(d, window, cx),
+            "watch-tmdb-key-remove" => clear_tmdb_key(d, cx),
+            _ => {}
+        },
+        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-catalog:") => {
+            let source = id.trim_start_matches("watch-catalog:").to_owned();
+            set_catalog_source(d, &source, on, cx);
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
     match outcome {
         Outcome::Activate(id) => match id.as_ref() {
             "watch-link" => start_link(d, cx),
             "watch-check" => check_link(d, cx),
             "watch-unlink" => unlink(d, cx),
-            "watch-tmdb-key-set" => set_tmdb_key(d, window, cx),
-            "watch-tmdb-key-remove" => clear_tmdb_key(d, cx),
             "watch-reset" => {
                 themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
                     prefs.theme = watch_theme();
@@ -418,10 +504,6 @@ pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-rail:") => {
             let kind = id.trim_start_matches("watch-rail:");
             set_rail(d, kind, on, cx);
-        }
-        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-catalog:") => {
-            let source = id.trim_start_matches("watch-catalog:").to_owned();
-            set_catalog_source(d, &source, on, cx);
         }
         Outcome::Changed(id, Value::Toggle(on)) if id.as_ref() == "watch-service-stop" => {
             let mut settings = heronite_watch::settings::read(&d.ctx.app);
