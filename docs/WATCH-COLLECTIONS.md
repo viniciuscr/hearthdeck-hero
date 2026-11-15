@@ -282,26 +282,40 @@ Landed, each its own commit:
 | `c333357c` | slice 2b: the Shelf tab — Continue watching, Watchlist, Favourites; empty rails hidden |
 | `8bd02c1a` | slice 2c: the shelf rides with the projection, so a kept title opens |
 | `cf046b82` | slice 3a: `WatchCollectionSource`, TMDB's “Top rated”/“Popular” rails, the registry, `heronite_watch::collections::{descriptors,enabled,rail_with}`, `settings.collections` |
+| `5c3cc9b1` | this status table |
+| `7ebcb33b` | slice 3b-1: the enabled rails are resolved with the library, marked `collection:<id>`, and drawn after Favourites in the settings order; `fork/watch/rails::title` names a rule |
+| `aaff2d9b` | slice 3b-2: the Settings → Watch → Catalog providers rows (desktop and console), writing `settings.collections` |
+| `e4523e2b` | slice 3b-3: the four locales for those rows |
+| `9a338ac2` | slice 3b-4: `a_rail_is_its_rules_page`, end to end through a fake that answers `/discover` and `/external_ids` |
 
-**Not landed — slice 3b, the app half of provider collections:**
+**Slice 3b is landed.** What the implementation settles, for the next slice:
 
-1. A rail in `sources.rs::personal_shelves` per enabled collection: ask
-   `heronite_watch::collections::enabled(app)` for `(source, descriptor)`, resolve
-   each with `rail_with`, stamp the items with their rail so the projection can
-   open them (`catalog: Some(format!("collection:{id}"))`), and draw the rails
-   after Favourites in the settings order.
-2. The Settings toggles: one row per declared collection in **Settings → Watch →
-   Catalog providers** (not a new section), writing `settings.collections` — the
-   ids are the sources' own (`tmdb:top-rated:movie`), first is drawn first. A row
-   whose source has no key says so.
-3. Locales for those rows and the rail headers.
-4. Restore the end-to-end rail test (rule → page) with a fake that answers
-   `/external_ids`: the TMDB source drops a title it cannot resolve to an IMDb id,
-   which is why the naive fixture yielded zero items.
-5. Then the `rust-skills` review of `f4dc5c3e..HEAD`.
+- **Where a rail is resolved.** In `heronite_watch::collection::items`, i.e. the
+  library refresh: the tab never asks a provider anything, and `enabled(app)` —
+  declaring a rail — is free by contract (`descriptors` makes no request). The
+  mark the refresh leaves (`collection:<id>` in `extra.watchCatalog`) is the rail's
+  membership, read back by `fork/watch/sources::rail_marker`.
+- **One mark per title.** A projection record carries one `catalog`, so a title in
+  two enabled rails is drawn in the first (settings order) and the rail a person
+  turned on outranks a catalogue page's feed key (a page can be replaced, a rail
+  cannot). The per-rail primitive of §5 (`replace_feed`/`remove_feed`, key
+  `collection:<kind>:<source>:<catalog>-<sort>`) is what lifts this.
+- **Not done, and intended:** the per-rail cache file of §4 and its freshness
+  rule (§5) — a rail is refetched whenever the library is, which is the same cost
+  as the tabs' browsing rails. The `watch-collections/` files are still unbuilt.
+- **Removal is a toggle, not a feed rewrite:** turning a rail off drops it from
+  `settings.collections`, and the tab stops drawing it; its titles stay in the
+  projection until the refresh no longer marks them, which is the `remove_feed`
+  work above.
+- **`settings.collections` order.** A rail turned on joins the end (`toggled`),
+  and reordering remains hand-editing the file, as §3 says.
+
+Slice 4 (TMDB account, franchises, local named lists) is **out of scope** by
+decision, and so is the `remove_feed`/per-rail-cache refinement above.
 
 Each provider offers its own collections by implementing `WatchCollectionSource`
-and joining `heronite-watch-catalogs::collection_sources()` — nothing in the app
-names TMDB, and an id a build does not have is skipped like every other settings
-list. Slice 4 (TMDB account, franchises, local named lists) is **out of scope** by
-decision.
+and joining `heronite-watch-catalogs::collection_sources()`: the tab, the refresh
+and the Settings rows all ask that registry, and an id a build does not have is
+skipped like every other settings list. The one place the app names a source is
+the row that says whether its key is set (`fork/watch/settings::source_keyed`) —
+the same place that already names TMDB's key.
