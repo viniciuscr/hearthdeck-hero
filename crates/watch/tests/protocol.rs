@@ -252,7 +252,7 @@ fn stremio_reads_the_progress_of_a_title_from_the_datastore() {
 }
 
 #[test]
-fn stremio_puts_continue_watching_first_and_marks_only_the_catalog_top() {
+fn stremio_browses_nothing_but_its_own_continue_watching() {
     let fake = Fake::new();
     let dir = tempfile::tempdir().unwrap();
     let app = heronite_data::paths::AppPaths { config: dir.path().join("config"), cache: dir.path().join("cache") };
@@ -261,12 +261,9 @@ fn stremio_puts_continue_watching_first_and_marks_only_the_catalog_top() {
     let ctx = Ctx { http: &fake, credentials: &credentials };
     let rails = Stremio.browse(&ctx).unwrap();
 
-    assert_eq!(rails.len(), 3);
+    assert_eq!(rails.len(), 1, "browsing is the catalogue sources' job, not the provider's");
     assert_eq!(rails[0].catalog.id, "continue-watching");
     let ids: Vec<&str> = rails[0].items.iter().map(|item| item.id.as_str()).collect();
     assert_eq!(ids, ["tt26657236"]);
-    assert!(!rails[0].items[0].top, "a library record is not a top catalog item");
-    assert_eq!(rails[1].catalog.kind, "movie");
-    assert!(rails[1].items.iter().all(|item| item.top));
-    assert_eq!(rails[2].catalog.kind, "series");
+    assert!(!rails[0].items[0].top, "a library record is not a top catalogue item");
 }

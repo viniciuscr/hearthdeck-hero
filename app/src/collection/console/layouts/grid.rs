@@ -477,7 +477,12 @@ impl CollectionView {
                 )))
         });
         let body = if keys.is_empty() {
-            kit::empty(Icon::FaSearch, tr!("No games match"), tr!("Change the filters above or the search (Y).")).into_any_element()
+            match crate::collection::watch_catalog::feed_kind(&spec.source) {
+                Some(kind) => self.watch_catalog_empty(kind),
+                None => {
+                    kit::empty(Icon::FaSearch, tr!("No games match"), tr!("Change the filters above or the search (Y).")).into_any_element()
+                }
+            }
         } else {
             let loading = crate::collection::watch_catalog::feed_kind(&spec.source).is_some_and(|kind| self.watch_feed_loading(kind));
             let scroller = self.grid_scroller(tab, &keys, cols, grid_focus, window);

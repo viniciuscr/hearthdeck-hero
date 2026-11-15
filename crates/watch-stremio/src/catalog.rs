@@ -1,26 +1,9 @@
-//! Cinemeta's Top catalogs and its records as Watch items.
+//! The account's records as Watch items.
 
-use anyhow::Result;
-use heronite_watch_addon::addon::AddonClient;
 use heronite_watch_core::types::MovieItem;
 
 use crate::datastore::LibraryItem;
 use crate::ID;
-
-pub const CINEMETA: &str = "https://v3-cinemeta.strem.io/manifest.json";
-
-/// Cinemeta's Top catalog of `kind`, every item marked as such.
-pub fn top(addon: &AddonClient<'_>, kind: &str) -> Result<Vec<MovieItem>> {
-    Ok(addon
-        .catalog(kind, "top", &[])?
-        .into_iter()
-        .map(|mut movie| {
-            movie.top = true;
-            movie.provider = ID.into();
-            movie
-        })
-        .collect())
-}
 
 /// A datastore record as a Watch item.
 pub fn from_library(item: &LibraryItem) -> MovieItem {

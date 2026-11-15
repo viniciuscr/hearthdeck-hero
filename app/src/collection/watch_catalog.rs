@@ -120,13 +120,11 @@ pub(super) struct WatchCatalog {
 }
 
 impl WatchCatalog {
-    /// Whether a title belongs in the tab: the current feed's own items once it
-    /// has asked for a page, and everything before that.
+    /// Whether a title belongs in the tab: only the feed's own items, and none
+    /// before its first page — a catalog tab never shows the rails' titles and
+    /// then replaces them.
     pub(super) fn visible(&self, kind: &str, id: &str) -> bool {
-        match self.feeds.get(kind) {
-            Some(feed) if feed.requested => feed.ids.contains(id),
-            _ => true,
-        }
+        self.feeds.get(kind).is_some_and(|feed| feed.ids.contains(id))
     }
 
     /// Whether a page is in flight (the grid says so at its end).
@@ -327,6 +325,29 @@ impl CollectionView {
         self.watch_feed_fetch(kind, cx);
     }
 
+    /// What a catalog tab says when it has nothing to show: the sources are
+    /// still being read, none is turned on, or the feed is empty — never the
+    /// rails' titles.
+    pub(super) fn watch_catalog_empty(&self, kind: &str) -> gpui_kit::AnyElement {
+        let icon = crate::icons::Icon::GridView;
+        if self.watch_catalog.declared.is_none() {
+            return crate::console::kit::empty(icon, tr!("Loading titles…"), tr!("Asking the catalog sources you turned on."))
+                .into_any_element();
+        }
+        if self.watch_catalogs_of(kind).is_empty() {
+            return crate::console::kit::empty(
+                icon,
+                tr!("No catalog providers are on"),
+                tr!("Turn one on in Settings → Watch → Catalog providers."),
+            )
+            .into_any_element();
+        }
+        if self.watch_feed_loading(kind) {
+            return crate::console::kit::empty(icon, tr!("Loading titles…"), tr!("The first page is on its way.")).into_any_element();
+        }
+        crate::console::kit::empty(icon, tr!("Nothing here yet"), tr!("Pick another catalog above, or search.")).into_any_element()
+    }
+
     /// Whether the tab is waiting for a page (the grid says so under it).
     pub(super) fn watch_feed_loading(&self, kind: &str) -> bool {
         self.watch_catalog.loading(kind)
@@ -447,15 +468,15 @@ mod tests {
     }
 
     #[test]
-    fn a_tab_shows_the_feed_ids_and_the_library_until_it_asks() {
+    fn a_tab_shows_only_its_feed() {
         let mut catalog = WatchCatalog::default();
-        assert!(catalog.visible("movie", "tt1"), "before any page, the library shows");
+        assert!(!catalog.visible("movie", "tt1"), "before its first page, a catalog tab is empty");
         let feed = catalog.feeds.entry("movie").or_default();
         feed.requested = true;
         feed.ids.insert("tt0133093".to_owned());
         assert!(catalog.visible("movie", "tt0133093"));
         assert!(!catalog.visible("movie", "tt0234215"), "a title the feed did not send is not in the tab");
-        assert!(catalog.visible("series", "tt0234215"), "the other tab is untouched");
+        assert!(!catalog.visible("series", "tt0234215"), "the other tab has its own feed");
     }
 
     #[test]

@@ -140,7 +140,7 @@ the app uses.
 | `heronite_watch` | `available`, `Endpoints`, `UreqTransport`, `AuthKey`, `Transport`, `Result` |
 | `heronite_watch::account` | `create_link`, `read_link`, `LinkOffer`, `LinkPoll` |
 | `heronite_watch::store` | `read_auth`, `write_auth`, `clear_auth`, `read_tmdb_key`, `write_tmdb_key`, `clear_tmdb_key` |
-| `heronite_watch::collection` | `ROOT`, `library` |
+| `heronite_watch::collection` | `ROOT`, `library` (the providers' account rails, then one browsing rail per enabled catalogue source and kind) |
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
 | `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider) |
 | `heronite_watch::catalog` | `sources`, `enabled`, `catalogs`, `catalogs_with`, `page`, `page_with`, `more_with`, `replace_with`, `feed_key`, `CatalogRequest`, `CatalogSort`, `CatalogDescriptor`, `WatchCatalogSource` |

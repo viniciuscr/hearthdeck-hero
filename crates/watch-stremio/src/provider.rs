@@ -12,7 +12,7 @@ use heronite_watch_core::provider::{Ctx, Rail, RailDescriptor, ResolvedStream, S
 use heronite_watch_core::types::{MovieItem, MovieProgress, StreamChoice};
 
 use crate::account::addon_collection;
-use crate::catalog::{self, CINEMETA};
+use crate::catalog::from_library;
 use crate::datastore::{self, DatastoreClient};
 use crate::endpoints::Endpoints;
 use crate::streaming::StreamingServer;
@@ -53,7 +53,7 @@ fn continue_watching(ctx: &Ctx<'_>, endpoints: &Endpoints) -> Result<Vec<MovieIt
     Ok(datastore::continue_watching(&client.get_all()?)
         .into_iter()
         .filter(|item| item.kind == "movie" || item.kind == "series")
-        .map(catalog::from_library)
+        .map(from_library)
         .collect())
 }
 
@@ -66,18 +66,13 @@ impl WatchProvider for Stremio {
         "Stremio"
     }
 
+    /// What the linked account knows: where the person stopped. Browsing is the
+    /// catalogue sources' job, so a media provider never goes looking for
+    /// something to discover — and never reaches a catalogue on its own.
     fn browse(&self, ctx: &Ctx<'_>) -> Result<Vec<Rail>> {
         let endpoints = Endpoints::default();
         endpoints.validate()?;
-        let mut rails = vec![Rail { catalog: CONTINUE_WATCHING, items: continue_watching(ctx, &endpoints)? }];
-
-        let mut addon = AddonClient::new(ctx.http, CINEMETA)?;
-        addon.manifest()?;
-        for kind in ["movie", "series"] {
-            let items = catalog::top(&addon, kind)?;
-            rails.push(Rail { catalog: RailDescriptor { id: "top", kind }, items });
-        }
-        Ok(rails)
+        Ok(vec![Rail { catalog: CONTINUE_WATCHING, items: continue_watching(ctx, &endpoints)? }])
     }
 
     fn streams(&self, ctx: &Ctx<'_>, kind: &str, id: &str) -> Result<Vec<StreamChoice>> {

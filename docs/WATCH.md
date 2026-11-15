@@ -335,6 +335,16 @@ Envelope, source `stremio-core`:
   scrolling appends. The rails (no feed) and the other kind are untouched.
 - A tab lists its feed's own ids once it has asked for a page, so the rails never
   leak into a catalog and a search shows its own titles.
+- **Browsing never lives in a media provider.** Stremio's `browse` reports only
+  what its own account knows — where the person stopped, the Continue watching
+  rail — and reaches no catalogue at all. The home's browsing rails (Top movies,
+  Top series) are built from the **enabled** catalogue sources, one per source and
+  kind from its first catalogue, so turning a source off removes what it
+  contributed from the home *and* from the tabs.
+- The Movies and Series tabs list only their own feed's titles: before the first
+  page arrives they are empty, with a message that says why (asking the sources,
+  none turned on, or nothing found). They never show the library and replace it a
+  moment later.
 - The app asks for the next page when the grid's last visible row is within two
   rows of the end (the wheel and the pad both move that), shows "Loading more…"
   while a page is in flight, and retries a failed page only after 20 s — a fetch
