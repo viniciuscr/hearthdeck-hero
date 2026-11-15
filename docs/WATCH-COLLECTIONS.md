@@ -269,3 +269,39 @@ isolates their failures. That difference is deliberate and stated here.
    writer owns the projection; `PersonalTitle` *is* `MovieItem`; the page enum is
    `ShelfEntry`; the seam is three arms and a new F-015; `X` keeps its existing
    meaning; and the tab is called **Shelf**, with *collection* kept for a rail.
+
+## 13. Status (2026-11-15)
+
+Landed, each its own commit:
+
+| Commit | Step |
+|---|---|
+| `f4dc5c3e`, `69c50925` | the design, revised after review, and named **Shelf** |
+| `bbc74a9f` | slice 1: `PersonalLibrary`, `<config>/watch-personal.json`, facade toggles |
+| `492df34e` | slice 2a: *Add to watch* / *Favourite* rows on the film page |
+| `c333357c` | slice 2b: the Shelf tab — Continue watching, Watchlist, Favourites; empty rails hidden |
+| `8bd02c1a` | slice 2c: the shelf rides with the projection, so a kept title opens |
+| `cf046b82` | slice 3a: `WatchCollectionSource`, TMDB's “Top rated”/“Popular” rails, the registry, `heronite_watch::collections::{descriptors,enabled,rail_with}`, `settings.collections` |
+
+**Not landed — slice 3b, the app half of provider collections:**
+
+1. A rail in `sources.rs::personal_shelves` per enabled collection: ask
+   `heronite_watch::collections::enabled(app)` for `(source, descriptor)`, resolve
+   each with `rail_with`, stamp the items with their rail so the projection can
+   open them (`catalog: Some(format!("collection:{id}"))`), and draw the rails
+   after Favourites in the settings order.
+2. The Settings toggles: one row per declared collection in **Settings → Watch →
+   Catalog providers** (not a new section), writing `settings.collections` — the
+   ids are the sources' own (`tmdb:top-rated:movie`), first is drawn first. A row
+   whose source has no key says so.
+3. Locales for those rows and the rail headers.
+4. Restore the end-to-end rail test (rule → page) with a fake that answers
+   `/external_ids`: the TMDB source drops a title it cannot resolve to an IMDb id,
+   which is why the naive fixture yielded zero items.
+5. Then the `rust-skills` review of `f4dc5c3e..HEAD`.
+
+Each provider offers its own collections by implementing `WatchCollectionSource`
+and joining `heronite-watch-catalogs::collection_sources()` — nothing in the app
+names TMDB, and an id a build does not have is skipped like every other settings
+list. Slice 4 (TMDB account, franchises, local named lists) is **out of scope** by
+decision.
