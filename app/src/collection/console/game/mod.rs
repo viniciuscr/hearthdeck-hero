@@ -539,6 +539,7 @@ impl CollectionView {
                 _ => {}
             },
             Outcome::Changed(id, value) => match (id.as_ref(), value) {
+                (id, Value::Toggle(_)) if id.starts_with("watch-") => self.watch_toggle_personal(&g, id, cx),
                 ("launch-option", Value::Choice { index, .. }) => {
                     let choice = super::super::launch_options::choices(&self.facts.launch_options).into_iter().nth(index).flatten();
                     self.set_launch_option(key, choice, cx);

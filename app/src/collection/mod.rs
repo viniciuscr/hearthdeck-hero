@@ -90,6 +90,7 @@ pub use screenshots::screenshots_global;
 pub mod stage;
 mod vm;
 pub(crate) mod watch_catalog;
+mod watch_personal;
 mod watch_playback;
 mod watch_service;
 
@@ -326,6 +327,10 @@ pub struct CollectionView {
     watch: watch_playback::WatchPlayback,
     /// The Stremio service this app started, if any (`watch_service.rs`).
     watch_service: watch_service::WatchService,
+    /// The person's watchlist and favourites (`watch_personal.rs`).
+    watch_personal: heronite_watch::personal::PersonalLibrary,
+    /// Whether the shelf has been read from its file yet.
+    watch_personal_ready: bool,
     /// The catalog feeds of the Movies and Series tabs (`watch_catalog.rs`).
     watch_catalog: watch_catalog::WatchCatalog,
     /// Language the precomputed view models and the search placeholder were
@@ -593,6 +598,8 @@ impl CollectionView {
             console: Default::default(),
             watch: Default::default(),
             watch_service: Default::default(),
+            watch_personal: Default::default(),
+            watch_personal_ready: false,
             watch_catalog: Default::default(),
             lang: heronite_i18n::current(),
         };

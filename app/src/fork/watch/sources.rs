@@ -54,3 +54,20 @@ pub fn providers(games: &[Arc<CollectionGame>]) -> Vec<String> {
     }
     providers.into_iter().collect()
 }
+
+/// The title as the person's shelf remembers it: the fields the card draws, keyed
+/// the way the rest of Watch resolves a title (`runner`, kind, id).
+pub fn personal_item(game: &CollectionGame) -> heronite_watch::personal::MovieItem {
+    heronite_watch::personal::MovieItem {
+        provider: game.runner.clone(),
+        kind: kind(game).to_owned(),
+        id: id(game).to_owned(),
+        name: game.title.clone(),
+        year: year(game).map(str::to_owned),
+        poster: game.game.art_cover.clone(),
+        background: game.game.art_background.clone(),
+        description: game.metadata.as_ref().and_then(|metadata| metadata.description.clone()),
+        genres: game.metadata.as_ref().map(|metadata| metadata.genres.clone()).unwrap_or_default(),
+        ..Default::default()
+    }
+}

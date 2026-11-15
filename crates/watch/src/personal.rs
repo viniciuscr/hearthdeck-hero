@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use heronite_data::paths::AppPaths;
-use heronite_watch_core::types::MovieItem;
+pub use heronite_watch_core::types::MovieItem;
 
 pub use heronite_watch_core::personal::{same_title, PersonalLibrary, PersonalList};
 
