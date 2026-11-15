@@ -7,6 +7,7 @@
 
 pub mod catalog;
 pub mod collection;
+pub mod collections;
 pub mod metadata;
 pub mod personal;
 pub mod playback;

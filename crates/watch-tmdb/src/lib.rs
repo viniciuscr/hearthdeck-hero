@@ -589,3 +589,84 @@ mod tests {
         assert!(format!("{error:#}").contains("Settings → Watch → Catalogs"), "{error:#}");
     }
 }
+
+/// TMDB's collection rails: two queries per kind, answered by its own catalogue.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TmdbCollections;
+
+const COLLECTIONS: heronite_watch_core::collections::CollectionSourceDescriptor =
+    heronite_watch_core::collections::CollectionSourceDescriptor { id: "tmdb", name: "TMDB" };
+
+impl heronite_watch_core::collections::WatchCollectionSource for TmdbCollections {
+    fn descriptor(&self) -> &heronite_watch_core::collections::CollectionSourceDescriptor {
+        &COLLECTIONS
+    }
+
+    fn collections(
+        &self,
+        _ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
+    ) -> Result<Vec<heronite_watch_core::collections::CollectionDescriptor>> {
+        use heronite_watch_core::catalog::{CatalogRequest, CatalogSort};
+        use heronite_watch_core::collections::CollectionDescriptor;
+        let mut rails = Vec::new();
+        for (kind, label) in [("movie", "Films"), ("series", "Series")] {
+            for (id, name, sort) in [("top-rated", "Top rated", CatalogSort::Rating), ("popular", "Popular", CatalogSort::Popular)] {
+                rails.push(CollectionDescriptor {
+                    id: format!("tmdb:{id}:{kind}"),
+                    name: format!("{label} · {name}"),
+                    kind: kind.to_owned(),
+                    rule: CatalogRequest { sort, ..CatalogRequest::first(kind) },
+                });
+            }
+        }
+        Ok(rails)
+    }
+}
+
+#[cfg(test)]
+mod collection_tests {
+    use super::*;
+    use heronite_watch_core::catalog::{CatalogCtx, CatalogSort};
+    use heronite_watch_core::collections::WatchCollectionSource;
+    use heronite_watch_core::http::Transport;
+    use heronite_watch_core::provider::{Credentials, Secret};
+
+    struct Nothing;
+
+    impl Transport for Nothing {
+        fn get(&self, _: &url::Url) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+        fn post_json(&self, _: &url::Url, _: &serde_json::Value) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct NoKey;
+
+    impl Credentials for NoKey {
+        fn get(&self, _: &str) -> Result<Option<Secret>> {
+            Ok(None)
+        }
+        fn set(&self, _: &str, _: &Secret) -> Result<()> {
+            Ok(())
+        }
+        fn clear(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn tmdb_declares_two_rails_a_kind_without_needing_a_key() {
+        let (http, credentials) = (Nothing, NoKey);
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
+        let rails = TmdbCollections.collections(&ctx).unwrap();
+        let ids: Vec<&str> = rails.iter().map(|rail| rail.id.as_str()).collect();
+        assert_eq!(ids, ["tmdb:top-rated:movie", "tmdb:popular:movie", "tmdb:top-rated:series", "tmdb:popular:series"]);
+        assert_eq!(rails[0].rule.sort, CatalogSort::Rating);
+        assert_eq!(rails[1].rule.sort, CatalogSort::Popular);
+        assert_eq!(rails[0].kind, "movie");
+        assert_eq!(rails[2].kind, "series");
+        assert!(rails[0].name.contains("Top rated"));
+    }
+}

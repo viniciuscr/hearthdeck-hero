@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod catalog;
+pub mod collections;
 pub mod http;
 pub mod metadata;
 pub mod personal;
@@ -16,6 +17,7 @@ pub use catalog::{
     CatalogCache, CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor,
     WatchCatalogSource,
 };
+pub use collections::{CollectionDescriptor, CollectionSourceDescriptor, WatchCollectionSource};
 pub use metadata::{Episode, Fact, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
 pub use personal::{same_title, PersonalLibrary, PersonalList};
 pub use provider::{Credentials, Ctx, Rail, RailDescriptor, ResolvedStream, Secret, StreamOrigin, WatchProvider};

@@ -11,6 +11,16 @@ use heronite_watch_core::catalog::WatchCatalogSource;
 
 pub mod cinemeta;
 
+use heronite_watch_core::collections::WatchCollectionSource;
+
+static TMDB_COLLECTIONS: heronite_watch_tmdb::TmdbCollections = heronite_watch_tmdb::TmdbCollections;
+static COLLECTION_SOURCES: [&dyn WatchCollectionSource; 1] = [&TMDB_COLLECTIONS];
+
+/// Every collection source this build has, in the order Settings lists them.
+pub fn collection_sources() -> &'static [&'static dyn WatchCollectionSource] {
+    &COLLECTION_SOURCES
+}
+
 static CINEMETA: cinemeta::Cinemeta = cinemeta::Cinemeta::builtin();
 static TMDB: heronite_watch_tmdb::Tmdb = heronite_watch_tmdb::Tmdb::new();
 static SOURCES: [&dyn WatchCatalogSource; 2] = [&CINEMETA, &TMDB];

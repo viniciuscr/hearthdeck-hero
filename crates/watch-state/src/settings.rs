@@ -35,6 +35,11 @@ pub struct Settings {
     /// already right when it lands.
     #[serde(default = "metadata_by_default")]
     pub metadata_sources: Vec<String>,
+    /// The collection rails the person turned on for the Shelf tab, in rail order
+    /// (Settings → Watch → Collections). Ids are the sources' own
+    /// (`tmdb:top-rated:movie`); one this build does not have is skipped.
+    #[serde(default)]
+    pub collections: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -60,6 +65,7 @@ impl Default for Settings {
             stop_service_when_done: true,
             catalog_sources: catalogs_by_default(),
             metadata_sources: metadata_by_default(),
+            collections: Vec::new(),
             extra: Map::new(),
         }
     }
@@ -111,6 +117,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read(&app(dir.path())).metadata_sources, ["tmdb", "cinemeta"], "no file: TMDB first, Cinemeta as the fallback");
         assert_eq!(Settings::default().metadata_sources, ["tmdb", "cinemeta"]);
+    }
+
+    #[test]
+    fn no_collection_rail_is_on_to_begin_with() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            read(&app(dir.path())).collections.is_empty(),
+            "the Shelf starts with Continue watching, the watchlist and the favourites only"
+        );
+        assert!(Settings::default().collections.is_empty());
     }
 
     #[test]
