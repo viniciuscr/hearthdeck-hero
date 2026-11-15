@@ -19,20 +19,29 @@ pub const ROOT: &str = "watch-library";
 /// The mark a catalog page leaves in its records, so a rails refresh keeps them.
 pub const CATALOG_KEY: &str = "watchCatalog";
 
-/// Rewrites the root from the items `fetch` returns, keeping the catalog pages
+/// What a rails refresh fetched: the records the sources answered with, and the
+/// collection rails that answered at all — an empty page is an answer, a source
+/// that could not be asked (offline, no key) is not.
+pub struct Fetched {
+    pub movies: Vec<MovieItem>,
+    pub answered: Vec<String>,
+}
+
+/// Rewrites the root from the records `fetch` returns, keeping the catalog pages
 /// fetched before: browsing deeper than the rails survives a refresh.
 ///
 /// A collection rail is resolved whole every time, so its titles outlive the
-/// refresh only while the person still has the rail on (`rails`, the enabled
-/// collection ids): turning one off takes its titles out of the library, and a
-/// refresh that could not ask the source (offline, no key) keeps the last good
-/// ones rather than emptying the rail.
+/// refresh under one rule: a rail the person turned off (`rails`, the enabled
+/// collection ids) takes its titles with it, and so does a title the rail no
+/// longer holds when it did answer — the rail follows its page. A rail that could
+/// not be asked this time (offline, no key) keeps its last good titles instead of
+/// emptying.
 pub fn refresh<F>(root: &Path, rails: &[String], fetch: F) -> Result<()>
 where
-    F: FnOnce() -> Result<Vec<MovieItem>>,
+    F: FnOnce() -> Result<Fetched>,
 {
-    let mut movies = fetch()?;
-    for item in stored(root).into_iter().filter(|item| kept(item, rails)) {
+    let Fetched { mut movies, answered } = fetch()?;
+    for item in stored(root).into_iter().filter(|item| kept(item, rails, &answered)) {
         if !movies.iter().any(|movie| same(movie, &item)) {
             movies.push(item);
         }
@@ -41,11 +50,12 @@ where
 }
 
 /// Whether a stored record outlives the refresh that is writing now: a catalogue
-/// page always, a collection rail's title while the rail is turned on.
-fn kept(item: &MovieItem, rails: &[String]) -> bool {
+/// page always, a collection rail's title only while the rail is on and could not
+/// be asked — one that answered has already brought back what it still holds.
+fn kept(item: &MovieItem, rails: &[String], answered: &[String]) -> bool {
     let Some(mark) = item.catalog.as_deref() else { return false };
     match mark.strip_prefix(MARK_PREFIX) {
-        Some(id) => rails.iter().any(|rail| rail == id),
+        Some(id) => rails.iter().any(|rail| rail == id) && !answered.iter().any(|rail| rail == id),
         None => true,
     }
 }
@@ -291,7 +301,7 @@ mod tests {
         assert_eq!(added, 1, "a title already there is not added again");
 
         // A rails refresh replaces the rails and keeps the page.
-        refresh(root, &[], || Ok(vec![movie("tt3", "New Film")])).unwrap();
+        refresh(root, &[], || Ok(Fetched { movies: vec![movie("tt3", "New Film")], answered: Vec::new() })).unwrap();
         let items = stored(root);
         let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, ["tt3", "tt2"]);
@@ -300,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn a_collection_rails_titles_leave_when_the_rail_is_turned_off() {
+    fn a_collection_rail_follows_its_page_and_keeps_what_it_could_not_ask() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write_root(root, &[movie("tt1", "A Film")]).unwrap();
@@ -308,14 +318,25 @@ mod tests {
         in_rail.catalog = Some(heronite_watch_core::collections::mark("tmdb:top-rated:movie"));
         append(root, &[in_rail]).unwrap();
 
-        // The rail is still on and this refresh could not ask (offline): its last
-        // good titles stay, which is what the tab draws while the source is away.
+        // The rail is on and this refresh could not ask (offline): its last good
+        // titles stay, which is what the tab draws while the source is away.
         let rail = ["tmdb:top-rated:movie".to_owned()];
-        refresh(root, &rail, || Ok(vec![movie("tt1", "A Film")])).unwrap();
+        let nothing = || Ok(Fetched { movies: vec![movie("tt1", "A Film")], answered: Vec::new() });
+        refresh(root, &rail, nothing).unwrap();
         assert!(stored(root).iter().any(|item| item.id == "tt2"), "an unreachable rail keeps its titles");
 
-        // Turned off: the library no longer holds them.
-        refresh(root, &[], || Ok(vec![movie("tt1", "A Film")])).unwrap();
+        // The rail answered, and its page no longer holds the title: the rail
+        // follows the page rather than accumulating what it once showed.
+        let answered = || Ok(Fetched { movies: vec![movie("tt1", "A Film")], answered: vec!["tmdb:top-rated:movie".to_owned()] });
+        refresh(root, &rail, answered).unwrap();
+        assert!(!stored(root).iter().any(|item| item.id == "tt2"), "a title off the page leaves the rail");
+
+        // Turned off: the library no longer holds its titles either, whether or
+        // not the source answered.
+        let mut popular = movie("tt4", "Another Rail Film");
+        popular.catalog = Some(heronite_watch_core::collections::mark("tmdb:popular:movie"));
+        append(root, &[popular]).unwrap();
+        refresh(root, &[], || Ok(Fetched { movies: vec![movie("tt1", "A Film")], answered: Vec::new() })).unwrap();
         let ids: Vec<String> = stored(root).into_iter().map(|item| item.id).collect();
         assert_eq!(ids, ["tt1"], "a rail the person turned off leaves no titles behind");
     }

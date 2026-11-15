@@ -316,13 +316,13 @@ Landed, each its own commit:
 - **Not done, and intended:** the per-rail cache file of §4 and its freshness
   rule (§5) — a rail is refetched whenever the library is, which is the same cost
   as the tabs' browsing rails. The `watch-collections/` files are still unbuilt.
-- **Removal is a toggle, and it is complete.** Turning a rail off drops it from
-  `settings.collections`, and the next refresh stops keeping its titles: its marks
-  are gone, so they leave the projection (`collection::refresh` is handed the
-  enabled ids for exactly this). A rail whose source could not answer — offline, no
-  key — keeps its last good titles instead, which is the §10 behaviour the design
-  asks for without the cache file. `remove_feed` (§5) is still unbuilt, so clearing
-  a rail's titles waits for the next refresh instead of happening on the toggle.
+- **Membership follows the rail's own page.** `collection::refresh` is handed the
+  enabled rail ids and the ids whose source answered, which is the whole rule: a
+  rail turned off keeps nothing, a rail that answered keeps only what it brought
+  back (a title off its page leaves the rail, and the library unless another rail
+  marks it), and a rail that could not be asked — offline, no key — keeps its last
+  good titles instead of emptying. `remove_feed` (§5) is still unbuilt, so clearing
+  a rail's titles waits for the next refresh rather than happening on the toggle.
 - **Continue watching on the Shelf is not the theme's rail toggle.** The Settings →
   Watch → *Home rails* switch for "Continue watching" turns the theme's rail off on
   the Watch home; §2 makes it the Shelf's first rail whenever there is progress,

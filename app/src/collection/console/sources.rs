@@ -290,13 +290,12 @@ impl CollectionView {
             shelves.push(shelf(kind, title.to_string(), games));
         }
 
-        // The collection rails the person turned on, in their order. The library
-        // carries their titles already — the refresh path resolved each rule and
-        // marked what it brought — so drawing one asks a provider nothing:
-        // declaring a rail is a saved query, not a request.
-        let enabled = heronite_watch::collections::enabled(&self.app_paths);
+        // The collection rails the person turned on, in their order, read with
+        // the library: the titles are already in it — the refresh path resolved
+        // each rule and marked what it brought — so drawing one asks a provider
+        // nothing, and the membership is the mark.
         shelves.extend(collection_shelves(
-            &enabled,
+            &self.watch_collections,
             all.iter().filter_map(|game| Some((crate::fork::watch::sources::rail_marker(game)?, game.key.as_str()))),
         ));
         shelves.retain(|shelf| !shelf.keys.is_empty());

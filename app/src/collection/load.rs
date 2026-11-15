@@ -25,6 +25,10 @@ struct Loaded {
     covers: HashMap<SharedString, Vec<ImageRef>>,
     stages: HashMap<SharedString, Vec<ImageRef>>,
     families: super::family_art::FamilyChains,
+    /// The collection rails the person has on, in their order (Watch only): a
+    /// source answering "what do you offer" builds a transport, so it is asked
+    /// here, off the UI thread, rather than when the Shelf tab draws.
+    collections: Vec<(String, heronite_watch::collections::CollectionDescriptor)>,
 }
 
 fn load_all(data_paths: &DataPaths, app: &AppPaths, cache: &std::path::Path, include_hidden: bool, space: Space) -> anyhow::Result<Loaded> {
@@ -50,8 +54,12 @@ fn load_all(data_paths: &DataPaths, app: &AppPaths, cache: &std::path::Path, inc
         families.add(&ctx, &key, g);
         stages.insert(key, to_chain(&art::stage_art(&ctx, g)));
     }
+    let collections = match space {
+        Space::Watch => heronite_watch::collections::enabled(app),
+        Space::Games => Vec::new(),
+    };
     log::info!("library: {} games loaded in {:?}", lib.games.len(), t.elapsed());
-    Ok(Loaded { lib, wiki, categories, smart_groups, extras, actions, covers, stages, families })
+    Ok(Loaded { lib, wiki, categories, smart_groups, extras, actions, covers, stages, families, collections })
 }
 
 /// A first load started just before the window opens, so it runs while the
@@ -148,6 +156,7 @@ impl CollectionView {
         // its rails be rebuilt against what just loaded.
         self.watch_personal = heronite_watch::personal::read(&self.app_paths);
         self.watch_personal_ready = true;
+        self.watch_collections = l.collections;
         self.forget_personal_shelves();
         let s = &l.lib.settings;
         let bg = &s.background;

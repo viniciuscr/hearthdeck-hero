@@ -333,6 +333,10 @@ pub struct CollectionView {
     watch_personal_ready: bool,
     /// The catalog feeds of the Movies and Series tabs (`watch_catalog.rs`).
     watch_catalog: watch_catalog::WatchCatalog,
+    /// The collection rails the person has on, in the order they are drawn: read
+    /// with the library (`load.rs`), because declaring one builds a transport and
+    /// the Shelf tab's rails are drawn on a render path.
+    watch_collections: Vec<(String, heronite_watch::collections::CollectionDescriptor)>,
     /// Language the precomputed view models and the search placeholder were
     /// built in.
     lang: heronite_i18n::Lang,
@@ -601,6 +605,7 @@ impl CollectionView {
             watch_personal: Default::default(),
             watch_personal_ready: false,
             watch_catalog: Default::default(),
+            watch_collections: Vec::new(),
             lang: heronite_i18n::current(),
         };
         this.apply_start_view();

@@ -7,12 +7,12 @@ use anyhow::Result;
 use heronite_data::paths::AppPaths;
 use heronite_data::{DataPaths, Library};
 use heronite_watch_core::catalog::{CatalogCtx, CatalogRequest, WatchCatalogSource};
-use heronite_watch_core::collections::mark;
+use heronite_watch_core::collections::{mark, CollectionDescriptor, MARK_PREFIX};
 use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::provider::{Ctx, Rail, RailDescriptor};
 use heronite_watch_core::types::MovieItem;
 use heronite_watch_state::catalog_cache::CatalogIds;
-use heronite_watch_state::collection;
+use heronite_watch_state::collection::{self, Fetched};
 use heronite_watch_state::store::StoreCredentials;
 
 use crate::registry;
@@ -25,11 +25,12 @@ pub use collection::ROOT;
 pub fn library(app: &AppPaths, include_hidden: bool) -> Result<Library> {
     let root = app.cache.join(ROOT);
     let http = UreqTransport::new();
-    // The collection rails still on: a refresh keeps their titles (a source that
-    // could not be asked this time would otherwise empty the rail) and drops the
-    // ones a rail the person turned off brought in.
-    let rails = heronite_watch_state::settings::read(app).collections;
-    if let Err(error) = collection::refresh(&root, &rails, || items(&http, app)) {
+    // The collection rails this build has and the person turned on. The refresh
+    // keeps a rail's titles while its source cannot answer, and drops the ones a
+    // rail no longer holds — or a rail that is now off — with the rail.
+    let rails = crate::collections::enabled(app);
+    let ids: Vec<String> = rails.iter().map(|(_, rail)| rail.id.clone()).collect();
+    if let Err(error) = collection::refresh(&root, &ids, || items(&http, app, &rails)) {
         log::warn!("movies provider: {error:#}; keeping the last library");
     }
     Library::load_with(&DataPaths::at(root), include_hidden)
@@ -37,7 +38,7 @@ pub fn library(app: &AppPaths, include_hidden: bool) -> Result<Library> {
 
 /// Every provider's rails, in registry order. A provider that fails aborts the
 /// refresh, so the last good library stays on screen.
-fn items(http: &dyn Transport, app: &AppPaths) -> Result<Vec<MovieItem>> {
+fn items(http: &dyn Transport, app: &AppPaths, collections: &[(String, CollectionDescriptor)]) -> Result<Fetched> {
     let credentials = StoreCredentials::new(app);
     let ctx = Ctx { http, credentials: &credentials };
     let mut rails = Vec::new();
@@ -62,27 +63,40 @@ fn items(http: &dyn Transport, app: &AppPaths) -> Result<Vec<MovieItem>> {
     let mut movies = assemble(rails);
     // The collection rails the person turned on, marked on the titles they
     // brought: the Shelf tab reads the mark back, so drawing a rail asks the
-    // provider nothing.
-    mark_collections(&mut movies, collection_rails(http, app));
-    Ok(movies)
+    // provider nothing. What they did not bring this time leaves with them.
+    let (rails, answered) = collection_rails(http, app, collections);
+    mark_collections(&mut movies, rails);
+    Ok(Fetched { movies, answered })
 }
 
-/// One rail per enabled collection, in the person's order. A rule is a catalogue
-/// page asked of the source that declared it, so one rail costs what a tab page
-/// costs; a source that cannot answer (no key, an outage) costs that rail and
+/// One rail per enabled collection, in the person's order, and the ids of the
+/// rails that answered — an empty page is an answer, a source that could not be
+/// asked (no key, an outage) is not.
+///
+/// A rule is a catalogue page asked of the source that declared it, so one rail
+/// costs what a tab page costs; a source that cannot answer costs that rail and
 /// nothing else.
-fn collection_rails(http: &dyn Transport, app: &AppPaths) -> Vec<(String, Vec<MovieItem>)> {
+fn collection_rails(
+    http: &dyn Transport,
+    app: &AppPaths,
+    collections: &[(String, CollectionDescriptor)],
+) -> (Vec<(String, Vec<MovieItem>)>, Vec<String>) {
     let mut rails = Vec::new();
-    for (source, descriptor) in crate::collections::enabled(app) {
-        match crate::collections::rail_with(http, app, &source, &descriptor) {
-            Ok(items) if !items.is_empty() => rails.push((descriptor.id, items)),
-            Ok(_) => {}
+    let mut answered = Vec::new();
+    for (source, descriptor) in collections {
+        match crate::collections::rail_with(http, app, source, descriptor) {
+            Ok(items) => {
+                answered.push(descriptor.id.clone());
+                if !items.is_empty() {
+                    rails.push((descriptor.id.clone(), items));
+                }
+            }
             // The reason goes to the log only: a transport URL can carry a
             // debrid key.
             Err(error) => log::warn!("watch collection {}: {error:#}", descriptor.id),
         }
     }
-    rails
+    (rails, answered)
 }
 
 /// Marks the rails' titles in the library, adding the ones no other rail holds.
@@ -100,7 +114,7 @@ fn mark_collections(movies: &mut Vec<MovieItem>, rails: Vec<(String, Vec<MovieIt
         for item in items {
             match movies.iter_mut().find(|movie| movie.id == item.id && movie.kind == item.kind) {
                 Some(movie) => {
-                    if movie.catalog.as_deref().is_some_and(|feed| feed.starts_with("collection:")) {
+                    if movie.catalog.as_deref().is_some_and(|feed| feed.starts_with(MARK_PREFIX)) {
                         continue;
                     }
                     movie.catalog = Some(rail_mark.clone());
@@ -294,7 +308,8 @@ mod tests {
         let settings =
             heronite_watch_state::settings::Settings { collections: vec!["tmdb:top-rated:movie".to_owned()], ..Default::default() };
         heronite_watch_state::settings::write(&app, &settings).unwrap();
-        assert!(collection_rails(&NoNet, &app).is_empty(), "a keyless source is skipped, not fatal");
+        let (rails, answered) = collection_rails(&NoNet, &app, &crate::collections::enabled(&app));
+        assert!(rails.is_empty() && answered.is_empty(), "a keyless source is skipped, not fatal");
     }
 
     #[test]
