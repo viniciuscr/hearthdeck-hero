@@ -14,6 +14,7 @@
   "Check": "Prüfen",
   "Choose what the Watch home shows. The console uses this theme; ☰ → Customize edits it in detail.": "Wähle, was die Watch-Startseite zeigt. Die Konsole verwendet dieses Theme; ☰ → Anpassen bearbeitet die Details.",
   "Code {code}": "Code {code}",
+  "Collections": "Sammlungen",
   "Continue watching": "Weiterschauen",
   "Could not load more titles: {error}": "Weitere Titel konnten nicht geladen werden: {error}",
   "Could not load streams: {error}": "Quellen konnten nicht geladen werden: {error}",
@@ -59,6 +60,7 @@
   "Pick another catalog above, or search.": "Oben einen anderen Katalog wählen oder suchen.",
   "Popular": "Beliebt",
   "Provider": "Anbieter",
+  "Rails the Shelf tab draws, in this order.": "Regale, die der Tab Regal zeigt, in dieser Reihenfolge.",
   "Recently watched": "Zuletzt gesehen",
   "Released": "Erschienen",
   "Remove the TMDB API key": "Den TMDB-API-Schlüssel entfernen",
@@ -72,6 +74,7 @@
   "Series from the provider's catalog.": "Serien aus dem Katalog des Anbieters.",
   "Set": "Festlegen",
   "Shelf": "Regal",
+  "Shown in the Shelf tab.": "Wird im Tab Regal gezeigt.",
   "Starring": "Besetzung",
   "Starting the Stremio service…": "Stremio-Dienst wird gestartet…",
   "Stop the Stremio service after watching": "Den Stremio-Dienst nach dem Ansehen beenden",
@@ -108,5 +111,6 @@
   "{n} seeder": "{n} Seeder",
   "{n} seeders": "{n} Seeder",
   "{shown} of {total} titles": "{shown} von {total} Titeln",
+  "{source} has no key yet: add it above, or this rail stays empty.": "{source} hat noch keinen Schlüssel: trage ihn oben ein, sonst bleibt dieses Regal leer.",
   "{time} watched": "{time} gesehen"
 }
