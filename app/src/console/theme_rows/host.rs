@@ -12,6 +12,7 @@ use heronite_data::paths::AppPaths;
 use heronite_i18n::tr;
 
 use super::{activate, export_name, movable, removable, run, Arg, Command, Ctx, Data, Step, StoreOp};
+use crate::collection::Space;
 use crate::console::browser::PickKind;
 use crate::console::list::{Outcome, Row};
 use crate::console::{hint, sound, themes, Btn, Hint, Pad};
@@ -144,8 +145,13 @@ pub fn change<H: Host>(h: &mut H, cmd: &Command, cx: &mut Context<H>) -> bool {
             crate::console::summon::options_changed(cx);
             themes::prefs(&app)
         }
-        // The controller's, not the theme's: no Undo step.
-        "controls.glyphs" | "controls.confirm" => themes::update(&app, |p| p.controller = probe.controller),
+        // The controller's, not the theme's: no Undo step. Global, so they are
+        // written to the Games prefs whatever space is on screen, while the
+        // rows keep showing this space's own prefs.
+        "controls.glyphs" | "controls.confirm" => {
+            themes::update_for(&app, Space::Games, |p| p.controller = probe.controller);
+            themes::prefs(&app)
+        }
         _ => {
             st.remember(cmd);
             let data = &st.data;

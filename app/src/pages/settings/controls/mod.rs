@@ -25,6 +25,7 @@ use heronite_i18n::{tr, tr as translate, trn};
 use heronite_platform::{supported, Feature};
 
 use super::{overlay, Section, SettingsPage};
+use crate::collection::Space;
 use crate::console::kit::Face;
 use crate::console::look;
 use crate::icons::Icon;
@@ -364,7 +365,12 @@ const CONFIRM_CHIP: &str = "controls-confirm";
 /// Changes the controller's options (console mode, the overlay and this
 /// page follow at once), and the Console mode section's copy.
 fn change_controller(d: &mut SettingsPage, cx: &mut Context<SettingsPage>, change: impl FnOnce(&mut ControllerPrefs)) {
-    let prefs = crate::console::themes::update(&d.ctx.app, |p| change(&mut p.controller));
+    // The controller's options are global: the Games prefs own them, so they
+    // are written there whatever space the Collection was left in.
+    crate::console::themes::update_for(&d.ctx.app, Space::Games, |p| change(&mut p.controller));
+    // The pages keep this space's prefs: `update_for` installed the options in
+    // `look`, which is what the buttons are drawn and read from.
+    let prefs = crate::console::themes::prefs(&d.ctx.app);
     if let Some(s) = d.console_mode.as_mut() {
         s.theme.prefs = prefs;
     }

@@ -111,12 +111,13 @@ implementation rules live in `docs/WATCH.md`.
 | F-005 | user-facing copy in `app/src`, `crates/i18n` locales, `README.md`, `docs/` | "Heronite" replaced by "Hearthdeck Hero" (app and i18n done; README/docs pending; `console_controls.json` in all four locales still carries upstream's two strings) | active |
 | F-006 | `app/src/collection/{mod,load,nav}.rs`, `app/src/collection/console/sidebar.rs`, `app/src/collection/{actions,game_actions}.rs`, `app/src/pages/settings/console.rs` (one dispatch line) | Collection `Space::Watch`, console space item, the Watch Play action and Settings → Watch's own sections | active |
 | F-007 | `crates/data/src/library.rs` | `stremio` source label | active |
-| F-008 | `app/src/console/{themes,theme_rows}.rs`, `app/src/collection/console/{sources,layouts/grid,filters}.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings registration, per-space prefs, editor lock, source/grid-filter helpers, filter panel and one-time migration of game-shaped Watch files | active |
+| F-008 | `app/src/console/{themes,theme_rows}.rs`, `app/src/console/theme_rows/host.rs`, `app/src/collection/console/{sources,layouts/grid,filters}.rs`, `app/src/pages/settings/{section,mod,console}.rs`, `app/src/pages/settings/controls/mod.rs`, `app/src/collection/mod.rs` | Watch theme preset, Watch settings registration, per-space prefs, editor lock, source/grid-filter helpers, filter panel and one-time migration of game-shaped Watch files; the controller's options are global, so they are read from and written to the Games prefs whatever space is on screen | active |
 | F-009 | `.github/workflows/{release,flatpak,windows-packages}.yml` | upstream release workflows guarded to the upstream repository | active |
 | F-010 | `app/src/collection/{actions,game_actions,render_focus,grid_drawer}.rs`, `app/src/collection/focus/mod.rs`, `app/src/collection/console/{mod.rs,game/mod.rs,layouts/spotlight/mod.rs}` | Native Watch playback: the stream list and Play action on both detail surfaces | active |
 | F-011 | `docs/ARCHITECTURE.md` | the watch crate map (the fork-owned watch crates are absent upstream) | active |
 | F-012 | `app/src/collection/console/{mod.rs,game/mod.rs,game/hero.rs}`, `app/src/collection/hltb_ui.rs` | a fork-owned film page for Watch titles (`console/watch_page.rs`) and no HowLongToBeat lookups for them | active |
 | F-013 | `crates/launch/src/ffmpeg_install.rs` (one test) | `only_the_programs_asked_for_are_downloaded` accepts a host that already has ffmpeg on the `PATH` — the Linux case the module documents — instead of expecting the "not downloaded on" error there | active |
+| F-014 | `app/src/collection/store_media/mod.rs` (`sync_store_media`) | no store media and no Steam lookup by name for a Watch title: a film has no store page, and its name would otherwise be searched on Steam as a game title | active |
 
 ### Conflict log
 

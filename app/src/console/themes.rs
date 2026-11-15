@@ -82,8 +82,15 @@ pub fn prefs_for(app: &AppPaths, space: Space) -> ConsolePrefs {
 /// `f` over one space's prefs without copying them (it must be quick: it holds the lock).
 pub fn read_for<R>(app: &AppPaths, space: Space, f: impl FnOnce(&ConsolePrefs) -> R) -> R {
     let mut cur = PREFS.lock().unwrap_or_else(|e| e.into_inner());
-    let slot = &mut cur[index(space)];
-    f(slot.get_or_insert_with(|| load(app, space)))
+    let slot = cur[index(space)].get_or_insert_with(|| load(app, space));
+    // The controller's options are global and `look` holds the ones in use, so
+    // the rest of a space's file carries only a copy, which may predate a change
+    // made while another space was on screen. The Games prefs own them, and
+    // their file keeps precedence over the mirror read at start.
+    if space != Space::Games {
+        slot.controller = super::look::controls();
+    }
+    f(slot)
 }
 
 /// `f` over the prefs without copying them (it must be quick: it holds the lock).

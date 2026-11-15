@@ -46,7 +46,7 @@ use heronite_metadata::store_media::{self, cache, MediaGame, SteamTarget, StoreM
 use heronite_metadata::{Endpoints, Http, Lookup};
 use smallvec::smallvec;
 
-use super::CollectionView;
+use super::{CollectionView, Space};
 use crate::dialogs::metadata_wizard::{hub, HubGlobal};
 
 /// Frames of a playing trailer, and their size (480p, the stream's).
@@ -255,7 +255,9 @@ impl CollectionView {
                 self.media_play(0, 0., false, cx);
             }
         }
-        if !shown() || crate::console::active() {
+        // Films have no store page: nothing to read, and no Steam lookup by
+        // title for a film's name.
+        if !shown() || crate::console::active() || self.space == Space::Watch {
             if self.media.game.is_some() {
                 self.media.reset();
             }
