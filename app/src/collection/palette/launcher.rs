@@ -99,6 +99,6 @@ mod tests {
         let alone: Vec<_> = verbs.iter().filter(|e| runs_alone(e)).map(|e| e.title.to_string()).collect();
         assert_eq!(alone, ["Play Control", "Open Control folder", "Add Control to favourites", "Hide Control"]);
         let opens: Vec<_> = verbs.iter().filter(|e| !runs_alone(e)).map(|e| e.title.to_string()).collect();
-        assert_eq!(opens, ["Control settings", "Control log", "Show Control in Heronite"]);
+        assert_eq!(opens, ["Control settings", "Control log", "Show Control in Hearthdeck Hero"]);
     }
 }

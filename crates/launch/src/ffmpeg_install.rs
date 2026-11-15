@@ -255,8 +255,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = DataPaths::at(dir.path().join("heronite"));
         let Some(assets) = assets_for(std::env::consts::OS, std::env::consts::ARCH) else {
-            let err = ensure(&paths, &[Tool::Ffmpeg], &FakeNet::online(), &|| false).unwrap_err();
-            assert!(err.contains("not downloaded on"), "{err}");
+            // A host that downloads nothing: an ffmpeg on the PATH (Linux
+            // packages have it) leaves nothing to do, and without one the
+            // error says where to get it.
+            match ensure(&paths, &[Tool::Ffmpeg], &FakeNet::online(), &|| false) {
+                Ok(()) => assert!(ffmpeg::find(Tool::Ffmpeg).is_some(), "nothing was missing, yet nothing was found"),
+                Err(err) => assert!(err.contains("not downloaded on"), "{err}"),
+            }
             return;
         };
         // Not the release's bytes: refused, after asking for ffmpeg only.
