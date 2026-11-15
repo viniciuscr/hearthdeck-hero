@@ -1,10 +1,18 @@
-# Watch — Collections, watchlist and favourites (design)
+# Watch — Shelf: collections, watchlist and favourites (design)
 
 Status: **spec, revised after a design review.** Fork-owned. Read alongside
 `docs/WATCH.md` (the contracts) and `docs/WATCH-CRATES.md` (the crates). This
 document owns the vocabulary and the rules; the implementation must not widen them
 without updating it.
 
+> **Revision 2026-11-15, after review, and named.** The tab is **Shelf** (source
+> `shelf`): it holds the person's things and a few curated rails, and a *collection*
+> is one of those rails — a provider-declared list or rule ("Top rated", a franchise).
+> Naming the tab "Collections" would have named it after one of its contents and
+> echoed the games' Collection screen; "Library" is the data model and a Settings
+> section already. Settings keeps the section name **Collections**, because that is
+> what it toggles.
+>
 > **Revision 2026-11-15, after review.** Three things changed the shape: a personal
 > rail draws from its own snapshot (the projection cannot draw a title it does not
 > hold), the collection contract carries the source and the media kind (a rule is
@@ -28,7 +36,7 @@ sorts by `Popular | Rating | Newest | Title`, so the rail is called **Popular**.
 
 ## 2. What replaces the Favourites tab
 
-The Watch space gets a tab with source `"collections"` (name **Collections**). A
+The Watch space gets a tab with source `"shelf"` (name **Shelf**). A
 theme that carries a `favourites` tab has it replaced — source *and* layout
 (`presets::cinema` carries one as `Layout::Cinema`), so the projection forces
 `Layout::Shelves`; a theme with none gets the tab added. The theme's `favourites`
@@ -143,7 +151,7 @@ the first draft:
 
 A personal rail needs none of this: it renders from the snapshot.
 
-## 6. The tab page (`app/src/collection/console/watch_collections.rs`, fork-owned)
+## 6. The page (`app/src/collection/console/watch_shelf.rs`, fork-owned)
 
 Dispatched from the console's Shelves path — **three arms, not one**:
 `render_shelves` → here, `shelf_pad` → here (navigation, activation), `shelves_hints`
@@ -152,13 +160,13 @@ Dispatched from the console's Shelves path — **three arms, not one**:
 in `docs/WATCH.md`'s editable-upstream list. The page never calls `console_shelves`:
 `console_in_source` has no `"collections"` case and falls through to "everything".
 
-The page draws a small enum, named `Shelf` so it cannot be confused with the
-provider's `Rail`:
+The page draws a small enum, named `ShelfEntry` so neither `Shelf` (the tab) nor
+`Rail` (the provider contract) is reused:
 
 ```rust
-pub enum Shelf { Continue(…), Personal { title: String, items: Vec<MovieItem> },
-                 Provider { source: String, descriptor: CollectionDescriptor, items: Vec<MovieItem> },
-                 Failed { title: String } }
+pub enum ShelfEntry { Continue(…), Personal { title: String, items: Vec<MovieItem> },
+                      Provider { source: String, descriptor: CollectionDescriptor, items: Vec<MovieItem> },
+                      Failed { title: String } }
 ```
 
 **Drawing and opening.** Cards come from the item's own art (`ImageRef::Url` +
@@ -259,4 +267,5 @@ isolates their failures. That difference is deliberate and stated here.
    without a key fails its listing rather than declaring nothing.
 3. Freshness is a per-rail file with a time, not the app's catalogue epoch; one
    writer owns the projection; `PersonalTitle` *is* `MovieItem`; the page enum is
-   `Shelf`; the seam is three arms and a new F-015; `X` keeps its existing meaning.
+   `ShelfEntry`; the seam is three arms and a new F-015; `X` keeps its existing
+   meaning; and the tab is called **Shelf**, with *collection* kept for a rail.
