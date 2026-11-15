@@ -9,6 +9,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use heronite_data::json_store;
 use heronite_data::DataPaths;
+use heronite_watch_core::collections::MARK_PREFIX;
 use heronite_watch_core::types::MovieItem;
 use serde_json::{json, Map, Value};
 
@@ -20,17 +21,33 @@ pub const CATALOG_KEY: &str = "watchCatalog";
 
 /// Rewrites the root from the items `fetch` returns, keeping the catalog pages
 /// fetched before: browsing deeper than the rails survives a refresh.
-pub fn refresh<F>(root: &Path, fetch: F) -> Result<()>
+///
+/// A collection rail is resolved whole every time, so its titles outlive the
+/// refresh only while the person still has the rail on (`rails`, the enabled
+/// collection ids): turning one off takes its titles out of the library, and a
+/// refresh that could not ask the source (offline, no key) keeps the last good
+/// ones rather than emptying the rail.
+pub fn refresh<F>(root: &Path, rails: &[String], fetch: F) -> Result<()>
 where
     F: FnOnce() -> Result<Vec<MovieItem>>,
 {
     let mut movies = fetch()?;
-    for item in stored(root).into_iter().filter(|item| item.catalog.is_some()) {
+    for item in stored(root).into_iter().filter(|item| kept(item, rails)) {
         if !movies.iter().any(|movie| same(movie, &item)) {
             movies.push(item);
         }
     }
     write_root(root, &movies)
+}
+
+/// Whether a stored record outlives the refresh that is writing now: a catalogue
+/// page always, a collection rail's title while the rail is turned on.
+fn kept(item: &MovieItem, rails: &[String]) -> bool {
+    let Some(mark) = item.catalog.as_deref() else { return false };
+    match mark.strip_prefix(MARK_PREFIX) {
+        Some(id) => rails.iter().any(|rail| rail == id),
+        None => true,
+    }
 }
 
 /// Merges a page of a catalog into the root's library, leaving the rails and
@@ -274,12 +291,33 @@ mod tests {
         assert_eq!(added, 1, "a title already there is not added again");
 
         // A rails refresh replaces the rails and keeps the page.
-        refresh(root, || Ok(vec![movie("tt3", "New Film")])).unwrap();
+        refresh(root, &[], || Ok(vec![movie("tt3", "New Film")])).unwrap();
         let items = stored(root);
         let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, ["tt3", "tt2"]);
         assert!(items.iter().any(|item| item.id == "tt2" && item.catalog.is_some()), "the page is still marked");
         assert_eq!(items[1].year.as_deref(), Some("2026"), "the page keeps its metadata");
+    }
+
+    #[test]
+    fn a_collection_rails_titles_leave_when_the_rail_is_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_root(root, &[movie("tt1", "A Film")]).unwrap();
+        let mut in_rail = movie("tt2", "Top Rated Film");
+        in_rail.catalog = Some(heronite_watch_core::collections::mark("tmdb:top-rated:movie"));
+        append(root, &[in_rail]).unwrap();
+
+        // The rail is still on and this refresh could not ask (offline): its last
+        // good titles stay, which is what the tab draws while the source is away.
+        let rail = ["tmdb:top-rated:movie".to_owned()];
+        refresh(root, &rail, || Ok(vec![movie("tt1", "A Film")])).unwrap();
+        assert!(stored(root).iter().any(|item| item.id == "tt2"), "an unreachable rail keeps its titles");
+
+        // Turned off: the library no longer holds them.
+        refresh(root, &[], || Ok(vec![movie("tt1", "A Film")])).unwrap();
+        let ids: Vec<String> = stored(root).into_iter().map(|item| item.id).collect();
+        assert_eq!(ids, ["tt1"], "a rail the person turned off leaves no titles behind");
     }
 
     #[test]

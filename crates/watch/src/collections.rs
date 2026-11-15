@@ -49,11 +49,21 @@ pub fn descriptors_with(http: &dyn Transport, app: &AppPaths) -> Vec<(String, Co
 }
 
 /// The rails the settings turned on, in the person's order. An id this build does
-/// not have is skipped, the way every other settings list treats one.
+/// not have is skipped, the way every other settings list treats one, and a list
+/// that names one rail twice draws it once (it is hand-editable).
 pub fn enabled(app: &AppPaths) -> Vec<(String, CollectionDescriptor)> {
     let wanted = heronite_watch_state::settings::read(app).collections;
     let declared = descriptors(app);
-    wanted.iter().filter_map(|id| declared.iter().find(|(_, rail)| rail.id == *id).cloned()).collect()
+    let mut rails: Vec<(String, CollectionDescriptor)> = Vec::new();
+    for id in &wanted {
+        if rails.iter().any(|(_, rail)| rail.id == *id) {
+            continue;
+        }
+        if let Some((source, rail)) = declared.iter().find(|(_, rail)| rail.id == *id) {
+            rails.push((source.clone(), rail.clone()));
+        }
+    }
+    rails
 }
 
 /// One rail's titles: its rule, asked of the source that declared it.
@@ -154,12 +164,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = app(dir.path());
         let settings = crate::settings::Settings {
-            collections: vec!["tmdb:popular:series".to_owned(), "gone".to_owned(), "tmdb:top-rated:movie".to_owned()],
+            collections: vec![
+                "tmdb:popular:series".to_owned(),
+                "gone".to_owned(),
+                "tmdb:top-rated:movie".to_owned(),
+                "tmdb:popular:series".to_owned(),
+            ],
             ..Default::default()
         };
         crate::settings::write(&app, &settings).unwrap();
         let rails = enabled(&app);
         let ids: Vec<&str> = rails.iter().map(|(_, rail)| rail.id.as_str()).collect();
-        assert_eq!(ids, ["tmdb:popular:series", "tmdb:top-rated:movie"], "the order is the person's, unknown ids skipped");
+        assert_eq!(
+            ids,
+            ["tmdb:popular:series", "tmdb:top-rated:movie"],
+            "the order is the person's, unknown ids skipped, and a repeated id drawn once"
+        );
     }
 }

@@ -42,7 +42,25 @@ pub fn read(app: &AppPaths) -> PersonalLibrary {
 
 pub fn write(app: &AppPaths, library: &PersonalLibrary) -> Result<()> {
     let path = path(app);
+    keep_unreadable(&path);
     json_store::write(&path, library).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Keeps a file that is there but does not parse beside itself (`….json.bak`)
+/// before the first write replaces it: the shelf is hand-editable, and one
+/// mistyped brace must not be the end of what the person typed.
+fn keep_unreadable(path: &Path) {
+    if !path.is_file() || json_store::read::<PersonalLibrary>(path).is_ok() {
+        return;
+    }
+    let backup = path.with_extension("json.bak");
+    if backup.exists() {
+        return;
+    }
+    match std::fs::copy(path, &backup) {
+        Ok(_) => log::warn!("{}: kept as {} before it was replaced", path.display(), backup.display()),
+        Err(error) => log::warn!("{}: {error}; it could not be kept aside", path.display()),
+    }
 }
 
 /// Says how a file could not be read once, not on every frame that reads it.
@@ -128,5 +146,25 @@ mod tests {
         std::fs::write(path(&app), b"not json").unwrap();
         let library = read(&app);
         assert!(library.watchlist.is_empty(), "the app still starts");
+    }
+
+    #[test]
+    fn a_corrupt_file_is_kept_aside_before_the_first_write_replaces_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        std::fs::create_dir_all(&app.config).unwrap();
+        std::fs::write(path(&app), b"{\"watchlist\": [ oops").unwrap();
+
+        let mut library = PersonalLibrary::default();
+        library.add_watchlist(&item("movie", "tt1"));
+        write(&app, &library).unwrap();
+
+        let backup = path(&app).with_extension("json.bak");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "{\"watchlist\": [ oops", "what the person typed is not lost");
+        assert_eq!(read(&app).watchlist.len(), 1, "and the shelf is written");
+
+        // A second write keeps the first backup rather than overwriting it.
+        write(&app, &library).unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "{\"watchlist\": [ oops");
     }
 }

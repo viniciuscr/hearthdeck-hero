@@ -121,7 +121,9 @@ list; reordering UI is out of scope for the first pass (the list is hand-editabl
   - **Every struct in the file carries `#[serde(flatten)] extra: Map<String, Value>`**
     — that, and only that, is what "unknown fields are kept" means. An unreadable
     file is the default value and is warned about **once per path** (a `OnceLock`),
-    because the file is read on every refresh.
+    because the file is read on every refresh. A file that is there but does not
+    parse is copied to `watch-personal.json.bak` before the first write replaces
+    it: the file is hand-editable, so a typo must be recoverable.
 - `<config>/watch-settings.json` gains `collections: Vec<String>` — the enabled
   provider collection ids, in rail order.
 - `<cache>/watch-collections/<provider>-<kind>-<id>.json` — one disposable file per
@@ -152,6 +154,17 @@ the first draft:
 A personal rail needs none of this: it renders from the snapshot.
 
 ## 6. The page (`app/src/collection/console/watch_shelf.rs`, fork-owned)
+
+> **As built (slice 2b, revised while implementing).** There is no `watch_shelf.rs`
+> and no new seam: `console_shelves("shelf")` (`app/src/collection/console/sources.rs`
+> → `personal_shelves`) returns the tab's rails — Continue watching, Watchlist,
+> Favourites and the enabled collections — and the existing Shelves layout draws
+> them, cuts and hints included. So there is no `ShelfEntry`, no `Failed` variant
+> (a rail that cannot be resolved is absent, not empty: §10), no F-015, and one
+> `Shelf` type named for the tab (`sources::Shelf`, not the provider's `Rail`). The
+> titles come from the projection, which is where the shelf and the rails ride
+> (§13), so cards draw through the cover chains like every other card. What follows
+> is the design as first written, kept for the day a page of its own is needed.
 
 Dispatched from the console's Shelves path — **three arms, not one**:
 `render_shelves` → here, `shelf_pad` → here (navigation, activation), `shelves_hints`
@@ -303,10 +316,17 @@ Landed, each its own commit:
 - **Not done, and intended:** the per-rail cache file of §4 and its freshness
   rule (§5) — a rail is refetched whenever the library is, which is the same cost
   as the tabs' browsing rails. The `watch-collections/` files are still unbuilt.
-- **Removal is a toggle, not a feed rewrite:** turning a rail off drops it from
-  `settings.collections`, and the tab stops drawing it; its titles stay in the
-  projection until the refresh no longer marks them, which is the `remove_feed`
-  work above.
+- **Removal is a toggle, and it is complete.** Turning a rail off drops it from
+  `settings.collections`, and the next refresh stops keeping its titles: its marks
+  are gone, so they leave the projection (`collection::refresh` is handed the
+  enabled ids for exactly this). A rail whose source could not answer — offline, no
+  key — keeps its last good titles instead, which is the §10 behaviour the design
+  asks for without the cache file. `remove_feed` (§5) is still unbuilt, so clearing
+  a rail's titles waits for the next refresh instead of happening on the toggle.
+- **Continue watching on the Shelf is not the theme's rail toggle.** The Settings →
+  Watch → *Home rails* switch for "Continue watching" turns the theme's rail off on
+  the Watch home; §2 makes it the Shelf's first rail whenever there is progress,
+  and it hides itself when there is none.
 - **`settings.collections` order.** A rail turned on joins the end (`toggled`),
   and reordering remains hand-editing the file, as §3 says.
 

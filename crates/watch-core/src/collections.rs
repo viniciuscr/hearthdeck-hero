@@ -41,8 +41,16 @@ pub trait WatchCollectionSource: Send + Sync {
     fn descriptor(&self) -> &CollectionSourceDescriptor;
 
     /// The rails it declares, in the order Settings lists them.
+    ///
+    /// **Declaring costs no request**: the screens call this (Settings per page,
+    /// the shelves when a rail is drawn), so an implementation that reached the
+    /// network here would put I/O on a render path. Listing is not answering.
     fn collections(&self, ctx: &CatalogCtx<'_>) -> Result<Vec<CollectionDescriptor>>;
 }
+
+/// How a collection's mark starts: the `extra.watchCatalog` of a title a rail
+/// brought in is [`mark`].
+pub const MARK_PREFIX: &str = "collection:";
 
 /// The mark a collection rail leaves on the titles it brought in — the
 /// `extra.watchCatalog` of their projection records: `collection:<id>`.
@@ -51,5 +59,5 @@ pub trait WatchCollectionSource: Send + Sync {
 /// is what the shelves read back; a catalogue page's feed key is a page that can
 /// be replaced.
 pub fn mark(id: &str) -> String {
-    format!("collection:{id}")
+    format!("{MARK_PREFIX}{id}")
 }

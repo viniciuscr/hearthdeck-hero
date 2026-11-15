@@ -33,13 +33,18 @@ pub struct State {
     /// Whether a TMDB key is stored: read once, because Settings must not touch
     /// the credential file on every frame, and updated when it changes.
     pub tmdb_key: bool,
+    /// The collection rails the build declares, with their source: read once for
+    /// the same reason — asking a source to declare builds a transport, which a
+    /// frame must not pay.
+    pub collections: Vec<(String, heronite_watch::collections::CollectionDescriptor)>,
 }
 
 impl State {
     pub fn new(ctx: &PageCtx) -> Self {
         let linked = heronite_watch::store::read_auth(&ctx.app).ok().flatten().is_some();
         let tmdb_key = heronite_watch::store::read_tmdb_key(&ctx.app).ok().flatten().is_some();
-        Self { linked, busy: false, offer: None, notice: None, tmdb_key }
+        let collections = heronite_watch::collections::descriptors(&ctx.app);
+        Self { linked, busy: false, offer: None, notice: None, tmdb_key, collections }
     }
 }
 
@@ -314,18 +319,20 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
     );
 
     // The collection rails: the source order is the rail order, and the ids are
-    // the sources' own, so a settings file stays readable.
-    let collections: Vec<AnyElement> = heronite_watch::collections::descriptors(&d.ctx.app)
-        .into_iter()
-        .map(|(source, rail)| {
-            let on = settings.collections.contains(&rail.id);
-            let note = rail_note(d, &source);
-            let label = SharedString::from(crate::fork::watch::rails::title(&rail));
-            toggle_row(format!("watch-collection-{}", rail.id), label, Some(note.as_str()), on)
-                .on_click(cx.listener(move |d, _, _, cx| set_collection(d, &rail.id, !on, cx)))
-                .into_any_element()
-        })
-        .collect();
+    // the sources' own, so a settings file stays readable. The list is read with
+    // the page (a source's declaration costs a transport), not per frame.
+    let mut collections: Vec<AnyElement> = Vec::new();
+    for (source, rail) in &d.watch.collections {
+        let on = settings.collections.contains(&rail.id);
+        let note = rail_note(d, source);
+        let label = SharedString::from(crate::fork::watch::rails::title(rail));
+        let id = rail.id.clone();
+        collections.push(
+            toggle_row(format!("watch-collection-{id}"), label, Some(note.as_str()), on)
+                .on_click(cx.listener(move |d, _, _, cx| set_collection(d, &id, !on, cx)))
+                .into_any_element(),
+        );
+    }
 
     let mut column = div()
         .flex()
@@ -448,6 +455,8 @@ fn save_tmdb_key(d: &mut SettingsPage, text: &str, cx: &mut Context<SettingsPage
     match heronite_watch::store::write_tmdb_key(&d.ctx.app, key) {
         Ok(()) => {
             d.watch.tmdb_key = true;
+            // A source's rails can depend on its key, so the list is read again.
+            d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
             d.watch.notice = Some(tr!("The TMDB API key was saved.").into());
             crate::collection::watch_catalog::catalogs_changed();
             // The collection rails are resolved with the library: the ones that
@@ -467,6 +476,7 @@ fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         log::warn!("clearing the TMDB key: {error:#}");
     }
     d.watch.tmdb_key = false;
+    d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
     crate::collection::watch_catalog::catalogs_changed();
     // What that key was resolving (the collection rails, TMDB's catalogs) is no
     // longer there to draw.
@@ -617,13 +627,12 @@ pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
         rows.push(Row::action("watch-tmdb-key-remove", tr!("Remove the TMDB API key")));
     }
     // The collection rails: one row each, in the order they are drawn.
-    let collections = heronite_watch::collections::descriptors(&d.ctx.app);
-    if !collections.is_empty() {
+    if !d.watch.collections.is_empty() {
         rows.push(Row::header(tr!("Collections")));
-        for (source, rail) in collections {
+        for (source, rail) in &d.watch.collections {
             let on = settings.collections.contains(&rail.id);
-            let title = SharedString::from(crate::fork::watch::rails::title(&rail));
-            let note = rail_note(d, &source);
+            let title = SharedString::from(crate::fork::watch::rails::title(rail));
+            let note = rail_note(d, source);
             rows.push(Row::toggle(SharedString::from(format!("watch-collection:{}", rail.id)), title, on).desc(note));
         }
         rows.push(Row::info("watch-collections-note", tr!("Collections"), tr!("Rails the Shelf tab draws, in this order.")));

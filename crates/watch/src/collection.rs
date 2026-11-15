@@ -25,7 +25,11 @@ pub use collection::ROOT;
 pub fn library(app: &AppPaths, include_hidden: bool) -> Result<Library> {
     let root = app.cache.join(ROOT);
     let http = UreqTransport::new();
-    if let Err(error) = collection::refresh(&root, || items(&http, app)) {
+    // The collection rails still on: a refresh keeps their titles (a source that
+    // could not be asked this time would otherwise empty the rail) and drops the
+    // ones a rail the person turned off brought in.
+    let rails = heronite_watch_state::settings::read(app).collections;
+    if let Err(error) = collection::refresh(&root, &rails, || items(&http, app)) {
         log::warn!("movies provider: {error:#}; keeping the last library");
     }
     Library::load_with(&DataPaths::at(root), include_hidden)
