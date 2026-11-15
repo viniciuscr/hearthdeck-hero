@@ -18,7 +18,10 @@ use heronite_watch_core::metadata::{MetaCtx, TitleDetails, TitleRef, WatchMetada
 pub mod cinemeta;
 
 static CINEMETA: cinemeta::Cinemeta = cinemeta::Cinemeta::builtin();
-static SOURCES: [&dyn WatchMetadataSource; 1] = [&CINEMETA];
+static TMDB: heronite_watch_tmdb::TmdbMeta = heronite_watch_tmdb::TmdbMeta;
+/// Registry order. It is not the priority — `metadataSources` is — but TMDB
+/// leads here too, so a reader sees the intended default.
+static SOURCES: [&dyn WatchMetadataSource; 2] = [&TMDB, &CINEMETA];
 
 /// Every metadata source, in the order their answers are asked.
 pub fn sources() -> &'static [&'static dyn WatchMetadataSource] {
@@ -147,16 +150,18 @@ mod tests {
     #[test]
     fn a_title_no_source_knows_is_none() {
         let fake = Fake::new(Answer::Status(404));
-        assert_eq!(details(sources(), &MetaCtx::new(&fake), &movie()).unwrap(), None);
+        // Cinemeta on its own: TMDB needs a key, and this is about a source that
+        // answered "I do not know it".
+        assert_eq!(details(&[&CINEMETA], &MetaCtx::new(&fake), &movie()).unwrap(), None);
     }
 
     #[test]
     fn a_source_that_could_not_be_asked_is_an_error() {
         let fake = Fake::new(Answer::Status(503));
-        let error = details(sources(), &MetaCtx::new(&fake), &movie()).unwrap_err();
+        let error = details(&[&CINEMETA], &MetaCtx::new(&fake), &movie()).unwrap_err();
         assert_eq!(heronite_watch_core::http::http_status(&error), Some(503));
         let fake = Fake::new(Answer::Fault);
-        assert!(details(sources(), &MetaCtx::new(&fake), &movie()).is_err());
+        assert!(details(&[&CINEMETA], &MetaCtx::new(&fake), &movie()).is_err());
     }
 
     #[test]
@@ -171,9 +176,9 @@ mod tests {
     #[test]
     fn the_registry_names_its_sources_and_what_they_cover() {
         let ids: Vec<&str> = sources().iter().map(|source| source.descriptor().id).collect();
-        assert_eq!(ids, ["cinemeta"]);
-        assert_eq!(sources_for(sources(), "stremio").len(), 1);
-        assert_eq!(sources_for(sources(), "youtube").len(), 1, "an empty applies_to covers every media provider");
+        assert_eq!(ids, ["tmdb", "cinemeta"], "TMDB leads; Cinemeta is the fallback");
+        assert_eq!(sources_for(sources(), "stremio").len(), 2, "TMDB and Cinemeta both cover a media provider");
+        assert_eq!(sources_for(sources(), "youtube").len(), 2, "an empty applies_to covers every media provider");
         let descriptor = MetaDescriptor { id: "x", name: "X", applies_to: &["stremio"] };
         assert!(descriptor.covers("stremio"));
         assert!(!descriptor.covers("youtube"));

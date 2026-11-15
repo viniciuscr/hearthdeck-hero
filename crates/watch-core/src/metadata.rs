@@ -69,14 +69,22 @@ impl MetaDescriptor {
     }
 }
 
-/// What a source may use besides the title: the transport, and nothing else.
+/// What a source may use besides the title: the transport, and its own
+/// credentials when it needs a key (TMDB does, Cinemeta does not).
 pub struct MetaCtx<'a> {
     pub http: &'a dyn Transport,
+    pub credentials: Option<&'a dyn crate::provider::Credentials>,
 }
 
 impl<'a> MetaCtx<'a> {
+    /// A source with no key to read (Cinemeta, and every test that does not care).
     pub fn new(http: &'a dyn Transport) -> Self {
-        Self { http }
+        Self { http, credentials: None }
+    }
+
+    /// A source that reads its own entry from the credential store.
+    pub fn with(http: &'a dyn Transport, credentials: &'a dyn crate::provider::Credentials) -> Self {
+        Self { http, credentials: Some(credentials) }
     }
 }
 

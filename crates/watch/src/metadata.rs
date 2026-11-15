@@ -14,7 +14,7 @@ use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::metadata::MetaCtx;
 use heronite_watch_state::details as cache;
 
-pub use heronite_watch_core::metadata::{Episode, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
+pub use heronite_watch_core::metadata::{Episode, Fact, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
 
 /// The metadata sources Watch ships with, in registry order.
 pub fn sources() -> &'static [&'static dyn WatchMetadataSource] {
@@ -44,7 +44,9 @@ pub fn details_with(http: &dyn Transport, app: &AppPaths, title: &TitleRef) -> R
     if cached.as_ref().is_some_and(|cached| cached.is_fresh(Utc::now())) {
         return Ok(cached.map(|cached| cached.details));
     }
-    match heronite_watch_metadata::details(&enabled, &MetaCtx::new(http), title) {
+    // A source that needs a key (TMDB) reads its own entry; Cinemeta ignores it.
+    let credentials = heronite_watch_state::store::StoreCredentials::new(app);
+    match heronite_watch_metadata::details(&enabled, &MetaCtx::with(http, &credentials), title) {
         Ok(Some(answer)) => {
             if let Err(error) = cache::write(&root, title, &sources, &answer, Utc::now()) {
                 log::warn!("watch details: {error:#}");

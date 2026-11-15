@@ -23,8 +23,9 @@ app
     ├── heronite-watch-stremio  the Stremio provider
     │   └── heronite-watch-addon
     │       └── heronite-watch-core
-    ├── heronite-watch-metadata the metadata sources: Cinemeta, in order
-    │   └── heronite-watch-addon
+    ├── heronite-watch-metadata the metadata sources: TMDB, Cinemeta, in order
+    │   ├── heronite-watch-tmdb   TMDB's own ids and records
+    │   └── heronite-watch-addon  Cinemeta's meta resource
     │       └── heronite-watch-core
     ├── heronite-watch-catalogs what there is to browse: the sources, in order
     │   ├── heronite-watch-tmdb   TMDB discover
@@ -42,7 +43,7 @@ app
 | `heronite-watch-addon` | Stremio addon protocol: manifest, catalog, meta, stream, `AddonClient`, size and seeders parsing | `heronite-watch-core` | account, datastore, endpoints, Cinemeta constants |
 | `heronite-watch-player` | mpv discovery, argument construction, IPC supervision, `PlaybackOutcome`, stream-origin policy | `heronite-data` (`proc`), url, serde_json, anyhow | protocol or provider types |
 | `heronite-watch-state` | `store` (movies, per-provider credentials) and `collection` (the Heroic-format projection) | `heronite-watch-core`, `heronite-data` | network, providers, GPUI |
-| `heronite-watch-metadata` | the metadata sources: `WatchMetadataSource`, the ordered registry and the Cinemeta source | `heronite-watch-{core,addon}` | media providers, accounts, playback, files, GPUI |
+| `heronite-watch-metadata` | the metadata sources: `WatchMetadataSource`, the ordered registry, and TMDB + Cinemeta | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, files, GPUI |
 | `heronite-watch-stremio` | endpoints, link code, `addonCollectionGet`, datastore and merge, streaming server, `impl WatchProvider` | `heronite-watch-{core,addon}` | files, processes, `heronite-data`, catalogs |
 | `heronite-watch-catalogs` | the catalog sources' registry (`sources`, `enabled`, `find`) and Cinemeta's catalogue | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, GPUI |
 | `heronite-watch-tmdb` | TMDB discover, genres and external ids as a catalog source; the key from the credential store | `heronite-watch-core` | accounts, playback, files, GPUI |

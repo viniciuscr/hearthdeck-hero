@@ -414,7 +414,7 @@ Envelope, source `stremio-core`:
 - Local `movies.json` is the source of truth between writes; Stremio is the
   cross-device source. The picker opens on the stored pointer and ticks it.
 
-### 7. Metadata sources (verified 2026-11-14)
+### 7. Metadata sources (verified 2026-11-15)
 
 - What **describes** a title is a metadata source, not a media provider. The
   media provider (`WatchProvider`: Stremio, YouTube) owns titles, streams and
@@ -433,10 +433,22 @@ Envelope, source `stremio-core`:
   and merges: the first answer for a field wins, the next fills what is still
   empty, extras are joined with the first of each id winning. An id this build
   does not have is skipped, so the order is already right when a source lands.
-- Sources answer through the addon protocol: `GET {transport}/meta/{type}/{id}.json`.
-  Cinemeta is the first source (`https://v3-cinemeta.strem.io/manifest.json`);
-  a second one later is another addon's manifest, added to the registry, with no
-  change to a media provider.
+- Cinemeta answers through the addon protocol: `GET {transport}/meta/{type}/{id}.json`;
+  TMDB answers through its own v3 API. Both arrive through the same
+  `WatchMetadataSource`.
+  Cinemeta is a source over its manifest
+  (`https://v3-cinemeta.strem.io/manifest.json`), and TMDB
+  (`heronite-watch-tmdb`) is the second: it starts at
+  `/find/{imdb}?external_source=imdb_id` — our keys are IMDb ids and TMDB's are
+  not — then reads `/movie/{id}` or `/tv/{id}` with
+  `append_to_response=credits,external_ids`, and for a series one
+  `/tv/{id}/season/{n}` per season so the episode picker works for titles only
+  TMDB knows. Episodes keep the id the `stream` resource is asked for
+  (`tt0944947:1:1`), so playback works whichever source described the series. It
+  also fills the open facts: a tagline, a budget, the network, the original
+  language. Its availability data ("on Netflix") is a fact when it lands, never a
+  stream source. A source that needs a key reads its own entry through
+  `MetaCtx`'s credentials; Cinemeta is given none.
 - A 404 is "this source does not know the title" (`None`), not a fault: the next
   source is asked. A timeout, a 5xx or a body that is not JSON is an error; the
   registry keeps it aside, asks the next source, and when none answers the page

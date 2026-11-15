@@ -12,6 +12,10 @@
 //! TMDB's own "watch providers" (Netflix, …) are *availability*, not streams, and
 //! belong to the metadata layer — this source never reports them.
 
+pub mod meta;
+
+pub use meta::TmdbMeta;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -23,7 +27,7 @@ use url::Url;
 use heronite_watch_core::catalog::{
     CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
 };
-use heronite_watch_core::provider::Secret;
+use heronite_watch_core::provider::{Credentials, Secret};
 use heronite_watch_core::types::MovieItem;
 
 /// TMDB's API root.
@@ -70,7 +74,7 @@ impl WatchCatalogSource for Tmdb {
     /// One `discover` catalog per kind: the sorts TMDB can order by on the
     /// server, its genres and a year.
     fn catalogs(&self, ctx: &CatalogCtx<'_>) -> Result<Vec<CatalogDescriptor>> {
-        let key = key(ctx)?;
+        let key = api_key(ctx.credentials)?;
         let genres = self.genres(ctx, &key)?;
         Ok(KINDS
             .iter()
@@ -97,7 +101,7 @@ impl WatchCatalogSource for Tmdb {
     }
 
     fn catalog(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest) -> Result<CatalogPage> {
-        let key = key(ctx)?;
+        let key = api_key(ctx.credentials)?;
         let Some(kind) = tmdb_kind(&request.kind) else {
             return Ok(CatalogPage::default());
         };
@@ -256,8 +260,8 @@ fn years() -> Vec<String> {
 }
 
 /// The API key, from the credential store and nowhere else.
-fn key(ctx: &CatalogCtx<'_>) -> Result<String> {
-    let Some(secret) = ctx.credentials.get("tmdb")? else {
+pub(crate) fn api_key(credentials: &dyn Credentials) -> Result<String> {
+    let Some(secret) = credentials.get("tmdb")? else {
         bail!("TMDB needs an API key: Settings → Watch → Catalogs.");
     };
     let key = match secret.decode::<Key>() {

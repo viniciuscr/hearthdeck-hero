@@ -61,7 +61,13 @@ impl Transport for Fake {
 }
 
 fn app(root: &std::path::Path) -> heronite_data::paths::AppPaths {
-    heronite_data::paths::AppPaths { config: root.join("config"), cache: root.join("cache") }
+    let app = heronite_data::paths::AppPaths { config: root.join("config"), cache: root.join("cache") };
+    // These tests speak Cinemeta's fixture, so only Cinemeta is asked: the
+    // registry also holds TMDB, which would answer "no key" first and change the
+    // cache key under our feet.
+    let settings = heronite_watch::settings::Settings { metadata_sources: vec!["cinemeta".to_owned()], ..Default::default() };
+    heronite_watch::settings::write(&app, &settings).unwrap();
+    app
 }
 
 fn movie() -> TitleRef {
@@ -134,5 +140,5 @@ fn a_source_that_could_not_be_asked_is_an_error_without_a_cache() {
 #[test]
 fn the_facade_publishes_the_metadata_sources_in_order() {
     let ids: Vec<&str> = sources().iter().map(|source| source.descriptor().id).collect();
-    assert_eq!(ids, ["cinemeta"]);
+    assert_eq!(ids, ["tmdb", "cinemeta"], "TMDB leads, Cinemeta is the fallback");
 }

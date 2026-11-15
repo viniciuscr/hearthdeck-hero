@@ -22,7 +22,7 @@ use heronite_data::text::DateLocale;
 use heronite_data::CollectionGame;
 use heronite_i18n::tr;
 use heronite_images::{ImageRef, Variant};
-use heronite_watch::metadata::{Episode, TitleDetails};
+use heronite_watch::metadata::{Episode, Fact, TitleDetails};
 
 use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection};
 use super::super::CollectionView;
@@ -97,11 +97,30 @@ fn detail_lines(details: Option<&TitleDetails>, library_genres: &[String], local
         push(tr!("Status").into(), details.series_status.clone());
         push(tr!("Seasons").into(), (details.season_count() > 0).then(|| details.season_count().to_string()));
         push(tr!("Episodes").into(), (details.episode_count() > 0).then(|| details.episode_count().to_string()));
+        // Whatever else the chosen sources know and we do not model: a tagline, a
+        // budget, a network, the original language. A source that knows more adds
+        // rows without this page changing.
+        for fact in &details.extras {
+            push(fact_label(fact), Some(fact.value.clone()));
+        }
     }
     if details.is_none_or(|details| details.genres.is_empty()) {
         push(tr!("Genres").into(), names(library_genres));
     }
     lines
+}
+
+/// A fact's row name: the ids we know read in the person's language, anything
+/// else as the source wrote it.
+fn fact_label(fact: &Fact) -> SharedString {
+    match fact.id.as_str() {
+        "tagline" => tr!("Tagline").into(),
+        "budget" => tr!("Budget").into(),
+        "network" => tr!("Network").into(),
+        "original_language" => tr!("Original language").into(),
+        _ if fact.label.trim().is_empty() => SharedString::from(fact.id.clone()),
+        _ => SharedString::from(fact.label.clone()),
+    }
 }
 
 /// "Winter Is Coming", or "Episode 3" when the source has no name.
