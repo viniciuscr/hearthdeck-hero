@@ -176,6 +176,20 @@ date, upstream commit, files, and resolution.
     text (de "Verknüpfung entfernen", fr "Non associé", pt-BR "Desvincular" and
     "Não vinculado").
 
+- **2026-11-16, upstream `7a5feddf`** (16 commits, including the fork's
+  Ludusavi emulator-manifest fix merged as `19181c55` with two review
+  follow-ups). Four locale files conflicted, again where the F-005 rename met
+  new upstream copy:
+  - `crates/i18n/locales/{de,es,fr,pt-BR}/quick_launch.json`: upstream's file
+    was taken whole and the rename re-applied, adding "Hearthdeck Hero could
+    not read the library, so no games are listed." and "{key} needs Ctrl, Alt
+    or {logo} with it; only the F keys, Print Screen and Pause work alone or
+    with just Shift.".
+  - Rebranded outside the conflicts (F-005), in the code the locales must
+    match: `app/src/quick_launch/view.rs` (the new "could not read the
+    library" string) and `app/src/quick_launch/window.rs` (the window title is
+    `fork_brand::NAME`).
+
 ## Releases
 
 - Tag `fork/main` as `v<upstream>-hearthdeck.<n>` (for example

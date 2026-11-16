@@ -74,6 +74,9 @@ pub(super) fn on_event(cx: &mut App, ev: LaunchEvent) {
     }
     tell_downloads(cx, &ev);
     tell_compression(cx, &ev);
+    if !matches!(ev, LaunchEvent::Status { .. } | LaunchEvent::Preparing { .. }) {
+        crate::quick_launch::running_changed(cx);
+    }
     // Heroic's `minimizeOnLaunch`, once the game runs: the window shows the
     // launch's progress until then. Needs the tray to come back from.
     if started && settings.minimize_on_launch && close_window_keep_alive(cx) {
@@ -244,7 +247,9 @@ pub(super) fn on_message(cx: &mut App, msg: Message) {
         log::info!("request from another invocation ignored: quitting");
         return;
     }
-    log::info!("request from another invocation: {msg:?}");
+    // The activation token is a credential: logged only as there or not.
+    let logged = Message { activation_token: msg.activation_token.as_ref().map(|_| "…".into()), ..msg.clone() };
+    log::info!("request from another invocation: {logged:?}");
     if let Some(req) = &msg.stop {
         stop_game(cx, req);
         if msg.launch.is_none() {
@@ -253,7 +258,7 @@ pub(super) fn on_message(cx: &mut App, msg: Message) {
     }
     if msg.quick_launch {
         // An older instance reads this as a plain start and shows its window.
-        crate::quick_launch::toggle(cx);
+        crate::quick_launch::toggle_with(cx, msg.activation_token.clone());
         if msg.launch.is_none() && msg.open_client.is_none() {
             return;
         }
