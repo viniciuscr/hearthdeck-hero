@@ -47,6 +47,19 @@ the rules that apply while building it.
 > anything, so runtime and the IMDb score stay on the film page, which already
 > loads `TitleDetails`.
 >
+> **A recap, from a session log** (2026-11-16): every playback appends one record
+> to `watch-sessions.json` (`crates/watch-state`): provider, kind, title, episode,
+> start and end, the time that session *covered* (the distance the position
+> moved — resuming at 40 min and stopping at 55 is fifteen minutes), the length
+> and whether it reached the finished threshold. Under 45 s is not recorded; a
+> title keeps its newest 2000; the file is never read to play anything, so it can
+> be deleted without losing a position. `heronite-watch-stats` turns the log into
+> a window — week, month, year, everything — of day buckets, titles, totals,
+> streaks, binge days and the early/evening split, and Settings → Watch → **Recap**
+> draws it: bars and cards on the desktop, readable rows in console mode. History
+> before this shipped exists only as Stremio's lifetime `totalPlayed`, which the
+> recap deliberately does not fold in.
+>
 > **Settings are grouped by provider** (2026-11-16): **Watch** (the theme and its
 > reset) / **Providers** (a card per registered provider, streaming services
 > first, then the sources: name, what it gives, its account or key and status,

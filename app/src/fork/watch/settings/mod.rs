@@ -19,6 +19,7 @@ use crate::ui::controls::{action_button, caption, card, card_box, toggle_row, Bu
 use crate::ui::fields::meta_text;
 
 pub mod qr;
+mod recap;
 
 pub mod registration;
 
@@ -37,6 +38,8 @@ pub struct State {
     pub tmdb_username: Option<SharedString>,
     /// The request token waiting for the person to approve it in their browser.
     pub tmdb_pending: Option<String>,
+    /// The window the recap is showing.
+    pub recap: recap::Recency,
     /// The collection rails the build declares, with their source: read once for
     /// the same reason — asking a source to declare builds a transport, which a
     /// frame must not pay.
@@ -49,7 +52,17 @@ impl State {
         let tmdb_key = heronite_watch::store::read_tmdb_key(&ctx.app).ok().flatten().is_some();
         let tmdb_username = heronite_watch::tmdb_sign_in::session(&ctx.app).map(|session| SharedString::from(session.username));
         let collections = heronite_watch::collections::descriptors(&ctx.app);
-        Self { linked, busy: false, offer: None, notice: None, tmdb_key, tmdb_username, tmdb_pending: None, collections }
+        Self {
+            linked,
+            busy: false,
+            offer: None,
+            notice: None,
+            tmdb_key,
+            tmdb_username,
+            tmdb_pending: None,
+            recap: recap::Recency::default(),
+            collections,
+        }
     }
 }
 
@@ -151,6 +164,21 @@ pub fn render_home(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
     }
     column.into_any_element()
+}
+
+/// Settings → Watch → Recap: what was watched, over the chosen window.
+pub fn render_recap(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
+    recap::render(d, window, cx)
+}
+
+/// Settings → Watch → Recap, as rows.
+pub(crate) fn recap_rows(d: &SettingsPage) -> Vec<Row> {
+    recap::rows(d)
+}
+
+/// The Recap page's choice.
+pub(crate) fn recap_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut Window, cx: &mut Context<SettingsPage>) {
+    recap::apply(d, outcome, window, cx)
 }
 
 /// Settings → Watch → Home, as rows: the same rails as a list.

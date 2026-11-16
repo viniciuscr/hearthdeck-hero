@@ -238,6 +238,18 @@ fn streaks(days: &[Day]) -> ((usize, Option<NaiveDate>), usize) {
     ((longest, longest_end), current)
 }
 
+/// The days folded into months, for a year's bars: `(1..=12, seconds)`, in order,
+/// including the months that have nothing yet.
+pub fn months(days: &[Day]) -> Vec<(u32, f64)> {
+    let mut out: Vec<(u32, f64)> = (1..=12).map(|month| (month, 0.)).collect();
+    for day in days {
+        if let Some(entry) = out.iter_mut().find(|(month, _)| *month == day.date.month()) {
+            entry.1 += day.seconds;
+        }
+    }
+    out
+}
+
 /// Today, as the app's clock reads it.
 pub fn today() -> NaiveDate {
     Utc::now().with_timezone(&chrono::Local).date_naive()
@@ -351,6 +363,17 @@ mod tests {
         let sessions = [session("a", "movie", at(2026, 11, 15, 3), 600., true), session("b", "movie", at(2026, 11, 15, 21), 600., true)];
         let recap = compute(&sessions, period(Span::Month, today));
         assert_eq!((recap.early, recap.evening), (1, 1), "03:00 and 21:00 as the viewer's clock reads them");
+    }
+
+    #[test]
+    fn a_years_days_fold_into_twelve_months() {
+        let today = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let sessions = [session("a", "movie", at(2026, 2, 3, 20), 3_600., true), session("b", "movie", at(2026, 2, 4, 20), 1_800., true)];
+        let recap = compute(&sessions, period(Span::Year, today));
+        let months = months(&recap.days);
+        assert_eq!(months.len(), 12);
+        assert!((months[1].1 - 5_400.).abs() < 1e-9, "February holds both");
+        assert!((months[0].1).abs() < 1e-9, "January is empty, not missing");
     }
 
     #[test]

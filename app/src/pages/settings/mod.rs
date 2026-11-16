@@ -941,6 +941,7 @@ impl SettingsPage {
             Section::Watch => watch::render(self, window, cx),
             Section::WatchProviders => watch::render_providers(self, window, cx),
             Section::WatchHome => watch::render_home(self, window, cx),
+            Section::WatchRecap => watch::render_recap(self, window, cx),
             Section::Logs => self.logs_section(cx),
             Section::About => self.about_section(cx).into_any_element(),
         }

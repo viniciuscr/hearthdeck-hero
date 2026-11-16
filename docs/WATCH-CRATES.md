@@ -32,6 +32,7 @@ app
     │   └── heronite-watch-addon
     │       └── heronite-watch-core
     ├── heronite-watch-state    local files + Collection projection
+    ├── heronite-watch-stats    the recap's numbers (sessions in, buckets out)
     ├── heronite-watch-player   mpv
     └── heronite-watch-core     domain types and ports
 ```
@@ -42,10 +43,11 @@ app
 | `heronite-watch-core` | `WatchItem`, `StreamChoice`, `WatchProgress`, `PosterShape`, `AuthKey`, `WatchProvider`, `WatchCatalogSource`, `Ctx`, `CatalogCtx`, `Transport`, `Credentials`, `Throttle`, `finished` | serde, serde_json, anyhow, url, chrono, ureq | `heronite-*`, files, processes, provider names |
 | `heronite-watch-addon` | Stremio addon protocol: manifest, catalog, meta, stream, `AddonClient`, size and seeders parsing | `heronite-watch-core` | account, datastore, endpoints, Cinemeta constants |
 | `heronite-watch-player` | mpv discovery, argument construction, IPC supervision, `PlaybackOutcome`, stream-origin policy | `heronite-data` (`proc`), url, serde_json, anyhow | protocol or provider types |
-| `heronite-watch-state` | `store` (movies, per-provider credentials) and `collection` (the Heroic-format projection) | `heronite-watch-core`, `heronite-data` | network, providers, GPUI |
+| `heronite-watch-state` | `store` (movies, per-provider credentials), `sessions` (`watch-sessions.json`, one record per playback) and `collection` (the Heroic-format projection) | `heronite-watch-core`, `heronite-data` | network, providers, GPUI |
 | `heronite-watch-metadata` | the metadata sources: `WatchMetadataSource`, the ordered registry, and TMDB + Cinemeta | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, files, GPUI |
 | `heronite-watch-stremio` | endpoints, link code, `addonCollectionGet`, datastore and merge, streaming server, `impl WatchProvider` | `heronite-watch-{core,addon}` | files, processes, `heronite-data`, catalogs |
 | `heronite-watch-catalogs` | the catalog sources' registry (`sources`, `enabled`, `find`) and Cinemeta's catalogue | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, GPUI |
+| `heronite-watch-stats` | the recap's numbers: sessions in, days/titles/totals out, over a week, month, year or everything (pure, no files, no GPUI) | `heronite-watch-state` (the session record), chrono | the app's screens, network, providers |
 | `heronite-watch-tmdb` | TMDB discover, genres and external ids as a catalog source; the key from the credential store; the sign-in (request token → session, no password) | `heronite-watch-core` | accounts, playback, files, GPUI |
 
 A provider crate takes everything it needs from `Ctx`; it never opens a file or

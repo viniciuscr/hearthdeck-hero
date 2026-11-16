@@ -20,6 +20,8 @@ pub enum Section {
     WatchProviders,
     /// What the Watch first page shows, rail by rail, with its provider.
     WatchHome,
+    /// What was watched, over a week, a month, a year or everything.
+    WatchRecap,
     Advanced,
     GameDefaults,
     Downloads,
@@ -69,7 +71,7 @@ impl Section {
     ];
 
     /// Same order as [`Section::GROUPS`].
-    pub const ALL: [Section; 26] = [
+    pub const ALL: [Section; 27] = [
         Section::General,
         Section::Appearance,
         Section::ConsoleMode,
@@ -78,6 +80,7 @@ impl Section {
         crate::fork::watch::settings::watch_registration::SECTION,
         crate::fork::watch::settings::watch_registration::PROVIDERS,
         crate::fork::watch::settings::watch_registration::HOME,
+        crate::fork::watch::settings::watch_registration::RECAP,
         Section::GameDefaults,
         Section::Downloads,
         Section::Launchers,
@@ -127,6 +130,7 @@ impl Section {
             Section::Watch => crate::fork::watch::settings::watch_registration::label(),
             Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_label(),
             Section::WatchHome => crate::fork::watch::settings::watch_registration::home_label(),
+            Section::WatchRecap => crate::fork::watch::settings::watch_registration::recap_label(),
             Section::Advanced => tr!("Advanced"),
             Section::GameDefaults => tr!("Game defaults"),
             Section::Downloads => tr!("Downloads"),
@@ -158,6 +162,7 @@ impl Section {
             Section::Watch => crate::fork::watch::settings::watch_registration::icon(),
             Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_icon(),
             Section::WatchHome => crate::fork::watch::settings::watch_registration::home_icon(),
+            Section::WatchRecap => crate::fork::watch::settings::watch_registration::recap_icon(),
             Section::Advanced => Icon::Build,
             Section::GameDefaults => Icon::Tune,
             Section::Downloads => Icon::Download,
@@ -190,6 +195,7 @@ impl Section {
             Section::Watch => crate::fork::watch::settings::watch_registration::blurb(),
             Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_blurb(),
             Section::WatchHome => crate::fork::watch::settings::watch_registration::home_blurb(),
+            Section::WatchRecap => crate::fork::watch::settings::watch_registration::recap_blurb(),
             Section::Advanced => tr!("Logs, folders and cache."),
             Section::GameDefaults => tr!("What new games start with. To change a game you already have, open its own settings."),
             Section::Downloads => tr!("Downloads and updates of Epic Games, GOG and Amazon Games games."),
@@ -225,6 +231,7 @@ impl Section {
             Section::Watch => crate::fork::watch::settings::watch_registration::KEYWORDS,
             Section::WatchProviders => crate::fork::watch::settings::watch_registration::PROVIDER_KEYWORDS,
             Section::WatchHome => crate::fork::watch::settings::watch_registration::HOME_KEYWORDS,
+            Section::WatchRecap => crate::fork::watch::settings::watch_registration::RECAP_KEYWORDS,
             Section::Advanced => "advanced cache folders copy settings avancado pastas copiar configuracoes",
             Section::GameDefaults => "game defaults wine proton version prefix dxvk nvapi esync fsync sync wayland wow64 gpu performance fps gamescope launch options new games padroes dos jogos versao prefixo desempenho opcoes de inicializacao novos jogos",
             Section::Downloads => "downloads epic updates install atualizacoes instalar baixar",

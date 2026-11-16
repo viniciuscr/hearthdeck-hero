@@ -47,7 +47,10 @@ const GROUPS: [(&str, &[CSec]); 5] = [
             CSec::Extras,
         ],
     ),
-    (n_!("Watch"), &[CSec::Rows(Section::Watch), CSec::Rows(Section::WatchProviders), CSec::Rows(Section::WatchHome)]),
+    (
+        n_!("Watch"),
+        &[CSec::Rows(Section::Watch), CSec::Rows(Section::WatchProviders), CSec::Rows(Section::WatchHome), CSec::Rows(Section::WatchRecap)],
+    ),
     (
         n_!("Games"),
         &[
@@ -181,6 +184,7 @@ impl SettingsPage {
             CSec::Rows(Section::Watch) => watch::console_rows(self),
             CSec::Rows(Section::WatchProviders) => watch::provider_rows(self),
             CSec::Rows(Section::WatchHome) => watch::home_rows(self),
+            CSec::Rows(Section::WatchRecap) => watch::recap_rows(self),
             CSec::Rows(Section::Appearance) => appearance::console_rows(self),
             CSec::Rows(Section::ConsoleMode) => console_mode::console_rows(self),
             CSec::Rows(Section::Metadata) => metadata::console_rows(self, cx),
@@ -205,6 +209,7 @@ impl SettingsPage {
             CSec::Rows(Section::Watch) => watch::console_apply(self, outcome, window, cx),
             CSec::Rows(Section::WatchProviders) => watch::provider_apply(self, outcome, window, cx),
             CSec::Rows(Section::WatchHome) => watch::home_apply(self, outcome, window, cx),
+            CSec::Rows(Section::WatchRecap) => watch::recap_apply(self, outcome, window, cx),
             CSec::Rows(Section::Appearance) => appearance::console_apply(self, outcome, window, cx),
             CSec::Rows(Section::ConsoleMode) => console_mode::send(self, outcome, window, cx),
             CSec::Rows(Section::Metadata) => metadata::console_apply(self, outcome, window, cx),

@@ -13,6 +13,7 @@ heronite-watch-player = { path = "../watch-player" }
 heronite-watch-stremio = { path = "../watch-stremio", optional = true }
 heronite-watch-state = { path = "../watch-state" }
 heronite-watch-tmdb = { path = "../watch-tmdb" }
+heronite-watch-stats = { path = "../watch-stats" }
 heronite-data = { path = "../data" }
 anyhow.workspace = true
 log.workspace = true
