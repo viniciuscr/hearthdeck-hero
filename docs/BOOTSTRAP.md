@@ -45,6 +45,7 @@ names, comma separated (`--only app,retroarch`, `--skip audio,mounts`).
 | `user` | Creates `hearthdeck-hero` (or `--user NAME`) with bash and the `video`, `audio`, `input`, `render` groups; offers to set a login password | `/etc/passwd`, `/etc/group`, `/home/<user>` |
 | `packages` | Offers `pacman -Syu`, then installs the session, emulation, media and backup packages, plus `base-devel` and the GPU's Vulkan driver | pacman database |
 | `aur` | Installs `stremio-service-bin`, `pcsx2-latest-bin` and `ludusavi` with `shelly`, `paru` or `yay`, falling back to `makepkg` as the console account | AUR builds under `~/.cache/hearthdeck-bootstrap` |
+| `ludusavi` | Downloads the per-emulator manifests for the emulators that are installed and adds them, with each emulator's save folder, to Ludusavi's config | `~/.config/ludusavi/config.yaml`, `~/.config/ludusavi/manifests/` |
 | `app` | Adds the fork's `[hearthdeck]` repository when it answers, then installs `hearthdeck-hero`; otherwise installs the latest release `.pkg.tar.zst` | `/etc/pacman.conf`, `/usr/bin/hearthdeck-hero` |
 | `mpv` | Installs the gamepad bindings and player settings the player needs (A/B/X/Y, D-pad, sticks, bumpers, triggers) as a managed block | `~/.config/mpv/input.conf`, `~/.config/mpv/mpv.conf` |
 | `retroarch` | Downloads the libretro joypad profiles for Xbox and/or PlayStation pads into the account's config, and sets fullscreen in `retroarch.cfg` | `~/.config/retroarch/autoconfig/udev`, `~/.config/retroarch/retroarch.cfg` |
@@ -67,6 +68,37 @@ A few deliberate choices:
 - **libretro profiles are matched by device name**, so installing both the Xbox
   and PlayStation families is harmless: a profile for a pad you do not own is
   never used.
+
+## Emulator saves, per game
+
+Ludusavi's own manifest knows PC games; emulator saves are not in it. The
+`ludusavi` step adds the per-game manifests from
+[sharkusmanch/ludusavi-emulator-manifests](https://github.com/sharkusmanch/ludusavi-emulator-manifests)
+for whichever emulators it finds installed, and points Ludusavi at the folder
+each one writes its saves to:
+
+| Emulator | Manifest | Root it needs |
+|---|---|---|
+| RetroArch (every core) | `retroarch.yaml` | `~/.config/retroarch` — the folder holding `saves/` and `states/` |
+| Dolphin (GameCube, Wii) | `dolphin.yaml` | `~/.local/share/dolphin-emu` |
+| PCSX2 (PS2) | `pcsx2.yaml` | `~/.config/PCSX2/memcards` (folder memory cards) |
+
+The manifests are downloaded to `~/.config/ludusavi/manifests/` and referenced
+by path, so backups work offline; a re-run refreshes them. Games appear with a
+platform suffix — `Pokemon - FireRed Version (RetroArch)`, `Tales of the Abyss
+(PS2)` — so they never merge with a PC game of the same name.
+
+The step edits `~/.config/ludusavi/config.yaml` in place: it adds `roots:`
+entries of type `other` and `manifest.secondary` paths, and keeps everything
+else (backup folder, format, retention). Ludusavi validates the result itself;
+if it refuses, the previous file is put back. Ludusavi rewrites its own config
+when it loads it, so the file may look reformatted afterwards — the version
+from before the step is kept as `config.yaml.bak.<timestamp>`.
+
+Only the emulators this bootstrap installs are detected. For another one (say
+DuckStation, at `~/.local/share/duckstation`), add its manifest URL or path to
+`manifest.secondary` and its save folder to `roots` — the repository lists the
+file and folder for each emulator.
 
 ## Safe to run again
 
@@ -203,7 +235,8 @@ The bootstrap installs and configures; it cannot log in for you.
   SSH, and `BROWSER=luakit rclone config` on the TV) sets up the cloud the
   Sync page uses.
 - **Ludusavi:** point it at a backup folder in Settings → Saves once you have
-  saves to back up.
+  saves to back up. Emulator saves are already per game thanks to the manifests
+  above; a PC game and an emulated game of the same name stay separate.
 - **Controller:** RetroArch autodetects it from the profiles, and the gamepad
   bindings for Watch playback are installed for you (the blocks under
   `~/.config/mpv`). Check both once on the TV.
@@ -219,6 +252,7 @@ Each part is independent; remove only what you want to undo.
 | Kiosk block | Delete the `# >>> hearthdeck-hero kiosk >>>` … `# <<< hearthdeck-hero kiosk <<<` block from `~/.bash_profile` |
 | Sound card profile | `rm ~/.config/systemd/user/hearthdeck-audio-profile.service ~/.config/systemd/user/default.target.wants/hearthdeck-audio-profile.service` |
 | External mount | Remove the `UUID=… /mnt/…` line and its `# Hearthdeck Hero:` comment from `/etc/fstab`, then `sudo systemctl daemon-reload` |
+| Ludusavi emulator manifests | Remove the `secondary` entries and the emulator roots from `~/.config/ludusavi/config.yaml` (or restore its `.bak` file); `~/.config/ludusavi/manifests/` can be deleted |
 | Fork repository | Delete the `[hearthdeck]` block and its comment from `/etc/pacman.conf` |
 | RetroArch settings | `~/.config/retroarch/retroarch.cfg.bak.<timestamp>` holds the previous file; the controller profiles are in `~/.config/retroarch/autoconfig/udev` |
 | mpv gamepad bindings | Delete the `# >>> hearthdeck-hero gamepad >>>` … `# <<< hearthdeck-hero gamepad <<<` block from `~/.config/mpv/input.conf` and `~/.config/mpv/mpv.conf` |
@@ -248,6 +282,12 @@ belongs to mpv, which needs `input-gamepad=yes` and the `GAMEPAD_*` key names;
 both live in the `~/.config/mpv` block (`--only mpv` restores it). If the app's
 settings say the controller is unsupported, that mpv build has no SDL gamepad
 support (`mpv --input-gamepad=yes --version` fails): the config cannot add it.
+
+**An emulated game's saves do not show up.** The root must be the folder the
+manifest expects: RetroArch's config folder (the one with `saves/` and
+`states/`), PCSX2's `memcards`, Dolphin's user folder. If the emulator was
+pointed somewhere else, change that root in `~/.config/ludusavi/config.yaml`.
+`ludusavi backup --preview --api </dev/null` lists what it would back up.
 
 **There is no sound.** Check `wpctl status` as the console account. The pinned
 profile is re-applied by a user unit at every login, so a change made by hand

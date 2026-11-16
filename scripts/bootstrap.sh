@@ -73,6 +73,10 @@ STEP_INDEX=0
 STEP_TOTAL=0
 HD_WROTE=0
 RUN_STAMP=""
+# Overridable so the tests can point at a downloaded binary.
+LUDUSAVI_BIN="${LUDUSAVI_BIN:-ludusavi}"
+# Overridable so the tests can serve mock manifests from a file:// URL.
+HD_MANIFESTS_URL="${HD_MANIFESTS_URL:-https://raw.githubusercontent.com/sharkusmanch/ludusavi-emulator-manifests/main/manifests}"
 WORK_DIR=""
 AUR_CACHE=""
 BOOTSTRAP_SUDO_FILE=""
@@ -399,6 +403,11 @@ as_user() {
   if [[ -d /run/user/$uid ]]; then
     envs+=(XDG_RUNTIME_DIR="/run/user/$uid")
     [[ -S /run/user/$uid/bus ]] && envs+=(DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus")
+  fi
+  if [[ $EUID -ne 0 ]]; then
+    # Only the tests (HD_BOOTSTRAP_LIB) get here; preflight insists on root.
+    run env "${envs[@]}" "$@"
+    return
   fi
   run runuser -u "$user" -- env "${envs[@]}" "$@"
 }
@@ -772,6 +781,311 @@ build_with_makepkg() {
     fi
   done
   [[ $failed -eq 0 ]] || warn "some AUR packages need a manual build; see $cache"
+}
+
+# ---------------------------------------------------------------------------
+# Ludusavi: per-game emulator saves
+# ---------------------------------------------------------------------------
+
+# yaml_quote_path PATH — double-quotes a path for YAML when it needs it.
+yaml_quote_path() {
+  case "$1" in
+    *[!A-Za-z0-9/._+-]*) printf '"%s"' "${1//\"/\\\"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# yaml_line_value LINE — the text after the first colon, without indentation.
+yaml_line_value() {
+  local value="${1#*:}"
+  printf '%s' "${value#"${value%%[![:space:]]*}"}"
+}
+
+# yaml_has_list_item FILE PATH — true when FILE already lists that path,
+# quoted or not. Ludusavi writes a root as `- path: …` the first time and as
+# `- store: …` followed by `path: …` after it rewrites the file, so a `path:`
+# line anywhere counts.
+yaml_has_list_item() {
+  local file="$1" want="$2"
+  [[ -f $file ]] || return 1
+  awk -v want="$want" -v q="'" '
+    /^[[:space:]]*(-[[:space:]]*)?path:[[:space:]]*/ {
+      line = $0
+      sub(/^[[:space:]]*(-[[:space:]]*)?path:[[:space:]]*/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      gsub("[\"" q "]", "", line)
+      if (line == want) found = 1
+    }
+    END { exit !found }
+  ' "$file"
+}
+
+# yaml_list_ensure FILE PARENT KEY KEY_INDENT ITEMS_FILE OWNER
+#   Adds the pre-indented ITEMS_FILE lines under KEY, keeping every other line
+#   as it was. PARENT empty means a top-level key; otherwise KEY sits at
+#   KEY_INDENT spaces inside PARENT. Returns 0 after writing (or, in a dry run,
+#   reporting), 1 when there was nothing to add, 3 when the YAML shape is not
+#   one this understands — in which case nothing is written.
+yaml_list_ensure() {
+  local file="$1" parent="$2" key="$3" kindent="$4" items="$5" owner="$6"
+  local -a lines=() out=() add=()
+  local i line key_line=-1 parent_line=-1 in_parent=0 value key_pad n
+  [[ -f $file ]] && mapfile -t lines <"$file"
+  mapfile -t add <"$items"
+  [[ ${#add[@]} -gt 0 ]] || return 1
+  printf -v key_pad '%*s' "$kindent" ''
+
+  n=${#lines[@]}
+  for ((i = 0; i < n; i++)); do
+    line="${lines[i]}"
+    if [[ -z $parent ]]; then
+      if [[ $line == "${key_pad}${key}:" || $line == "${key_pad}${key}: "* ]]; then
+        key_line=$i
+        break
+      fi
+      continue
+    fi
+    if ((in_parent == 0)); then
+      if [[ $line == "${parent}:" || $line == "${parent}: "* ]]; then
+        in_parent=1
+        parent_line=$i
+      fi
+      continue
+    fi
+    if [[ $line == "${key_pad}${key}:" || $line == "${key_pad}${key}: "* ]]; then
+      key_line=$i
+      break
+    fi
+    if [[ -n ${line//[[:space:]]/} && ${line:0:1} != ' ' && ${line:0:1} != '#' ]]; then
+      in_parent=0
+    fi
+  done
+
+  if ((key_line >= 0)); then
+    value=$(yaml_line_value "${lines[key_line]}")
+    case "$value" in
+      "[]")
+        out=("${lines[@]:0:key_line}")
+        out+=("${key_pad}${key}:")
+        out+=("${add[@]}")
+        out+=("${lines[@]:key_line+1}")
+        ;;
+      \[*\])
+        return 3
+        ;;
+      *)
+        # A block list (or a key with no value yet): prepend the new items so
+        # the existing ones keep their order.
+        out=("${lines[@]:0:key_line+1}")
+        out+=("${add[@]}")
+        out+=("${lines[@]:key_line+1}")
+        ;;
+    esac
+  elif [[ -z $parent ]]; then
+    out=("${lines[@]}")
+    out+=("${key_pad}${key}:")
+    out+=("${add[@]}")
+  elif ((parent_line >= 0)); then
+    value=$(yaml_line_value "${lines[parent_line]}")
+    case "$value" in
+      "{}")
+        out=("${lines[@]:0:parent_line}")
+        out+=("${parent}:")
+        out+=("${key_pad}${key}:")
+        out+=("${add[@]}")
+        out+=("${lines[@]:parent_line+1}")
+        ;;
+      "")
+        out=("${lines[@]:0:parent_line+1}")
+        out+=("${key_pad}${key}:")
+        out+=("${add[@]}")
+        out+=("${lines[@]:parent_line+1}")
+        ;;
+      *)
+        return 3
+        ;;
+    esac
+  else
+    out=("${lines[@]}")
+    out+=("${parent}:")
+    out+=("${key_pad}${key}:")
+    out+=("${add[@]}")
+  fi
+
+  local tmp="$WORK_DIR/yaml.$$.$RANDOM"
+  if [[ ${#out[@]} -gt 0 ]]; then
+    printf '%s\n' "${out[@]}" >"$tmp"
+  else
+    : >"$tmp"
+  fi
+  commit_file "$file" "$tmp" "$owner" "0644"
+  return 0
+}
+
+# emulator_installed PKG... — true when any of these packages is installed.
+emulator_installed() {
+  local package
+  for package in "$@"; do
+    if pacman -Q "$package" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ludusavi_targets HOME — prints "<manifest>\t<root>" for each installed
+# emulator, pointing at the folder its saves actually live in on Linux:
+# RetroArch's config folder (saves/ and states/), Dolphin's XDG data folder,
+# and PCSX2's folder memory cards (DataRoot = $XDG_CONFIG_HOME/PCSX2).
+ludusavi_targets() {
+  local home="$1"
+  if emulator_installed retroarch; then
+    printf 'retroarch\t%s\n' "$home/.config/retroarch"
+  fi
+  if emulator_installed dolphin-emu; then
+    printf 'dolphin\t%s\n' "$home/.local/share/dolphin-emu"
+  fi
+  if emulator_installed pcsx2 pcsx2-latest-bin pcsx2-git pcsx2-avx2; then
+    printf 'pcsx2\t%s\n' "$home/.config/PCSX2/memcards"
+  fi
+}
+
+# ludusavi_setup USER CONFIG_DIR MANIFEST_DIR TARGETS_FILE
+#   Downloads the per-emulator manifests, makes the folders they read, and
+#   teaches Ludusavi about both. Ludusavi itself validates the result; if it
+#   refuses, the previous config is put back.
+ludusavi_setup() {
+  local user="$1" cfgdir="$2" mandir="$3" targets="$4" owner="$1:$1"
+  local cfg="$cfgdir/config.yaml" name root url file dl items rc=0
+  local -a names=() roots=()
+  local changed=0 refreshed=0 i
+
+  while IFS=$'\t' read -r name root; do
+    [[ -n $name ]] || continue
+    names+=("$name")
+    roots+=("$root")
+  done <"$targets"
+  [[ ${#names[@]} -gt 0 ]] || return 0
+
+  for root in "${roots[@]}"; do
+    run install -d -o "$user" -g "$user" -m 0755 "$root"
+  done
+  run install -d -o "$user" -g "$user" -m 0755 "$mandir"
+
+  for i in "${!names[@]}"; do
+    name="${names[i]}"
+    url="$HD_MANIFESTS_URL/$name.yaml"
+    file="$mandir/$name.yaml"
+    dl="$WORK_DIR/manifest-$name.yaml"
+    if ! curl -fsSL --max-time 300 -o "$dl" "$url"; then
+      warn "could not download $url; keeping the manifest already in $file"
+      continue
+    fi
+    if ! grep -q '^[[:space:]]*files:' "$dl" || ! grep -q '<root>' "$dl"; then
+      warn "$url is not a Ludusavi manifest; keeping $file"
+      continue
+    fi
+    write_if_changed "$file" "$owner" "0644" <"$dl"
+    if [[ $HD_WROTE -eq 1 ]]; then
+      refreshed=$((refreshed + 1))
+    fi
+  done
+
+  items="$WORK_DIR/ludusavi-roots.items"
+  : >"$items"
+  for root in "${roots[@]}"; do
+    if yaml_has_list_item "$cfg" "$root"; then continue; fi
+    {
+      printf '  - path: %s\n' "$(yaml_quote_path "$root")"
+      printf '    store: other\n'
+    } >>"$items"
+  done
+  if [[ -s $items ]]; then
+    yaml_list_ensure "$cfg" "" "roots" 0 "$items" "$owner"
+    rc=$?
+    if [[ $rc -eq 3 ]]; then
+      warn "$cfg has a roots: list this script does not understand; add these by hand:"
+      sed 's/^/      /' "$items" >&2
+    elif [[ $rc -eq 0 ]]; then
+      changed=1
+    fi
+  fi
+
+  items="$WORK_DIR/ludusavi-secondary.items"
+  : >"$items"
+  for name in "${names[@]}"; do
+    file="$mandir/$name.yaml"
+    if yaml_has_list_item "$cfg" "$file"; then continue; fi
+    printf '    - path: %s\n' "$(yaml_quote_path "$file")" >>"$items"
+  done
+  if [[ -s $items ]]; then
+    yaml_list_ensure "$cfg" "manifest" "secondary" 2 "$items" "$owner"
+    rc=$?
+    if [[ $rc -eq 3 ]]; then
+      warn "$cfg has a manifest: block this script does not understand; add these by hand:"
+      sed 's/^/      /' "$items" >&2
+    elif [[ $rc -eq 0 ]]; then
+      changed=1
+    fi
+  fi
+
+  if [[ $refreshed -gt 0 ]]; then
+    note "downloaded $refreshed Ludusavi emulator manifest(s)"
+  fi
+  if [[ $changed -eq 0 ]]; then
+    ok "Ludusavi already knows these emulators"
+    return 0
+  fi
+
+  if ! as_user "$user" "$LUDUSAVI_BIN" --config "$cfgdir" --no-manifest-update config show >/dev/null 2>&1; then
+    warn "Ludusavi rejected the edited $cfg; putting the previous file back"
+    if [[ -f "$cfg.bak.$RUN_STAMP" ]]; then
+      cp -a -- "$cfg.bak.$RUN_STAMP" "$cfg"
+    else
+      rm -f -- "$cfg"
+    fi
+    note "Ludusavi config left alone (it could not be updated)"
+    return 0
+  fi
+  note "Ludusavi: per-game saves for ${names[*]}"
+}
+
+step_ludusavi() {
+  section "Ludusavi"
+  local user="$HD_APP_USER" home cfgdir mandir targets name root
+  home=$(home_or_default "$user")
+  cfgdir="$home/.config/ludusavi"
+  mandir="$cfgdir/manifests"
+  targets="$WORK_DIR/ludusavi-targets"
+
+  if ! command -v "$LUDUSAVI_BIN" >/dev/null 2>&1; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      info "Ludusavi comes from the AUR step; this step then teaches it the emulator saves"
+      return 0
+    fi
+    warn "Ludusavi is not installed, so its emulator manifests wait"
+    return 0
+  fi
+  ludusavi_targets "$home" >"$targets"
+  if [[ ! -s $targets ]]; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      info "no emulator installed yet; after the packages step this adds RetroArch, Dolphin and PCSX2"
+    else
+      ok "no emulator this bootstrap knows is installed; nothing to add"
+    fi
+    return 0
+  fi
+  info "per-game emulator saves:"
+  while IFS=$'\t' read -r name root; do
+    printf '    %-10s %s\n' "$name" "$root"
+  done <"$targets"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "  ${C_DIM}[dry-run]${C_RESET} would download the manifests into $mandir and add them to $cfgdir/config.yaml"
+    return 0
+  fi
+  run install -d -o "$user" -g "$user" -m 0755 "$cfgdir"
+  ludusavi_setup "$user" "$cfgdir" "$mandir" "$targets"
 }
 
 step_app() {
@@ -1519,7 +1833,7 @@ preflight() {
 build_step_list() {
   local step candidate keep
   SELECTED=()
-  for step in user packages aur app mpv retroarch audio mounts session lockdown; do
+  for step in user packages aur ludusavi app mpv retroarch audio mounts session lockdown; do
     keep=1
     if [[ ${#ONLY[@]} -gt 0 ]]; then
       local matched=0
@@ -1544,6 +1858,7 @@ plan() {
   say "  account     $HD_APP_USER (created if missing, added to video, audio, input, render)"
   say "  packages    session, RetroArch, the libretro cores, mpv, rclone, luakit, Dolphin"
   say "  AUR         ${HD_PKGS_AUR[*]}"
+  say "  Ludusavi    per-game emulator saves for the emulators that are installed"
   say "  app         $HD_APP_NAME from $REPO_URL (or the latest release package)"
   say "  mpv         gamepad bindings and player settings for $HD_APP_USER"
   say "  RetroArch   $CONTROLLER controller profiles, fullscreen on"
@@ -1655,7 +1970,7 @@ Options:
   -V, --version             print the bootstrap version
 
 Steps, in order:
-  user packages aur app mpv retroarch audio mounts session lockdown
+  user packages aur ludusavi app mpv retroarch audio mounts session lockdown
 
 Examples:
   sudo bash bootstrap.sh --dry-run
@@ -1779,6 +2094,7 @@ run_step() {
     user) step_user ;;
     packages) step_packages ;;
     aur) step_aur ;;
+    ludusavi) step_ludusavi ;;
     app) step_app ;;
     mpv) step_mpv ;;
     retroarch) step_retroarch ;;
