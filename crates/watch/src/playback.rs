@@ -21,6 +21,8 @@ use heronite_watch_player::player::{MpvSession, PlayRequest};
 use heronite_watch_state::store;
 use heronite_watch_state::store::StoreCredentials;
 
+mod session;
+
 use crate::registry;
 
 /// What to play: one normalized stream of a title.
@@ -65,6 +67,8 @@ pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Res
     let start_ms = previous.as_ref().filter(|progress| resumes_this(progress, request)).and_then(resume_at);
     let outcome = play_url(request, resolved, start_ms, stop)?;
     record(app, provider, &ctx, &request.id, request.video_id.as_deref(), previous.as_ref(), &outcome);
+    // What the recap is built from: this playback, its start and its end.
+    session::record(app, request, previous.as_ref(), &outcome);
     Ok(outcome)
 }
 
