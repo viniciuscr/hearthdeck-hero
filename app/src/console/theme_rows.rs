@@ -102,6 +102,9 @@ pub struct Data {
     pub facts: Facts,
     /// The user's saved themes.
     pub saved: Vec<ConsoleTheme>,
+    /// The space being edited: its sources, shelves and words. `Default` is
+    /// Games, which is what an editor reading no space means.
+    pub space: Space,
 }
 
 pub struct Ctx<'a> {
@@ -182,7 +185,7 @@ pub const CARDS: [Card; 14] = [
 
 /// The rows of one card.
 pub fn rows(card: Card, cx: &Ctx) -> Vec<Row> {
-    if crate::fork::watch::theme_rows::locked(card) {
+    if crate::fork::watch::theme_rows::locked_in(cx.data.space, card) {
         return Vec::new();
     }
     let mut v = match card {
@@ -212,7 +215,7 @@ fn cards_rows(cards: &[Card], cx: &Ctx) -> Vec<Row> {
     let titled = cards.len() > 1;
     let mut v = Vec::new();
     for card in cards {
-        if crate::fork::watch::theme_rows::locked(*card) {
+        if crate::fork::watch::theme_rows::locked_in(cx.data.space, *card) {
             continue;
         }
         if titled {
@@ -265,14 +268,25 @@ pub fn is_edited(prefs: &ConsolePrefs, saved: &[ConsoleTheme]) -> bool {
     is_edited_for(crate::console::themes::active_space(), prefs, saved)
 }
 
-/// [`is_edited`] against the projection of a space: selecting a built-in in
-/// Watch changes its tabs and shelves, but it is still that built-in.
+/// [`is_edited`] against what the space can draw: taking a built-in in Watch
+/// adds its watch tabs and rails (that is not an edit), and a value the space
+/// ignores (a Games menu entry, say) is not one either.
 pub fn is_edited_for(space: Space, prefs: &ConsolePrefs, saved: &[ConsoleTheme]) -> bool {
-    base_theme(prefs, saved).is_none_or(|base| {
-        let base = crate::fork::watch::space_theme::project(base, space);
-        let current = crate::fork::watch::space_theme::project(prefs.theme.clone(), space);
-        base != current
-    })
+    let present = crate::fork::watch::space_theme::present;
+    let validate = crate::fork::watch::space_theme::validate;
+    base_theme(prefs, saved).is_none_or(|base| structure(present(base, space)) != structure(validate(prefs.theme.clone(), space)))
+}
+
+/// The theme without the words of the tabs a space presents there itself: those
+/// follow the language (and switch with it), so a language switch is not an
+/// edit. A tab of the theme's own keeps its name, and a rename is one.
+fn structure(mut theme: ConsoleTheme) -> ConsoleTheme {
+    for tab in &mut theme.tabs {
+        if matches!(tab.source.as_str(), "all" | "type:movie" | "type:series" | "shelf") {
+            tab.name.clear();
+        }
+    }
+    theme
 }
 
 /// The preset or saved theme the prefs started from (`None` once it was deleted).
@@ -297,7 +311,7 @@ pub fn theme_list(saved: &[ConsoleTheme]) -> Vec<(String, String)> {
 fn theme_rows(cx: &Ctx) -> Vec<Row> {
     let (p, saved) = (cx.prefs, &cx.data.saved);
     let list = theme_list(saved);
-    let edited = is_edited(p, saved);
+    let edited = is_edited_for(cx.data.space, p, saved);
     let current = list.iter().position(|(id, _)| *id == p.based_on).filter(|_| !edited);
     let mut names: Vec<SharedString> = list.iter().map(|(_, n)| SharedString::from(n.clone())).collect();
     if current.is_none() {
@@ -349,9 +363,14 @@ fn tab_rows(cx: &Ctx) -> Vec<Row> {
             layout_names().into_iter().map(SharedString::from).collect(),
             index(Layout::ALL, t.layout),
         ));
-        let sources = source_options(&cx.data.facts, &t.source);
+        let sources = source_options(&cx.data.facts, cx.data.space, &t.source);
         let at = sources.iter().position(|(v, _)| *v == t.source).unwrap_or(0);
-        v.push(Row::choice(format!("tab.{i}.source"), tr!("Games"), sources.into_iter().map(|(_, l)| l.into()).collect(), at));
+        v.push(Row::choice(
+            format!("tab.{i}.source"),
+            source_row_label(cx.data.space),
+            sources.into_iter().map(|(_, l)| l.into()).collect(),
+            at,
+        ));
         if i > 0 {
             v.push(Row::action(format!("tab.{i}.up"), tr!("Move earlier")).icon(Icon::ArrowUpward));
         }
@@ -365,27 +384,52 @@ fn tab_rows(cx: &Ctx) -> Vec<Row> {
     v
 }
 
-/// What a tab can show, as `(source, label)`: the fixed choices, then the
-/// library's statuses, categories, stores and platforms; the current value
-/// is kept even when the library has no such thing now.
-pub fn source_options(facts: &Facts, current: &str) -> Vec<(String, String)> {
-    let mut v: Vec<(String, String)> = vec![
-        ("all".into(), tr!("All games").into()),
-        ("installed".into(), tr!("Installed").into()),
-        ("not-installed".into(), tr!("Not installed").into()),
-        ("favourites".into(), tr!("Favourites").into()),
-        ("pc".into(), tr!("PC games").into()),
-        ("emulated".into(), tr!("Emulated games").into()),
-    ];
-    v.extend(facts.statuses.iter().map(|(k, n)| (format!("status:{k}"), tr!("Status: {name}", name = n))));
-    v.extend(facts.categories.iter().map(|c| (format!("category:{c}"), tr!("Category: {name}", name = c))));
-    v.extend(facts.smart.iter().map(|(id, n)| (format!("smart:{id}"), tr!("Category: {name}", name = n))));
-    v.extend(facts.stores.iter().map(|s| (format!("store:{s}"), tr!("Store: {name}", name = s))));
-    v.extend(facts.platforms.iter().map(|s| (format!("platform:{s}"), tr!("Platform: {name}", name = s))));
+/// What a tab shows, as `(source, label)`: the fixed choices of the space,
+/// then the library's own (statuses, categories, stores and platforms for
+/// games; genres, providers and the catalog rails for Watch); the current
+/// value is kept even when the library has no such thing now.
+pub fn source_options(facts: &Facts, space: Space, current: &str) -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = match space {
+        Space::Games => vec![
+            ("all".into(), tr!("All games").into()),
+            ("installed".into(), tr!("Installed").into()),
+            ("not-installed".into(), tr!("Not installed").into()),
+            ("favourites".into(), tr!("Favourites").into()),
+            ("pc".into(), tr!("PC games").into()),
+            ("emulated".into(), tr!("Emulated games").into()),
+        ],
+        Space::Watch => vec![
+            ("all".into(), tr!("Everything").into()),
+            ("type:movie".into(), tr!("Movies").into()),
+            ("type:series".into(), tr!("Series").into()),
+            ("shelf".into(), tr!("Shelf").into()),
+        ],
+    };
+    match space {
+        Space::Games => {
+            v.extend(facts.statuses.iter().map(|(k, n)| (format!("status:{k}"), tr!("Status: {name}", name = n))));
+            v.extend(facts.categories.iter().map(|c| (format!("category:{c}"), tr!("Category: {name}", name = c))));
+            v.extend(facts.smart.iter().map(|(id, n)| (format!("smart:{id}"), tr!("Category: {name}", name = n))));
+            v.extend(facts.stores.iter().map(|s| (format!("store:{s}"), tr!("Store: {name}", name = s))));
+            v.extend(facts.platforms.iter().map(|s| (format!("platform:{s}"), tr!("Platform: {name}", name = s))));
+        }
+        Space::Watch => {
+            v.extend(facts.genres.iter().map(|g| (format!("genre:{g}"), tr!("Genre: {name}", name = g))));
+            v.extend(facts.stores.iter().map(|s| (format!("store:{s}"), tr!("Provider: {name}", name = s))));
+        }
+    }
     if !v.iter().any(|(k, _)| k == current) {
         v.push((current.to_string(), current.to_string()));
     }
     v
+}
+
+/// The row that says which titles a tab shows.
+fn source_row_label(space: Space) -> &'static str {
+    match space {
+        Space::Games => tr!("Games"),
+        Space::Watch => tr!("Media type"),
+    }
 }
 
 /// The name a shelf kind shows when it has no title of its own;
@@ -404,9 +448,6 @@ pub fn kind_label(kind: &str, status_name: impl Fn(&str) -> String) -> String {
         "statuses" => tr!("One per status").into(),
         "status" => status_name(value),
         "category" if value == UNCATEGORIZED => tr!("Uncategorized").into(),
-        "provider" if value == "top-movies" => tr!("Top movies").into(),
-        "provider" if value == "top-series" => tr!("Top series").into(),
-        "provider" if value == "top" => tr!("Top movies").into(),
         "smart" => status_name(kind),
         _ => value.to_string(),
     }
@@ -426,50 +467,62 @@ pub fn kind_group(kind: &str) -> &'static str {
         "store" => tr!("Store"),
         "genre" => tr!("Genre"),
         "category" => tr!("Category"),
-        "provider" => tr!("From the catalog"),
         _ => "",
     }
 }
 
-/// The name a shelf shows: its own title, else its kind's.
-pub fn shelf_title(s: &ShelfSpec, status_name: impl Fn(&str) -> String) -> String {
-    if s.title.trim().is_empty() {
-        kind_label(&s.kind, status_name)
-    } else {
-        s.title.clone()
+/// The name a shelf shows: its own title, else the kind's name in the words
+/// of `space`.
+pub fn shelf_title(space: Space, s: &ShelfSpec, status_name: impl Fn(&str) -> String) -> String {
+    if !s.title.trim().is_empty() {
+        return s.title.clone();
     }
+    if space == Space::Watch && s.kind == "recent" {
+        return tr!("Continue watching").into();
+    }
+    kind_label(&s.kind, status_name)
 }
 
 fn shelf_rows(cx: &Ctx) -> Vec<Row> {
+    let space = cx.data.space;
     let mut v: Vec<Row> = cx
         .prefs
         .theme
         .shelves
         .iter()
         .enumerate()
-        .map(|(i, s)| Row::toggle(format!("shelf.{i}"), shelf_title(s, |k| cx.data.facts.status_name(k)), s.on).desc(kind_group(&s.kind)))
+        .map(|(i, s)| {
+            Row::toggle(format!("shelf.{i}"), shelf_title(space, s, |k| cx.data.facts.status_name(k)), s.on).desc(kind_group(&s.kind))
+        })
         .collect();
     v.push(Row::action("shelf.add", tr!("Add a shelf…")).icon(Icon::Add));
     v
 }
 
 /// The shelf kinds that are not in the theme yet, grouped, for the picker:
-/// `(group, kind, name)`.
+/// `(group, kind, name)`. Each space offers the kinds it can draw.
 pub fn addable_kinds(cx: &Ctx) -> Vec<(&'static str, String, String)> {
     let f = &cx.data.facts;
     let have: BTreeSet<&str> = cx.prefs.theme.shelves.iter().map(|s| s.kind.as_str()).collect();
     let mut out = Vec::new();
-    for k in ["recent", "favourites", "installed", "statuses", "added", "backlog-short", "random", "forgotten"] {
-        out.push((tr!("Shelves"), k.to_string(), kind_label(k, |k| f.status_name(k))));
+    match cx.data.space {
+        Space::Games => {
+            for k in ["recent", "favourites", "installed", "statuses", "added", "backlog-short", "random", "forgotten"] {
+                out.push((tr!("Shelves"), k.to_string(), kind_label(k, |k| f.status_name(k))));
+            }
+            out.extend(f.statuses.iter().map(|(k, n)| (tr!("Status"), format!("status:{k}"), n.clone())));
+            out.extend(f.platforms.iter().map(|n| (tr!("Platform"), format!("platform:{n}"), n.clone())));
+            out.extend(f.stores.iter().map(|n| (tr!("Store"), format!("store:{n}"), n.clone())));
+            out.extend(f.genres.iter().map(|n| (tr!("Genre"), format!("genre:{n}"), n.clone())));
+            out.extend(f.categories.iter().map(|n| (tr!("Category"), format!("category:{n}"), n.clone())));
+            out.extend(f.smart.iter().map(|(id, n)| (tr!("Smart category"), format!("smart:{id}"), n.clone())));
+        }
+        Space::Watch => {
+            out.push((tr!("Watch"), "recent".to_string(), tr!("Continue watching").into()));
+            out.extend(f.genres.iter().map(|n| (tr!("Genre"), format!("genre:{n}"), n.clone())));
+            out.extend(f.stores.iter().map(|n| (tr!("Provider"), format!("store:{n}"), n.clone())));
+        }
     }
-    out.push((tr!("Watch"), "provider:top-movies".into(), tr!("Top movies").into()));
-    out.push((tr!("Watch"), "provider:top-series".into(), tr!("Top series").into()));
-    out.extend(f.statuses.iter().map(|(k, n)| (tr!("Status"), format!("status:{k}"), n.clone())));
-    out.extend(f.platforms.iter().map(|n| (tr!("Platform"), format!("platform:{n}"), n.clone())));
-    out.extend(f.stores.iter().map(|n| (tr!("Store"), format!("store:{n}"), n.clone())));
-    out.extend(f.genres.iter().map(|n| (tr!("Genre"), format!("genre:{n}"), n.clone())));
-    out.extend(f.categories.iter().map(|n| (tr!("Category"), format!("category:{n}"), n.clone())));
-    out.extend(f.smart.iter().map(|(id, n)| (tr!("Smart category"), format!("smart:{id}"), n.clone())));
     out.retain(|(_, k, _)| !have.contains(k.as_str()));
     out
 }

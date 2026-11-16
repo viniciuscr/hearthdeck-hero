@@ -108,7 +108,8 @@ fn save(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<SettingsPage
             let app = d.ctx.app.clone();
             // The details belong to the theme: set them on the one in use, then save it.
             if let Some(s) = d.console_mode.as_mut() {
-                s.theme.prefs = crate::console::themes::update(&app, |p| {
+                let space = crate::console::theme_rows::edited_space();
+                s.theme.prefs = crate::console::themes::update_for(&app, space, |p| {
                     p.theme.description = description;
                     p.theme.version = version;
                 });

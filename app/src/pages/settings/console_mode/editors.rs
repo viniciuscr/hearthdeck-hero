@@ -25,11 +25,12 @@ pub(super) fn tabs(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<S
     let Some(s) = d.console_mode.as_ref() else { return div() };
     let tabs = s.theme.prefs.theme.tabs.clone();
     let facts = s.theme.data.facts.clone();
+    let space = s.theme.data.space;
     let mut col = card_box().py(px(12.)).gap(px(12.));
-    col = col.child(meta_text(tr!("LB and RB switch between the tabs. Each shows its games in a layout.")));
+    col = col.child(meta_text(tr!("LB and RB switch between the tabs. Each shows what it picks in a layout.")));
     for (i, t) in tabs.iter().enumerate() {
         let name = text_input(d, &format!("tab.{i}.name"), &format!("tab.{i}.name"), &t.name, tr!("Name"), window, cx);
-        let sources = theme_rows::source_options(&facts, &t.source);
+        let sources = theme_rows::source_options(&facts, space, &t.source);
         let at = sources.iter().position(|(v, _)| *v == t.source).unwrap_or(0);
         let labels: Vec<SharedString> = sources.into_iter().map(|(_, l)| l.into()).collect();
         let source = choice_select(d, &format!("tab.{i}.source").into(), &labels, at, true, cx);

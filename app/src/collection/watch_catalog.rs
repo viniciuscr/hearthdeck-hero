@@ -296,6 +296,25 @@ impl CollectionView {
         }
     }
 
+    /// Asks for a catalogue tab's first page, whatever layout draws it: the
+    /// grid pages itself, but a Series X or Cinema tab of `type:movie` would
+    /// otherwise draw nothing. It never asks for a second page — scrolling is
+    /// the grid's business.
+    pub(super) fn watch_feed_start(&mut self, kind: &'static str, cx: &mut Context<Self>) {
+        self.watch_catalogs_ensure(cx);
+        if self.watch_catalog.declared.is_none() || self.watch_catalogs_of(kind).is_empty() {
+            return;
+        }
+        let feed = self.watch_catalog.feeds.entry(kind).or_default();
+        if feed.requested || feed.loading || feed.done || feed.looking_up.is_some() {
+            return;
+        }
+        if feed.retry_at.is_some_and(|at| Instant::now() < at) {
+            return;
+        }
+        self.watch_feed_fetch(kind, cx);
+    }
+
     /// The search the tab shows, or the catalog again when the box is empty.
     pub(super) fn watch_feed_search(&mut self, kind: &'static str, query: String, cx: &mut Context<Self>) {
         let feed = self.watch_catalog.feeds.entry(kind).or_default();

@@ -14,7 +14,12 @@ fn data() -> Data {
             genres: vec!["Adventure".into()],
         },
         saved: Vec::new(),
+        space: Space::Games,
     }
+}
+
+fn data_for(space: Space) -> Data {
+    Data { space, ..data() }
 }
 
 fn change(prefs: &mut ConsolePrefs, id: &str, value: Value) -> bool {
@@ -70,7 +75,7 @@ fn startup_options_live_in_the_prefs_not_the_theme() {
 }
 
 #[test]
-fn tabs_stay_between_one_and_four() {
+fn tabs_stay_between_one_and_six() {
     let mut p = ConsolePrefs::default();
     let add = Command::new("tab.add", Arg::Press);
     for _ in 0..10 {
@@ -106,12 +111,12 @@ fn a_tab_follows_its_layout_name_until_renamed() {
 #[test]
 fn a_tab_source_comes_from_the_library() {
     let mut p = ConsolePrefs::default();
-    let options = source_options(&data().facts, "all");
+    let options = source_options(&data().facts, Space::Games, "all");
     let at = options.iter().position(|(v, _)| v == "status:playing").unwrap();
     change(&mut p, "tab.0.source", choice(at));
     assert_eq!(p.theme.tabs[0].source, "status:playing");
     assert!(options.iter().any(|(v, _)| v == "category:Co-op" && v != "all"));
-    let odd = source_options(&data().facts, "store:Itch");
+    let odd = source_options(&data().facts, Space::Games, "store:Itch");
     assert_eq!(odd.last().unwrap().0, "store:Itch", "an unknown source is kept");
 }
 
@@ -228,11 +233,45 @@ fn picking_a_theme_replaces_the_theme_and_its_base() {
     let at = list.iter().position(|(id, _)| id == "cinema").unwrap();
     assert!(change(&mut p, "theme.use", choice(at)));
     assert_eq!(p.based_on, "cinema");
-    assert_eq!(p.theme, presets::cinema());
+    assert_eq!(p.theme, crate::fork::watch::space_theme::validate(presets::cinema(), Space::Games));
     assert!(!is_edited(&p, &[]));
     assert!(run(&mut p, &Command::new("theme.reset", Arg::Press), &data()));
-    assert_eq!(p.theme, presets::minimal());
+    assert_eq!(p.theme, crate::fork::watch::space_theme::validate(presets::minimal(), Space::Games));
     assert_eq!(p.based_on, "minimal");
+}
+
+#[test]
+fn a_language_switch_is_not_an_edit() {
+    let mut prefs = ConsolePrefs {
+        theme: crate::fork::watch::space_theme::present(presets::cinema(), Space::Watch),
+        based_on: "cinema".into(),
+        ..Default::default()
+    };
+    assert!(!is_edited_for(Space::Watch, &prefs, &[]));
+    // The words a space presents are translated as it runs; a stored theme
+    // keeps the words of the language it was presented in.
+    for tab in &mut prefs.theme.tabs {
+        if matches!(tab.source.as_str(), "all" | "type:movie" | "type:series" | "shelf") {
+            tab.name = "Autre".into();
+        }
+    }
+    assert!(!is_edited_for(Space::Watch, &prefs, &[]), "another language is not an edit");
+    prefs.theme.tabs.push(heronite_data::console_theme::TabSpec::new("Drame", Layout::Grid, "genre:Drama"));
+    assert!(is_edited_for(Space::Watch, &prefs, &[]), "a tab of the theme's own is");
+}
+
+#[test]
+fn reverting_in_watch_keeps_the_watch_tabs() {
+    let mut prefs = ConsolePrefs {
+        theme: crate::fork::watch::space_theme::present(presets::cinema(), Space::Watch),
+        based_on: "cinema".into(),
+        ..Default::default()
+    };
+    prefs.theme.nav.wrap = true;
+    assert!(run(&mut prefs, &Command::new("theme.revert", Arg::Press), &data_for(Space::Watch)));
+    assert!(prefs.theme.tabs.iter().any(|tab| tab.source == "type:movie"));
+    assert!(prefs.theme.tabs.iter().any(|tab| tab.source == "shelf"));
+    assert!(!prefs.theme.nav.wrap);
 }
 
 #[test]
@@ -396,5 +435,5 @@ fn smart_categories_can_be_shelves_and_tabs() {
     let kinds = addable_kinds(&cx);
     assert!(kinds.iter().any(|(_, k, n)| k == "smart:g1" && n == "Unplayed"), "{kinds:?}");
     assert_eq!(kind_label("smart:g1", |k| d.facts.status_name(k)), "Unplayed");
-    assert!(source_options(&d.facts, "all").iter().any(|(k, _)| k == "smart:g1"));
+    assert!(source_options(&d.facts, Space::Games, "all").iter().any(|(k, _)| k == "smart:g1"));
 }

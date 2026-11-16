@@ -86,7 +86,7 @@ impl CollectionView {
                 // the Shelf tab's rails are rebuilt from it.
                 self.watch_personal = personal::read(&self.app_paths);
                 self.watch_personal_ready = true;
-                self.forget_personal_shelves();
+                self.forget_watch_shelves();
                 cx.notify();
             }
             Err(error) => {

@@ -217,8 +217,9 @@ impl CollectionView {
     fn build_shelves(&self, lib: &Library, source: &str) -> Vec<Shelf> {
         // The person's own shelf is not a theme shelf: it is Continue watching,
         // the watchlist and the favourites, and its rails hide when empty.
+        // Only the Watch space has one; a Games theme cannot reach it.
         if source == "shelf" {
-            return self.personal_shelves(lib);
+            return if self.space == crate::collection::Space::Watch { self.personal_shelves(lib) } else { Vec::new() };
         }
         let theme = crate::console::look::theme();
         let games = self.cached_games(source);
@@ -237,25 +238,34 @@ impl CollectionView {
                 }
             })
             .collect();
-        specs
+        let mut shelves: Vec<Shelf> = specs
             .iter()
             .filter_map(|spec| {
                 let mut keys = keys(self.shelf_games(lib, &games, &spec.kind));
                 let total = keys.len();
                 keys.truncate(limit);
                 (!keys.is_empty()).then(|| Shelf {
-                    title: theme_rows::shelf_title(spec, |v| self.shelf_name(lib, v)).into(),
+                    title: theme_rows::shelf_title(self.space, spec, |v| self.shelf_name(lib, v)).into(),
                     keys,
                     total,
                     kind: spec.kind.clone().into(),
                 })
             })
-            .collect()
+            .collect();
+        // The provider collections the person turned on are drawn on the first
+        // page, after the theme's own rails and in the settings' order: the
+        // catalogues they name are what the tabs browse, these are their picks.
+        if source == "all" && self.space == crate::collection::Space::Watch {
+            let marked = games.iter().filter_map(|game| Some((crate::fork::watch::sources::rail_marker(game)?, game.key.as_str())));
+            shelves.extend(collection_shelves(&self.watch_collections, marked));
+        }
+        shelves
     }
 
-    /// The Shelf tab's rails, in order: where the person stopped, what they mean
-    /// to watch, what they like, and the collection rails they turned on. A rail
-    /// with nothing in it is not drawn.
+    /// The Shelf tab's rails, in order: where the person stopped (one rail per
+    /// provider that has progress), what they mean to watch, what they like. The
+    /// provider collections are the first page's. A rail with nothing in it is
+    /// not drawn.
     fn personal_shelves(&self, lib: &Library) -> Vec<Shelf> {
         let all: Vec<&CollectionGame> = lib.games.iter().map(|game| game.as_ref()).collect();
         let shelf = |kind: &str, title: String, games: Vec<&CollectionGame>| Shelf {
@@ -266,9 +276,17 @@ impl CollectionView {
         };
         let mut shelves = Vec::new();
 
-        // Continue watching: the provider's own record of where the person stopped.
-        let resumed: Vec<&CollectionGame> = all.iter().copied().filter(|game| game.last_played.is_some()).collect();
-        shelves.push(shelf("shelf:continue", tr!("Continue watching").to_string(), by_last_played(resumed)));
+        // Continue watching, one rail per provider: several providers (Stremio
+        // today, others later) each continue their own titles, so they are not
+        // merged into one list.
+        let resumed = all
+            .iter()
+            .copied()
+            .filter(|game| game.last_played.is_some())
+            .map(|game| (game.runner.as_str(), game.source_label, game.last_played.as_deref().unwrap_or_default(), game));
+        for (kind, title, games) in continue_groups(resumed) {
+            shelves.push(shelf(&kind, title, by_last_played(games)));
+        }
 
         // The two flags: the shelf's snapshots, resolved against this library. A
         // title the projection no longer holds is not drawn (it still is in the
@@ -290,34 +308,21 @@ impl CollectionView {
             shelves.push(shelf(kind, title.to_string(), games));
         }
 
-        // The collection rails the person turned on, in their order, read with
-        // the library: the titles are already in it — the refresh path resolved
-        // each rule and marked what it brought — so drawing one asks a provider
-        // nothing, and the membership is the mark.
-        shelves.extend(collection_shelves(
-            &self.watch_collections,
-            all.iter().filter_map(|game| Some((crate::fork::watch::sources::rail_marker(game)?, game.key.as_str()))),
-        ));
         shelves.retain(|shelf| !shelf.keys.is_empty());
         shelves
     }
 
-    /// Drops the Shelf tab's cached rails, so a toggle shows at once.
-    pub(crate) fn forget_personal_shelves(&mut self) {
-        self.console.sources.borrow_mut().shelves.remove("shelf");
+    /// Drops every cached rail, so a toggle or a new progress record shows at
+    /// once: the Shelf's (Continue watching per provider, watchlist, favourites)
+    /// and the first page's (the provider collections Settings lists).
+    pub(crate) fn forget_watch_shelves(&mut self) {
+        self.console.sources.borrow_mut().shelves.clear();
     }
 
     fn shelf_games<'a>(&self, lib: &Library, games: &[&'a CollectionGame], kind: &str) -> Vec<&'a CollectionGame> {
         let (k, value) = kind.split_once(':').unwrap_or((kind, ""));
         let pick = |f: &dyn Fn(&CollectionGame) -> bool| games.iter().copied().filter(|g| f(g)).collect::<Vec<_>>();
         match k {
-            "provider" if value == "top" => pick(&|g: &CollectionGame| crate::fork::watch::sources::top(g)),
-            "provider" if value == "top-movies" => {
-                pick(&|g: &CollectionGame| crate::fork::watch::sources::top(g) && crate::fork::watch::sources::kind(g) == "movie")
-            }
-            "provider" if value == "top-series" => {
-                pick(&|g: &CollectionGame| crate::fork::watch::sources::top(g) && crate::fork::watch::sources::kind(g) == "series")
-            }
             "recent" => {
                 let mut v = by_last_played(pick(&|g| g.last_played.is_some()));
                 v.truncate(20);
@@ -380,6 +385,34 @@ fn fxhash(s: &str) -> u64 {
 ///
 /// `marked` is each title's `extra.watchCatalog` and its key: the membership was
 /// decided when the library was refreshed, so this is a grouping, not a request.
+/// The Continue watching rails, one per provider: `(kind, title, the titles)`.
+/// Each item is `(provider id, its label, when the title was last watched, the
+/// title)`. A single provider's rail is just "Continue watching"; with several,
+/// each says which provider's progress it is, and the provider watched most
+/// recently comes first.
+fn continue_groups<'a, G>(items: impl Iterator<Item = (&'a str, &'a str, &'a str, G)>) -> Vec<(String, String, Vec<G>)> {
+    use std::collections::BTreeMap;
+    let mut by_provider: BTreeMap<&str, (&str, Vec<(&str, G)>)> = BTreeMap::new();
+    for (provider, label, when, game) in items {
+        by_provider.entry(provider).or_insert((label, Vec::new())).1.push((when, game));
+    }
+    let several = by_provider.len() > 1;
+    let mut rails: Vec<(&str, &str, String, Vec<G>)> = by_provider
+        .into_iter()
+        .map(|(provider, (label, games))| {
+            let newest = games.iter().map(|(when, _)| *when).max().unwrap_or_default();
+            let title = if several {
+                tr!("Continue watching · {provider}", provider = label).to_string()
+            } else {
+                tr!("Continue watching").to_string()
+            };
+            (provider, newest, title, games.into_iter().map(|(_, game)| game).collect())
+        })
+        .collect();
+    rails.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+    rails.into_iter().map(|(provider, _, title, games)| (format!("shelf:continue:{provider}"), title, games)).collect()
+}
+
 fn collection_shelves<'a>(
     enabled: &[(String, heronite_watch::collections::CollectionDescriptor)],
     marked: impl Iterator<Item = (&'a str, &'a str)>,
@@ -437,6 +470,23 @@ mod tests {
         assert_eq!(titles[1].1, ["stremio:tt2"]);
         assert!(shelves.iter().all(|shelf| shelf.total == shelf.keys.len()), "a rail is not cut by the theme's shelf limit");
         assert!(shelves.iter().all(|shelf| shelf.kind.starts_with("collection:")), "a rail says what it is");
+    }
+
+    #[test]
+    fn continue_watching_is_one_rail_per_provider_newest_first() {
+        let stremio = [("stremio", "Stremio", "2026-11-14", "s1"), ("stremio", "Stremio", "2026-11-10", "s2")];
+        let netflix = [("netflix", "Netflix", "2026-11-15", "n1")];
+        let items = stremio.iter().chain(netflix.iter()).map(|(provider, label, when, game)| (*provider, *label, *when, *game));
+        let rails = continue_groups(items);
+        assert_eq!(rails.len(), 2, "one rail per provider, never merged");
+        assert_eq!(rails[0].0, "shelf:continue:netflix", "the provider watched most recently first");
+        assert_eq!(rails[0].1, format!("{} · Netflix", tr!("Continue watching")), "each rail says whose progress it is");
+        assert_eq!(rails[0].2, ["n1"]);
+        assert_eq!(rails[1].2.len(), 2);
+
+        let saja = continue_groups(stremio.iter().map(|(provider, label, when, game)| (*provider, *label, *when, *game)));
+        assert_eq!(saja[0].1, tr!("Continue watching"), "a single provider needs no name");
+        assert_eq!(saja[0].0, "shelf:continue:stremio");
     }
 
     #[test]

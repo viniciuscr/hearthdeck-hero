@@ -34,6 +34,18 @@ curates. TMDB's *lists*, *watchlist* and *favourites* are account state and need
 session (§9). "Most played" does not exist anywhere in our vocabulary: a catalogue
 sorts by `Popular | Rating | Newest | Title`, so the rail is called **Popular**.
 
+> **Revision 2026-11-16 — the collections are the first page's, the Shelf is the
+> person's.** The enabled provider collections are no longer drawn in the Shelf
+> tab: the **first page** (the `all` tab) appends one rail per enabled collection,
+> after the theme's own rails and in the order Settings → Watch → Collections
+> lists them. The Shelf keeps what the person owns — **Continue watching**
+> (one rail *per provider* that has progress, the most recently watched first,
+> each named after its provider when there is more than one), **Watchlist** and
+> **Favourites**. The theme no longer carries them: `provider:*` shelf kinds are
+> not theme shelves (an old theme's are dropped on load), and the two fixed
+> "Top movies" / "Top series" switches are gone — the collections list is the one
+> switch list, whatever provider declared the rail.
+
 ## 2. What replaces the Favourites tab
 
 The Watch space gets a tab with source `"shelf"` (name **Shelf**). A
@@ -43,12 +55,17 @@ theme that carries a `favourites` tab has it replaced — source *and* layout
 **shelf** is dropped for Watch (nothing ever sets `favourite` on a Watch title, so
 it draws nothing).
 
-Rails, top to bottom:
+Rails, top to bottom (revised 2026-11-16: the collections moved to the first
+page):
 
-1. **Continue watching** — the Stremio provider's rail, as today.
+1. **Continue watching** — one rail per provider that has progress, the one
+   watched most recently first; it says the provider's name when more than one
+   provider has progress.
 2. **Watchlist** — the local list.
 3. **Favourites** — the local list.
-4. **Enabled provider collections** — one rail each, in settings order.
+
+The **enabled provider collections** are the first page's: one rail each, in
+settings order, after the theme's own rails.
 
 Rules:
 

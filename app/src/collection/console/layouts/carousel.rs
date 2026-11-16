@@ -519,7 +519,7 @@ impl CollectionView {
                 .items_center()
                 .gap(u(INFO_GAP))
                 .child(row(if logo { LOGO_H } else { NAME_H }).child(name))
-                .when(theme.hero.facts, |d| d.child(row(FACTS_H).child(self.console_fact_line(&g, Self::console_facts(&g), 15.))))
+                .when(theme.hero.facts, |d| d.child(row(FACTS_H).child(self.console_fact_line(&g, self.console_facts(&g), 15.))))
                 .child(row(PLACE_H).child(place(tab, letter, index, n)));
             // From the side the focus came from, never from blank (held
             // directions keep it readable).

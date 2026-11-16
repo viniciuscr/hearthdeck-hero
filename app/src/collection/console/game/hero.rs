@@ -340,7 +340,7 @@ impl CollectionView {
         let on_buttons = !in_content && nav.more.is_none();
 
         let name = self.console_name(&g, HeroSize { title: 58., logo: (520., 128.), ..HeroSize::default() }, window);
-        let facts = self.console_fact_line(&g, Self::console_facts(&g), 16.);
+        let facts = self.console_fact_line(&g, self.console_facts(&g), 16.);
         let buttons_row = div().flex().gap(u(12.)).mt(u(8.)).children(btns.iter().enumerate().map(|(i, b)| {
             // A click: up from the screenshots, ← → to the button, A.
             let mut pads = if in_content { vec![Pad::Up] } else { Vec::new() };

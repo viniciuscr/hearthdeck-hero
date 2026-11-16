@@ -12,7 +12,7 @@ use crate::collection::Space;
 use crate::console::layers::{self, HasLayer};
 use crate::console::list::{Outcome, Row, Value};
 use crate::console::themes;
-use crate::fork::watch::watch_theme::watch_theme;
+use crate::fork::watch::prefs::default_theme as watch_default_theme;
 use crate::pages::settings::SettingsPage;
 use crate::pages::PageCtx;
 use crate::theme;
@@ -106,32 +106,14 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
     }
 
     let prefs = themes::prefs_for(&d.ctx.app, Space::Watch);
-    let rails = card([
-        toggle_row(
-            "watch-rail-recent",
-            tr!("Continue watching"),
-            Some(tr!("Films and series you have started.")),
-            rail_on(&prefs, "recent"),
-        )
-        .on_click(cx.listener(|d, _, _, cx| toggle_rail(d, "recent", cx)))
-        .into_any_element(),
-        toggle_row(
-            "watch-rail-top-movies",
-            tr!("Top movies"),
-            Some(tr!("Films from the provider's catalog.")),
-            rail_on(&prefs, "provider:top-movies"),
-        )
-        .on_click(cx.listener(|d, _, _, cx| toggle_rail(d, "provider:top-movies", cx)))
-        .into_any_element(),
-        toggle_row(
-            "watch-rail-top-series",
-            tr!("Top series"),
-            Some(tr!("Series from the provider's catalog.")),
-            rail_on(&prefs, "provider:top-series"),
-        )
-        .on_click(cx.listener(|d, _, _, cx| toggle_rail(d, "provider:top-series", cx)))
-        .into_any_element(),
-    ]);
+    let rails = card([toggle_row(
+        "watch-rail-recent",
+        tr!("Continue watching"),
+        Some(tr!("Films and series you have started.")),
+        rail_on(&prefs, "recent"),
+    )
+    .on_click(cx.listener(|d, _, _, cx| toggle_rail(d, "recent", cx)))
+    .into_any_element()]);
 
     let settings = heronite_watch::settings::read(&d.ctx.app);
     let service = card([toggle_row(
@@ -150,8 +132,8 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
         true,
         cx.listener(|d, _, _, cx| {
             themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
-                prefs.theme = watch_theme();
-                prefs.based_on = "watch".into();
+                prefs.theme = watch_default_theme();
+                prefs.based_on = crate::fork::watch::prefs::base_id().into();
                 prefs.last_tab = 0;
             });
             cx.notify();
@@ -347,7 +329,7 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
     if !collections.is_empty() {
         column = column
             .child(caption(tr!("Collections")))
-            .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!("Rails the Shelf tab draws, in this order."))))
+            .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!("Rails the first page draws, in this order."))))
             .child(card(collections));
     }
     if let Some(notice) = &d.watch.notice {
@@ -373,7 +355,7 @@ fn source_keyed(d: &SettingsPage, source: &str) -> bool {
 /// its source still needs.
 fn rail_note(d: &SettingsPage, source: &str) -> String {
     if source_keyed(d, source) {
-        return tr!("Shown in the Shelf tab.").to_string();
+        return tr!("Shown on the first page.").to_string();
     }
     let name = heronite_watch::collections::source_name(source);
     tr!("{source} has no key yet: add it above, or this rail stays empty.", source = name).to_string()
@@ -507,8 +489,6 @@ fn toggle_rail(d: &mut SettingsPage, kind: &str, cx: &mut Context<SettingsPage>)
 fn rail_title(kind: &str) -> String {
     match kind {
         "recent" => tr!("Continue watching").to_string(),
-        "provider:top-movies" => tr!("Top movies").to_string(),
-        "provider:top-series" => tr!("Top series").to_string(),
         _ => kind.to_string(),
     }
 }
@@ -597,8 +577,6 @@ pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
     rows.push(Row::header(tr!("Home rails")));
     let prefs = themes::prefs_for(&d.ctx.app, Space::Watch);
     rows.push(Row::toggle("watch-rail:recent", tr!("Continue watching"), rail_on(&prefs, "recent")));
-    rows.push(Row::toggle("watch-rail:provider:top-movies", tr!("Top movies"), rail_on(&prefs, "provider:top-movies")));
-    rows.push(Row::toggle("watch-rail:provider:top-series", tr!("Top series"), rail_on(&prefs, "provider:top-series")));
     rows.push(Row::action("watch-reset", tr!("Reset Watch theme")));
     rows.push(Row::header(tr!("Stremio service")));
     let settings = heronite_watch::settings::read(&d.ctx.app);
@@ -635,7 +613,7 @@ pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
             let note = rail_note(d, source);
             rows.push(Row::toggle(SharedString::from(format!("watch-collection:{}", rail.id)), title, on).desc(note));
         }
-        rows.push(Row::info("watch-collections-note", tr!("Collections"), tr!("Rails the Shelf tab draws, in this order.")));
+        rows.push(Row::info("watch-collections-note", tr!("Collections"), tr!("Rails the first page draws, in this order.")));
     }
     rows.push(Row::info("watch-catalogs-note", tr!("Catalogs"), tr!("A catalog decides what is listed; it never changes what plays.")));
     rows
@@ -671,8 +649,8 @@ pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mu
             "watch-unlink" => unlink(d, cx),
             "watch-reset" => {
                 themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
-                    prefs.theme = watch_theme();
-                    prefs.based_on = "watch".into();
+                    prefs.theme = watch_default_theme();
+                    prefs.based_on = crate::fork::watch::prefs::base_id().into();
                     prefs.last_tab = 0;
                 });
                 cx.notify();

@@ -4,6 +4,54 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-16 — themes are presented per space, and Watch edits its
+> own.** The Watch theme is no longer a frozen copy of a game preset, and a
+> theme's structure is no longer rewritten on every load. Two steps, named in
+> `app/src/fork/watch/space_theme.rs`:
+>
+> - **`validate`** runs on every load and after every change. It only *removes*
+>   what the space cannot draw — a Games menu entry, a `shelf` tab or a
+>   `provider:` rail in Games; `installed`, `pc`, `emulated`, `status:*`,
+>   `category:*`, `smart:*` and `platform:*` tab sources in Watch — so it is
+>   idempotent and can never undo an edit.
+> - **`present`** runs when a theme is *taken* (chosen in the Theme row,
+>   imported, reset, or a space's first run). It validates, then adds the tabs
+>   and rails Watch needs (Movies, Series, Shelf, Continue watching), fitted to
+>   `MAX_TABS` (`F-015`: six, because the canonical four
+>   left no room for a theme's own tab). It never renames or reorders what the
+>   theme brought, and only the upstream home words "All games" / "Games" are
+>   read as **Watch**.
+>
+> Consequences, all intended: a preset's layouts reach Watch (Living room's
+> **Series X** home is a Series X screen there; Classic's Library grid tab
+> survives next to the theme's home tab), a fresh Watch starts from **Classic**
+> with `basedOn: "classic"` (so the Theme row names it instead of reading
+> "Customised"), and Customize → **Tabs**, **Shelves** and **Hero** are editable
+> in Watch while **Menu** and **Game page** stay locked (their entries and
+> styles are the games').
+>
+> The editors follow the space: a tab's source picker offers `all`,
+> `type:movie`, `type:series`, `shelf`, `genre:*`, `store:*` and the catalog
+> rails in Watch; the shelf picker offers Continue watching, the catalog rails,
+> genres and providers; and `isEdited` compares a theme with the presentation of
+> its base, so taking a preset is not an edit while a renamed tab is.
+> `MAX_TABS` is six (`F-015`). A catalogue tab pages its feeds in **any**
+> layout, not only the Grid, or a Series X "Movies" tab would draw nothing.
+>
+> The hero speaks watch: **facts** are the provider it streams from ("Stremio"
+> today, "Netflix" or "YouTube" when those providers exist) and the year — never
+> "Installed" or a playtime — and **stats** are the watched time, when it was
+> last watched and the genre. Both come from the library's own records
+> (`last_played`, `playtime_minutes` from Stremio's timestamps, release date and
+> genres from the metadata projection): the home screen asks no metadata source
+> anything, so runtime and the IMDb score stay on the film page, which already
+> loads `TitleDetails`.
+>
+> The desktop theme editor only ever writes the **Games** prefs; the Watch theme
+> is edited from the Watch space (Customize, or Settings → Console mode while
+> Watch is on screen). A `shelf` tab cannot reach Games any more: `validate`
+> drops it, and the shelf source draws nothing outside the Watch space.
+
 > **Revision 2026-11-15 — metadata sources you choose, merged field by field.**
 > What describes a title is a **metadata source**, and which ones answer is the
 > person's choice: `metadataSources` in `watch-settings.json` (Settings → Watch →
@@ -76,13 +124,15 @@ the rules that apply while building it.
 > not require changes to the Collection or console screens. The provider name
 > travels in `GameInfo.runner` / `source` and in `WatchItem.provider`.
 
-> **Revision 2026-11-11 — Watch settings and migration.**
-> Settings → Watch owns the Stremio account and the home rails; console
+> **Revision 2026-11-11 — Watch settings and migration** (superseded by
+> 2026-11-16: the backup and the one-time replacement are gone — `validate`
+> turns a game-shaped file into a watch theme in place, and the theme is
+> presented from Classic, not copied into `app/src/console/watch_theme.rs`).
+> Settings → Watch owns the Stremio account, its rails and the collections; console
 > Customize edits the same Watch theme. A game-shaped `console-watch.json` or
-> `watch-ui-state.json` is backed up as `*.json.bak` and replaced once with the
+> `watch-ui-state.json` was backed up as `*.json.bak` and replaced once with the
 > Watch defaults: Home / Movies / Series, and Continue watching / Top movies /
-> Top series. The Watch theme is fork-owned (`app/src/console/watch_theme.rs`),
-> not a transformed game preset.
+> Top series.
 
 ## Scope
 
@@ -350,11 +400,11 @@ Envelope, source `stremio-core`:
 - A tab lists its feed's own ids once it has asked for a page, so the rails never
   leak into a catalog and a search shows its own titles.
 - **Browsing never lives in a media provider.** Stremio's `browse` reports only
-  what its own account knows — where the person stopped, the Continue watching
-  rail — and reaches no catalogue at all. The home's browsing rails (Top movies,
-  Top series) are built from the **enabled** catalogue sources, one per source and
-  kind from its first catalogue, so turning a source off removes what it
-  contributed from the home *and* from the tabs.
+  what its own account knows — where the person stopped — and reaches no
+  catalogue at all. The **first page** draws the provider collections Settings
+  lists (one rail each, in that order), so turning a collection off removes it
+  from the page and turning a source off removes what it contributed from the
+  first page *and* from the tabs.
 - The Movies and Series tabs list only their own feed's titles: before the first
   page arrives they are empty, with a message that says why (asking the sources,
   none turned on, or nothing found). They never show the library and replace it a

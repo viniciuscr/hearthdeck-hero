@@ -38,13 +38,25 @@ pub struct ThemeState {
 /// Steps of Undo kept.
 const UNDO_MAX: usize = 100;
 
+/// The space the editor edits: the console's while it is on screen, the Games
+/// theme otherwise. The Watch theme belongs to the Watch space, so Settings
+/// must never write it behind the person's back.
+pub fn edited_space() -> Space {
+    if crate::console::active() {
+        crate::console::themes::active_space()
+    } else {
+        Space::Games
+    }
+}
+
 impl ThemeState {
-    /// Reads `console.json` (once per run); the saved themes come with
-    /// [`load_saved`].
+    /// Reads the space's prefs (once per run); the saved themes come with
+    /// [`load_saved`]. [`change`] follows the space if it changed since.
     pub fn new(app: &AppPaths) -> Self {
+        let space = edited_space();
         Self {
-            prefs: themes::prefs(app),
-            data: Data::default(),
+            prefs: themes::prefs_for(app, space),
+            data: Data { space, ..Default::default() },
             notice: None,
             moving: false,
             undo: Vec::new(),
@@ -125,37 +137,45 @@ pub fn change<H: Host>(h: &mut H, cmd: &Command, cx: &mut Context<H>) -> bool {
     if !run(&mut probe, cmd, &st.data) {
         return false;
     }
+    let space = edited_space();
+    // The state outlives a console session: when the space changed, the rows
+    // and the file they write must be that space's.
+    if st.data.space != space {
+        st.data.space = space;
+        st.prefs = themes::prefs_for(&app, space);
+        st.forget_steps();
+    }
     let before = st.prefs.theme.clone();
     st.prefs = match cmd.id.as_str() {
         "startup.open_in" => {
             crate::console::startup::set_open_in(&app, probe.open_in);
-            themes::prefs(&app)
+            themes::prefs_for(&app, space)
         }
         "startup.fullscreen" => {
             crate::console::startup::set_fullscreen(&app, probe.fullscreen);
-            themes::prefs(&app)
+            themes::prefs_for(&app, space)
         }
         "startup.auto_console" => {
             crate::console::startup::set_auto_console(&app, probe.auto_console);
             crate::console::summon::options_changed(cx);
-            themes::prefs(&app)
+            themes::prefs_for(&app, space)
         }
         "startup.console_button" => {
             crate::console::startup::set_console_button(&app, probe.console_button);
             crate::console::summon::options_changed(cx);
-            themes::prefs(&app)
+            themes::prefs_for(&app, space)
         }
         // The controller's, not the theme's: no Undo step. Global, so they are
         // written to the Games prefs whatever space is on screen, while the
         // rows keep showing this space's own prefs.
         "controls.glyphs" | "controls.confirm" => {
             themes::update_for(&app, Space::Games, |p| p.controller = probe.controller);
-            themes::prefs(&app)
+            themes::prefs_for(&app, space)
         }
         _ => {
             st.remember(cmd);
             let data = &st.data;
-            themes::update(&app, |p| {
+            themes::update_for(&app, space, |p| {
                 run(p, cmd, data);
             })
         }
@@ -261,7 +281,8 @@ pub fn undo<H: Host>(h: &mut H, back: bool, cx: &mut Context<H>) {
     theme.id = st.prefs.theme.id.clone();
     to.push(st.prefs.theme.clone());
     st.last_change = None;
-    st.prefs = themes::update(&app, |p| p.theme = theme);
+    let space = st.data.space;
+    st.prefs = themes::update_for(&app, space, |p| p.theme = theme);
     st.notice = None;
     cx.notify();
 }
@@ -365,7 +386,8 @@ fn fail<H: Host>(h: &mut H, e: anyhow::Error, cx: &mut Context<H>) {
 fn adopt<H: Host>(h: &mut H, theme: ConsoleTheme, list: Vec<ConsoleTheme>, note: String, cx: &mut Context<H>) {
     let app = h.app();
     let id = theme.id.clone();
-    let next = themes::apply(&app, theme, Some(&id));
+    let space = h.theme_state().map_or_else(edited_space, |st| st.data.space);
+    let next = themes::apply_for(&app, space, theme, Some(&id));
     if let Some(st) = h.theme_state() {
         st.prefs = next;
         st.data.saved = list;
@@ -422,7 +444,8 @@ fn delete_job<H: Host>(_h: &mut H, app: AppPaths, id: String, cx: &mut Context<H
             Ok(list) => {
                 let app = h.app();
                 let in_use = h.theme_state().is_some_and(|st| st.prefs.based_on == id);
-                let prefs = in_use.then(|| themes::update(&app, |p| p.based_on.clear()));
+                let space = h.theme_state().map_or_else(edited_space, |st| st.data.space);
+                let prefs = in_use.then(|| themes::update_for(&app, space, |p| p.based_on.clear()));
                 if let Some(st) = h.theme_state() {
                     st.data.saved = list;
                     if let Some(p) = prefs {
@@ -459,7 +482,8 @@ fn rename_job<H: Host>(h: &mut H, app: AppPaths, name: String, cx: &mut Context<
             .await;
         this.update(cx, |h, cx| match res {
             Ok((t, list)) => {
-                let prefs = themes::update(&app, |p| p.theme.name = t.name.clone());
+                let space = h.theme_state().map_or_else(edited_space, |st| st.data.space);
+                let prefs = themes::update_for(&app, space, |p| p.theme.name = t.name.clone());
                 if let Some(st) = h.theme_state() {
                     st.prefs = prefs;
                     st.data.saved = list;
@@ -485,7 +509,8 @@ fn save_job<H: Host>(_h: &mut H, app: AppPaths, start: ConsoleTheme, theme: Cons
             Ok((t, list)) if h.theme_state().is_none_or(|st| st.prefs.theme == start) => adopt(h, t, list, done, cx),
             Ok((t, list)) => {
                 let app = h.app();
-                let next = themes::update(&app, |p| {
+                let space = h.theme_state().map_or_else(edited_space, |st| st.data.space);
+                let next = themes::update_for(&app, space, |p| {
                     if p.theme.background.image == start.background.image {
                         p.theme.background.image = t.background.image.clone();
                     }
@@ -566,7 +591,7 @@ fn import_from<H: Host>(h: &mut H, path: PathBuf, cx: &mut Context<H>) {
         let res = cx.background_spawn(async move { store::import(&app, &path).map(|t| (t, store::list(&app))) }).await;
         this.update(cx, |h, cx| match res {
             // Unsaved changes on screen are never replaced: the theme waits in the list.
-            Ok((t, list)) if h.theme_state().is_some_and(|st| super::is_edited(&st.prefs, &st.data.saved)) => {
+            Ok((t, list)) if h.theme_state().is_some_and(|st| super::is_edited_for(st.data.space, &st.prefs, &st.data.saved)) => {
                 if let Some(st) = h.theme_state() {
                     st.data.saved = list;
                     st.notice = Some((tr!("“{name}” is with your themes.", name = t.name), false));

@@ -30,8 +30,10 @@ use crate::paths::AppPaths;
 /// Version of the theme format this app writes. A theme with a higher
 /// `format` is refused on import (it may rely on things this app lacks).
 pub const FORMAT: u32 = 1;
-/// At most this many tabs (LB / RB).
-pub const MAX_TABS: usize = 4;
+/// At most this many tabs (LB / RB). Six rather than four: the Watch space's
+/// canonical tabs (home, movies, series, shelf) fill four on their own, and a
+/// theme brings one or two of its own.
+pub const MAX_TABS: usize = 6;
 /// Interface scale, percent.
 pub const SCALE_RANGE: (u16, u16) = (80, 140);
 pub const DIM_MAX: u8 = 90;

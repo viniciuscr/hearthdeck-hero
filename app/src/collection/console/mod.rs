@@ -915,6 +915,14 @@ impl CollectionView {
             self.render_console_game(key, window, cx)
         } else {
             let dir = std::mem::take(&mut self.console.tab_dir);
+            // A catalogue tab in a layout that does not page (Series X, Cinema,
+            // Shelves…) still needs its first page: the grid is not the only
+            // layout that shows a provider's catalog.
+            if let Some(kind) = crate::collection::watch_catalog::feed_kind(&spec.source) {
+                if spec.layout != heronite_data::console_theme::Layout::Grid {
+                    self.watch_feed_start(kind, cx);
+                }
+            }
             let layout = self.render_layout(tab, &spec, window, cx);
             motion::enter(
                 SharedString::from(format!("console-tab-{tab}-{}-{}", spec.layout.as_str(), look::epoch())),

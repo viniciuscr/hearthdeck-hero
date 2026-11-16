@@ -8,7 +8,6 @@ use gpui_kit::*;
 use heronite_data::console_theme::{FactStyle, HeroAlign, TabSpec};
 use heronite_data::organize::release_year;
 use heronite_data::CollectionGame;
-use heronite_i18n::tr;
 
 use super::super::super::CollectionView;
 use super::super::hero::{played_time, shelf_heading, HeroSize};
@@ -30,11 +29,12 @@ const PEEK: f32 = 40.;
 /// Height of the line of genres above the covers (Chips).
 const GENRES: f32 = 36.;
 
-/// "2019 · Action · 3h 54m played" (the store when none of it is known).
-fn meta_line(g: &CollectionGame) -> String {
+/// "2019 · Action · 3h 54m played" (watched, in the Watch space; the store
+/// when none of it is known).
+fn meta_line(space: crate::collection::Space, g: &CollectionGame) -> String {
     let year = release_year(g).map(|y| y.to_string());
     let genre = g.details.genres.first().cloned();
-    let played = played_time(g).map(|time| tr!("{time} played", time = time));
+    let played = played_time(g).map(|time| super::super::hero::watched_or_played(space, &time));
     let parts: Vec<String> = year.into_iter().chain(genre).chain(played).collect();
     if parts.is_empty() {
         g.source_label.to_string()
@@ -53,7 +53,7 @@ impl CollectionView {
         let size = HeroSize { title: 56., logo: (560., (free - 62.).clamp(100., 200.)), max_w: 760., overview: 0 };
         let name = self.console_name(g, size, window);
         let meta = theme.hero.facts.then(|| match theme.hero.fact_style {
-            FactStyle::Line => self.console_fact_line(g, meta_line(g), 16.),
+            FactStyle::Line => self.console_fact_line(g, meta_line(self.space, g), 16.),
             FactStyle::Chips => self.console_chips(g),
         });
         let mut info = div().relative().flex().flex_col().gap(u(12.)).max_w(u(size.max_w)).child(name);

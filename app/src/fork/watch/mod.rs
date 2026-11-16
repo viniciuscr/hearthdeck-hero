@@ -7,4 +7,3 @@ pub mod settings;
 pub mod sources;
 pub mod space_theme;
 pub mod theme_rows;
-pub mod watch_theme;

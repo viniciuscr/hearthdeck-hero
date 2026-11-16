@@ -200,24 +200,24 @@ fn apply(prefs: &mut ConsolePrefs, cmd: &Command, data: &Data) {
             let list = theme_list(&data.saved);
             if let Some((tid, _)) = list.get(*index) {
                 if let Some(next) = presets::by_id(tid).or_else(|| data.saved.iter().find(|s| s.id == *tid).cloned()) {
-                    prefs.theme = next;
+                    prefs.theme = crate::fork::watch::space_theme::present(next, data.space);
                     prefs.based_on = tid.clone();
                 }
             }
         }
         ("theme.use", Arg::Pick(tid)) => {
             if let Some(next) = presets::by_id(tid).or_else(|| data.saved.iter().find(|s| s.id == *tid).cloned()) {
-                prefs.theme = next;
+                prefs.theme = crate::fork::watch::space_theme::present(next, data.space);
                 prefs.based_on = tid.clone();
             }
         }
         ("theme.revert", Arg::Press) => {
             if let Some(base) = base_theme(prefs, &data.saved) {
-                prefs.theme = base;
+                prefs.theme = crate::fork::watch::space_theme::present(base, data.space);
             }
         }
         ("theme.reset", Arg::Press) => {
-            prefs.theme = presets::default_theme();
+            prefs.theme = crate::fork::watch::space_theme::present(presets::default_theme(), data.space);
             prefs.based_on = presets::DEFAULT.into();
         }
         ("tab.add", Arg::Press) => {
@@ -275,7 +275,7 @@ fn apply_indexed(prefs: &mut ConsolePrefs, cmd: &Command, data: &Data) {
         }
     } else if let Some(i) = tab_index(id, ".source") {
         if let (Arg::Value(Value::Choice { index, .. }), Some(tab)) = (&cmd.arg, t.tabs.get_mut(i)) {
-            if let Some((source, _)) = source_options(&data.facts, &tab.source).get(*index) {
+            if let Some((source, _)) = source_options(&data.facts, data.space, &tab.source).get(*index) {
                 tab.source = source.clone();
             }
         }

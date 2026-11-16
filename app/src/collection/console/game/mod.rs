@@ -375,7 +375,7 @@ impl CollectionView {
                     .max_w(u(900.))
                     .pb(u(4.))
                     .child(kit::title(g.title.clone(), title).line_clamp(2))
-                    .child(self.console_fact_line(&g, Self::console_facts(&g), 16.))
+                    .child(self.console_fact_line(&g, self.console_facts(&g), 16.))
                     .children(
                         focus
                             .as_ref()

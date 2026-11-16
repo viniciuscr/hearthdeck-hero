@@ -457,7 +457,7 @@ impl CollectionView {
         let name = self.console_name(&game, HeroSize { title: 30., logo: (w * 0.7, 66.), ..HeroSize::default() }, window);
         let running = self.playing.contains_key(&game.app_name) || self.preparing.contains_key(&game.app_name);
         let label = if game.installed && !running { tr!("Continue") } else { self.primary_label(&game) };
-        let line = played_line(&game, false);
+        let line = played_line(self.space, &game, false);
         let r = u(look::tile_radius());
         let pill_ink: Rgba = if kit::light() { rgb(0xffffff) } else { rgb(DARK) };
         div()

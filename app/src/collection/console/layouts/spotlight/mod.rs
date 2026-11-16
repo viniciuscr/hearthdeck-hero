@@ -236,7 +236,8 @@ impl CollectionView {
             };
             div().flex_none().on_pads(pads).child(button)
         });
-        let when = div().ml(u(10.)).text_size(u(15.)).text_color(theme::text_muted()).whitespace_nowrap().child(played_line(g, true));
+        let when =
+            div().ml(u(10.)).text_size(u(15.)).text_color(theme::text_muted()).whitespace_nowrap().child(played_line(self.space, g, true));
         div().flex().items_center().gap(u(14.)).mt(u(18.)).h(u(BUTTON_H)).children(buttons).child(when)
     }
 

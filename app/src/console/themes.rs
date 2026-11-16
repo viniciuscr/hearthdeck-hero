@@ -3,10 +3,11 @@
 //! the UI thread (the latest version wins; writes never overlap).
 //!
 //! Games and Watch keep separate prefs: `console.json` for games,
-//! `console-watch.json` for the Watch space. The first Watch session starts
-//! from the Games theme and turns its shelves into watch rails (Continue
-//! watching, Top movies, Top series), so the two spaces can be customized
-//! independently.
+//! `console-watch.json` for the Watch space, so the two can be customized
+//! independently. A theme is *presented* through a space when it is taken
+//! (`present`: its look and layouts, plus the tabs and rails the space needs)
+//! and only *validated* on every load (`validate`: what the space cannot show
+//! removed). That is what lets a person's tab edits survive a restart.
 //!
 //! [`update`] is the one way to change the theme in use: it also installs it
 //! in [`super::look`] while console mode is on, so the screen follows at once.
@@ -20,7 +21,7 @@ use heronite_data::console_theme::{ConsolePrefs, ConsoleTheme, ControllerPrefs, 
 use heronite_data::paths::AppPaths;
 
 use crate::collection::Space;
-use crate::fork::watch::space_theme::project;
+use crate::fork::watch::space_theme::{present, validate};
 
 const GAMES: u8 = 0;
 const WATCH: u8 = 1;
@@ -60,7 +61,7 @@ fn load(app: &AppPaths, space: Space) -> ConsolePrefs {
     match space {
         Space::Games => {
             let mut prefs = ConsolePrefs::load(app);
-            prefs.theme = project(prefs.theme, Space::Games);
+            prefs.theme = validate(prefs.theme, Space::Games);
             // The controller's options are global, and they live in this file.
             install_controls(app, prefs.controller);
             prefs
@@ -155,7 +156,7 @@ pub fn update_for(app: &AppPaths, space: Space, change: impl FnOnce(&mut Console
         let p = cur[index(space)].get_or_insert_with(|| load(app, space));
         let before = p.theme.clone();
         change(p);
-        p.theme = project(std::mem::take(&mut p.theme).normalized(), space);
+        p.theme = validate(std::mem::take(&mut p.theme).normalized(), space);
         (before, p.clone())
     };
     // Covers of a shape the new theme draws and the old one did not.
@@ -172,9 +173,11 @@ pub fn update_for(app: &AppPaths, space: Space, change: impl FnOnce(&mut Console
     next
 }
 
-/// Uses `theme` (from a preset or a saved theme when `based_on` is given).
-pub fn apply(app: &AppPaths, theme: ConsoleTheme, based_on: Option<&str>) -> ConsolePrefs {
-    update(app, |p| {
+/// Uses `theme` (from a preset or a saved theme when `based_on` is given) in
+/// one space, presented for it.
+pub fn apply_for(app: &AppPaths, space: Space, theme: ConsoleTheme, based_on: Option<&str>) -> ConsolePrefs {
+    let theme = present(theme.normalized(), space);
+    update_for(app, space, |p| {
         p.theme = theme;
         if let Some(b) = based_on {
             p.based_on = b.to_string();

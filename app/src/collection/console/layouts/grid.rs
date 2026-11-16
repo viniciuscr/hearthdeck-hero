@@ -446,7 +446,7 @@ impl CollectionView {
         // The focused game's name and facts over the grid, where it is in
         // the list at the right end.
         let title_line = game.as_ref().filter(|_| !panel).map(|g| {
-            let facts = look::theme().hero.facts.then(|| self.console_fact_line(g, Self::console_facts(g), 15.).flex_none());
+            let facts = look::theme().hero.facts.then(|| self.console_fact_line(g, self.console_facts(g), 15.).flex_none());
             let about = div()
                 .relative()
                 .flex()
@@ -588,7 +588,7 @@ impl CollectionView {
                     .children(art.map(|s| img(s).size_full().object_fit(ObjectFit::Cover))),
             )
             .child(name)
-            .when(theme.hero.facts, |d| d.child(self.console_fact_line(g, Self::console_facts(g), 14.).flex_wrap().gap(u(10.))))
+            .when(theme.hero.facts, |d| d.child(self.console_fact_line(g, self.console_facts(g), 14.).flex_wrap().gap(u(10.))))
             .child(
                 div()
                     .flex()

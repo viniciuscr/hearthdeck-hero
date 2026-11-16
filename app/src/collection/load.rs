@@ -157,7 +157,7 @@ impl CollectionView {
         self.watch_personal = heronite_watch::personal::read(&self.app_paths);
         self.watch_personal_ready = true;
         self.watch_collections = l.collections;
-        self.forget_personal_shelves();
+        self.forget_watch_shelves();
         let s = &l.lib.settings;
         let bg = &s.background;
         self.scrim = stage::Scrim { dim: bg.dimming.get() as f32 / 100., scrim: bg.scrim.get() as f32 / 100. };

@@ -130,15 +130,29 @@ pub(crate) fn played_time(g: &CollectionGame) -> Option<String> {
     (g.playtime_minutes > 0).then(|| heronite_data::collection::format_playtime_minutes(g.playtime_minutes))
 }
 
-/// "3 days ago · 12h 40m"; `long` says "Last played 3 days ago · 12h 40m".
-/// "Not played yet" for a game never played.
-pub(crate) fn played_line(g: &CollectionGame, long: bool) -> String {
+/// "3 days ago · 12h 40m"; `long` says "Last played 3 days ago · 12h 40m"
+/// ("Last watched" and "watched" in the Watch space). "Not played yet" (or
+/// "Not watched yet") for a title never started.
+pub(crate) fn played_line(space: crate::collection::Space, g: &CollectionGame, long: bool) -> String {
+    let watch = space == crate::collection::Space::Watch;
     let when = match g.last_played.as_deref().and_then(played_ago) {
+        Some(ago) if long && watch => tr!("Last watched {at}", at = ago.to_lowercase()),
         Some(ago) if long => tr!("Last played {when}", when = ago.to_lowercase()),
         Some(ago) => ago,
+        None if watch => tr!("Not watched yet").to_string(),
         None => tr!("Not played yet").to_string(),
     };
-    [Some(when), played_time(g)].into_iter().flatten().collect::<Vec<_>>().join(" \u{b7} ")
+    let time = played_time(g).map(|time| watched_or_played(space, &time));
+    let parts: Vec<String> = Some(when).into_iter().chain(time).collect();
+    parts.join(" \u{b7} ")
+}
+
+/// "{time} watched" in Watch, "{time} played" in Games.
+pub(crate) fn watched_or_played(space: crate::collection::Space, time: &str) -> String {
+    match space {
+        crate::collection::Space::Games => tr!("{time} played", time = time),
+        crate::collection::Space::Watch => tr!("{time} watched", time = time),
+    }
 }
 
 /// A card's surface: a soft dark panel with a thin edge.
@@ -189,11 +203,24 @@ pub(crate) fn pill_button(focused: bool, ic: Icon, label: Option<SharedString>, 
 }
 
 impl CollectionView {
-    /// "Steam · Installed · 3h 54m played".
-    pub(super) fn console_facts(g: &CollectionGame) -> String {
+    /// "Steam · Installed · 3h 54m played" for a game; "Stremio · 1999" for a
+    /// film or a series — where it streams from and when it is from.
+    pub(super) fn console_facts(&self, g: &CollectionGame) -> String {
         let mut facts = vec![g.source_label.to_string()];
-        facts.push(if g.installed { tr!("Installed").into() } else { tr!("Not installed").into() });
-        facts.extend(played_time(g).map(|time| tr!("{time} played", time = time)));
+        match self.space {
+            crate::collection::Space::Games => {
+                facts.push(if g.installed { tr!("Installed").into() } else { tr!("Not installed").into() });
+                facts.extend(played_time(g).map(|time| watched_or_played(crate::collection::Space::Games, &time)));
+            }
+            crate::collection::Space::Watch => {
+                // The year, or the range a series prints ("2011–2019").
+                let year = release_year(g)
+                    .map(|year| year.to_string())
+                    .or_else(|| g.details.release_date.as_deref().map(str::trim).filter(|date| !date.is_empty()).map(str::to_owned));
+                facts.extend(year);
+            }
+        }
+        facts.retain(|fact| !fact.trim().is_empty());
         facts.join(" \u{b7} ")
     }
 
@@ -244,8 +271,11 @@ impl CollectionView {
                     .text_color(theme::black_a(0.85))
                     .child(format!("{s:.0}"))
             }))
-            .children(played_time(g).map(|t| div().text_color(theme::text_muted()).child(t)))
-            .children(self.console_status_badge(g))
+            .children(played_time(g).map(|t| div().text_color(theme::text_muted()).child(watched_or_played(self.space, &t))))
+            .children(match self.space {
+                crate::collection::Space::Games => self.console_status_badge(g),
+                crate::collection::Space::Watch => None,
+            })
     }
 
     /// The first genres as outlined tags.
@@ -278,26 +308,41 @@ impl CollectionView {
     /// The panel of numbers at the right edge (`hero.stats`): time played,
     /// last played, size on disk, score, genre and status; only what is
     /// known, at most `max` lines. The caller puts it at the edge (it is
-    /// `absolute` with its own `right`).
+    /// `absolute` with its own `right`). Watch titles get their own lines:
+    /// watched time, when, the genre.
     pub(super) fn console_stats(&self, g: &CollectionGame, max: usize) -> AnyElement {
         let mut lines: Vec<(Icon, String, Option<Rgba>)> = Vec::new();
-        if let Some(time) = played_time(g) {
-            lines.push((Icon::AccessTime, time, None));
-        }
-        if let Some(ago) = g.last_played.as_deref().and_then(played_ago) {
-            lines.push((Icon::History, ago, None));
-        }
-        if let Some(size) = g.details.install_size.as_deref().filter(|s| g.installed && !s.is_empty() && *s != "0") {
-            lines.push((Icon::FaHardDrive, size.to_string(), None));
-        }
-        if let Some(s) = g.details.critic_score.filter(|s| *s > 0.) {
-            lines.push((Icon::Star, format!("{s:.0}"), Some(score_color(s))));
+        match self.space {
+            crate::collection::Space::Games => {
+                if let Some(time) = played_time(g) {
+                    lines.push((Icon::AccessTime, time, None));
+                }
+                if let Some(ago) = g.last_played.as_deref().and_then(played_ago) {
+                    lines.push((Icon::History, ago, None));
+                }
+                if let Some(size) = g.details.install_size.as_deref().filter(|s| g.installed && !s.is_empty() && *s != "0") {
+                    lines.push((Icon::FaHardDrive, size.to_string(), None));
+                }
+                if let Some(s) = g.details.critic_score.filter(|s| *s > 0.) {
+                    lines.push((Icon::Star, format!("{s:.0}"), Some(score_color(s))));
+                }
+            }
+            crate::collection::Space::Watch => {
+                if let Some(time) = played_time(g) {
+                    lines.push((Icon::AccessTime, watched_or_played(crate::collection::Space::Watch, &time), None));
+                }
+                if let Some(ago) = g.last_played.as_deref().and_then(played_ago) {
+                    lines.push((Icon::History, tr!("Last watched {at}", at = ago.to_lowercase()).to_string(), None));
+                }
+            }
         }
         if let Some(genre) = g.details.genres.first() {
             lines.push((Icon::Label, genre.clone(), None));
         }
-        if let Some((name, colour)) = self.console_status(g) {
-            lines.push((Icon::Flag, name, Some(colour)));
+        if self.space == crate::collection::Space::Games {
+            if let Some((name, colour)) = self.console_status(g) {
+                lines.push((Icon::Flag, name, Some(colour)));
+            }
         }
         lines.truncate(max);
         let mut fill = theme::console_sidebar();
@@ -353,9 +398,13 @@ impl CollectionView {
         } else {
             self.console_name(&g, size, window)
         };
-        let mut line = Self::console_facts(&g);
+        let mut line = self.console_facts(&g);
         if let Some(ago) = g.last_played.as_deref().and_then(played_ago).filter(|_| how.last_played) {
-            line = format!("{line} \u{b7} {}", tr!("Last played {when}", when = ago.to_lowercase()));
+            let when = match self.space {
+                crate::collection::Space::Games => tr!("Last played {when}", when = ago.to_lowercase()),
+                crate::collection::Space::Watch => tr!("Last watched {at}", at = ago.to_lowercase()),
+            };
+            line = format!("{line} \u{b7} {when}");
         }
         let facts = theme.hero.facts.then(|| match theme.hero.fact_style {
             FactStyle::Line => self.console_fact_line(&g, line, 16.),

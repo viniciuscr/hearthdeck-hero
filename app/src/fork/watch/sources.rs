@@ -18,11 +18,6 @@ pub fn kind(game: &CollectionGame) -> &str {
     game.game.extra.as_ref().and_then(|extra| extra.get("stremioType")).and_then(serde_json::Value::as_str).unwrap_or("movie")
 }
 
-/// Whether the provider put the item in its top catalog.
-pub fn top(game: &CollectionGame) -> bool {
-    game.game.extra.as_ref().and_then(|extra| extra.get("stremioTop")).and_then(serde_json::Value::as_bool).unwrap_or(false)
-}
-
 /// The rail that brought the title in (`extra.watchCatalog`): a catalogue page's
 /// feed key, or `collection:<id>` for one of the rails the person turned on.
 pub fn rail_marker(game: &CollectionGame) -> Option<&str> {

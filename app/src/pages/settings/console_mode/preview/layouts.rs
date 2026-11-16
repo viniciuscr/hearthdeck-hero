@@ -9,6 +9,8 @@ use heronite_data::console_theme::{
 };
 use heronite_i18n::tr;
 
+use crate::collection::Space;
+
 use super::tile::Dress;
 use super::{Pic, CANVAS_H};
 use crate::console::kit::spaced_caps;
@@ -84,10 +86,11 @@ impl Pic<'_, '_> {
         col
     }
 
-    /// The title of shelf `n` of the theme (the ones switched on).
+    /// The title of shelf `n` of the theme (the ones switched on). A desktop
+    /// picture draws the Games theme: Watch's own previews are the console.
     fn shelf_heading(&self, n: usize) -> Div {
         let spec = self.t.shelves.iter().filter(|s| s.on).nth(n);
-        let name = spec.map(|s| theme_rows::shelf_title(s, |k| k.to_string())).unwrap_or_default();
+        let name = spec.map(|s| theme_rows::shelf_title(Space::Games, s, |k: &str| k.to_string())).unwrap_or_default();
         // Spaced capitals are lighter and a little smaller, as in the console.
         if self.t.interface.headings == Headings::Spaced {
             self.label(spaced_caps(&name), 8.5 * 0.95, self.text).font_weight(W_REGULAR)

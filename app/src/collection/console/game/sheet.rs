@@ -165,7 +165,7 @@ impl CollectionView {
                     .gap(u(6.))
                     .min_w_0()
                     .child(name)
-                    .child(div().text_size(u(13.5)).text_color(theme::text_muted()).child(Self::console_facts(&g)))
+                    .child(div().text_size(u(13.5)).text_color(theme::text_muted()).child(self.console_facts(&g)))
                     .children(self.console_status_badge(&g).map(|b| div().flex().child(b))),
             );
         let body = div().flex().flex_col().size_full().child(head).child(div().flex_1().min_h_0().px(u(12.)).py(u(6.)).child(list));

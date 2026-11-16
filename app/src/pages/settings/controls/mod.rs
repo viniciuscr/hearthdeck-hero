@@ -180,7 +180,8 @@ fn change_console_theme(
     cx: &mut Context<SettingsPage>,
     change: impl FnOnce(&mut heronite_data::console_theme::ConsoleTheme),
 ) {
-    let prefs = crate::console::themes::update(&d.ctx.app, |p| change(&mut p.theme));
+    let space = crate::console::theme_rows::edited_space();
+    let prefs = crate::console::themes::update_for(&d.ctx.app, space, |p| change(&mut p.theme));
     if let Some(s) = d.console_mode.as_mut() {
         s.theme.prefs = prefs;
         // Its Undo holds whole themes from before this change.
