@@ -47,6 +47,18 @@ the rules that apply while building it.
 > anything, so runtime and the IMDb score stay on the film page, which already
 > loads `TitleDetails`.
 >
+> **Backups carry Watch** (2026-11-16): a backup's rule is *everything that is not
+> left out is in*, so Watch's files were already inside `Part::Settings` — the
+> history (`movies.json`), the session log (`watch-sessions.json`), the shelves
+> (`watch-personal.json`), the settings and the Watch console theme. That is now
+> pinned by name in the catalog's tests instead of riding the default. The one
+> change is the credentials: `stremio-auth.json`, `tmdb-auth.json` (and the next
+> provider's) are **`Part::Logins`**, so a backup can exclude them and the cloud
+> sync — which uploads only `Collection` and `Settings` — never sends an account
+> key anywhere. A restore without them keeps every record: progress, sessions and
+> shelf snapshots are keyed by provider and id, so they come back the moment the
+> account is linked again.
+>
 > **Watched is local, per episode** (2026-11-16): a title's record
 > (`movies.json`) keeps **one state per episode finish** — `episodes: { videoId →
 > { positionMs, durationMs, updatedAt, finished } }` — beside the resume pointer

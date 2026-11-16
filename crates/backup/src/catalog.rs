@@ -184,6 +184,15 @@ pub fn classify_config(rel: &str) -> Class {
     if rel == "rclone.conf" {
         return Class::In(Part::Logins);
     }
+    // Watch's provider credentials (`stremio-auth.json`, `tmdb-auth.json`, and
+    // whatever provider comes next): account state, not settings. As a login it
+    // can be excluded from a backup, and the cloud sync never uploads logins.
+    // Everything else of Watch — `movies.json`, `watch-sessions.json`,
+    // `watch-personal.json`, `watch-settings.json`, `console-watch.json` — stays
+    // `Settings`, so a restore keeps the person's history and shelves.
+    if rel.ends_with("-auth.json") {
+        return Class::In(Part::Logins);
+    }
     Class::In(Part::Settings)
 }
 
@@ -309,6 +318,14 @@ mod tests {
         assert_eq!(classify_config("epic-move.json"), Class::Out(Left::Temp));
         assert_eq!(classify_config(crate::restore::PENDING_FILE), Class::Out(Left::Temp));
         assert_eq!(classify_config("rclone.conf"), Class::In(Part::Logins));
+        // Watch: the history, shelves and settings are Settings; the provider keys
+        // are logins, which a backup may leave out and the cloud never uploads.
+        for rel in ["movies.json", "watch-sessions.json", "watch-personal.json", "watch-settings.json", "console-watch.json"] {
+            assert_eq!(classify_config(rel), Class::In(Part::Settings), "{rel}");
+        }
+        for rel in ["stremio-auth.json", "tmdb-auth.json"] {
+            assert_eq!(classify_config(rel), Class::In(Part::Logins), "{rel}");
+        }
         assert_eq!(classify_data("local_library/sync-before/local_library-sessions.json"), Class::Out(Left::Caches));
         assert_eq!(classify_data("local_library/sync-ledger.json"), Class::In(Part::Collection));
     }
