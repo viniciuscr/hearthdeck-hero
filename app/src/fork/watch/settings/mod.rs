@@ -261,51 +261,6 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
         .collect();
     let sources = card(source_rows);
 
-    let keyed = d.watch.tmdb_key;
-    let key_buttons = {
-        let mut buttons = div().flex().items_center().gap(px(8.));
-        buttons = buttons.child(action_button(
-            "watch-tmdb-key-paste",
-            ButtonKind::Primary,
-            tr!("Paste the key"),
-            true,
-            cx.listener(|d, _, _, cx| paste_tmdb_key(d, cx)),
-        ));
-        buttons = buttons.child(action_button(
-            "watch-tmdb-key",
-            ButtonKind::Glass,
-            tr!("Type it instead"),
-            true,
-            cx.listener(|d, _, window, cx| set_tmdb_key(d, window, cx)),
-        ));
-        if keyed {
-            buttons = buttons.child(action_button(
-                "watch-tmdb-key-remove",
-                ButtonKind::Ghost,
-                tr!("Remove"),
-                true,
-                cx.listener(|d, _, _, cx| clear_tmdb_key(d, cx)),
-            ));
-        }
-        buttons
-    };
-    let key = card_box().py(px(12.)).child(
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.))
-                    .child(div().text_size(px(14.)).child(tr!("TMDB API key")))
-                    .child(meta_text(tr!("Needed to browse TMDB's catalogs. Copy it on another device and paste it here: no typing."))),
-            )
-            .child(key_buttons),
-    );
-
     // The collection rails: the source order is the rail order, and the ids are
     // the sources' own, so a settings file stays readable. The list is read with
     // the page (a source's declaration costs a transport), not per frame.
@@ -322,28 +277,33 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
         );
     }
 
+    // One entry point for TMDB: connect (the key is asked for only when there is
+    // none), approve in the browser, or sign out. The key is not a separate thing
+    // to manage here.
+    let browse = tr!("Browsing uses this account's key. Signing out keeps the key, so the catalogs keep working.");
+    let (title, desc) = match (&d.watch.tmdb_username, &d.watch.tmdb_pending) {
+        (Some(name), _) if name.is_empty() => (tr!("Signed in to TMDB").to_string(), browse),
+        (Some(name), _) => (tr!("Signed in as {name}", name = name.clone()).to_string(), browse),
+        (None, Some(_)) => (
+            tr!("Approve the sign-in in your browser, then come back.").to_string(),
+            tr!("TMDB opened in your browser: there is nothing to type here."),
+        ),
+        (None, None) if d.watch.tmdb_key => {
+            (tr!("TMDB").to_string(), tr!("The key is set. Sign in to let your watchlist and favourites follow the account."))
+        }
+        (None, None) => (
+            tr!("TMDB").to_string(),
+            tr!("Browsing needs an API key from your TMDB account: Connect asks for it once, then opens TMDB to approve the sign-in."),
+        ),
+    };
     let account = card_box().py(px(12.)).child(
         div()
             .flex()
             .items_center()
             .justify_between()
             .gap(px(12.))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.))
-                    .child(div().text_size(px(14.)).child(match (&d.watch.tmdb_username, &d.watch.tmdb_pending) {
-                        (Some(name), _) if name.is_empty() => tr!("Signed in to TMDB").to_string(),
-                        (Some(name), _) => tr!("Signed in as {name}", name = name.clone()).to_string(),
-                        (None, Some(_)) => tr!("Approve the sign-in in your browser, then come back.").to_string(),
-                        (None, None) => tr!("TMDB account").to_string(),
-                    }))
-                    .child(meta_text(tr!(
-                        "A session names your account: watchlist, favourites and rated lists. The key above is what browses."
-                    ))),
-            )
-            .child(account_buttons(d, cx)),
+            .child(div().flex().flex_col().gap(px(3.)).child(div().text_size(px(14.)).child(title)).child(meta_text(desc)))
+            .child(tmdb_buttons(d, cx)),
     );
 
     let mut column = div()
@@ -355,7 +315,6 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
             "What the Movies and Series tabs may browse. A catalog decides what is listed; it never changes what plays."
         ))))
         .child(sources)
-        .child(key)
         .child(account);
     if !collections.is_empty() {
         column = column
@@ -369,8 +328,9 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
     column.into_any_element()
 }
 
-/// The account card's buttons: sign in, finish a pending approval, or sign out.
-fn account_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
+/// The card's buttons: connect (the key is asked for only if there is none),
+/// finish a pending approval, or sign out — plus forgetting TMDB entirely.
+fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
     let mut buttons = div().flex().items_center().gap(px(8.));
     if d.watch.tmdb_username.is_some() {
         buttons = buttons.child(action_button(
@@ -402,14 +362,38 @@ fn account_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
         ));
     } else {
         buttons = buttons.child(action_button(
-            "watch-tmdb-sign-in",
+            "watch-tmdb-connect",
             ButtonKind::Primary,
-            tr!("Sign in with TMDB"),
-            d.watch.tmdb_key,
-            cx.listener(|d, _, _, cx| start_tmdb_sign_in(d, cx)),
+            tr!("Connect TMDB"),
+            true,
+            cx.listener(|d, _, window, cx| connect_tmdb(d, window, cx)),
+        ));
+    }
+    if d.watch.tmdb_key {
+        buttons = buttons.child(action_button(
+            "watch-tmdb-forget",
+            ButtonKind::Ghost,
+            tr!("Forget TMDB"),
+            true,
+            cx.listener(|d, _, _, cx| clear_tmdb_key(d, cx)),
         ));
     }
     buttons
+}
+
+/// The one way in: ask for the key when there is none (the keyboard, or the
+/// on-screen one in console mode), then send the person to TMDB's approval page.
+fn connect_tmdb(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<SettingsPage>) {
+    d.watch.notice = None;
+    if d.watch.tmdb_key {
+        start_tmdb_sign_in(d, cx);
+        return;
+    }
+    layers::open_osk(d.layer_mut(), tr!("TMDB API key"), "", window, cx, |d, text, _, cx| {
+        if save_tmdb_key(d, &text, cx) {
+            start_tmdb_sign_in(d, cx);
+        }
+    });
 }
 
 /// Opens TMDB's approval page for `token`; a browser that will not open is a
@@ -537,34 +521,13 @@ fn set_catalog_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Con
     cx.notify();
 }
 
-/// The keyboard, for a key typed by hand. It opens empty: the stored key is a
-/// secret and this screen is a television.
-fn set_tmdb_key(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<SettingsPage>) {
-    layers::open_osk(d.layer_mut(), tr!("TMDB API key"), "", window, cx, |d, text, _, cx| {
-        save_tmdb_key(d, &text, cx);
-    });
-}
-
-/// The key from the clipboard: no typing, which is the only workable way with a
-/// gamepad. A person copies the token on their phone or computer and pastes it
-/// here.
-fn paste_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
-    let text = cx.read_from_clipboard().and_then(|item| item.text()).map(|text| text.to_owned()).unwrap_or_default();
-    if text.trim().is_empty() {
-        d.watch.notice = Some(tr!("The clipboard has no text: copy the key first, then paste it here.").into());
-        cx.notify();
-        return;
-    }
-    save_tmdb_key(d, &text, cx);
-}
-
-/// Stores a pasted or typed key and says what happened.
-fn save_tmdb_key(d: &mut SettingsPage, text: &str, cx: &mut Context<SettingsPage>) {
+/// Stores the key and says what happened; whether it took it.
+fn save_tmdb_key(d: &mut SettingsPage, text: &str, cx: &mut Context<SettingsPage>) -> bool {
     let key = text.trim();
     if key.is_empty() {
         d.watch.notice = Some(tr!("That key is empty.").into());
         cx.notify();
-        return;
+        return false;
     }
     match heronite_watch::store::write_tmdb_key(&d.ctx.app, key) {
         Ok(()) => {
@@ -576,13 +539,14 @@ fn save_tmdb_key(d: &mut SettingsPage, text: &str, cx: &mut Context<SettingsPage
             // The collection rails are resolved with the library: the ones that
             // were waiting for this key are drawn from now on.
             cx.emit(crate::pages::PageEvent::LibraryChanged);
+            true
         }
         Err(error) => {
             log::warn!("saving the TMDB key: {error:#}");
             d.watch.notice = Some(tr!("The TMDB API key could not be saved.").into());
+            false
         }
     }
-    cx.notify();
 }
 
 fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
@@ -590,6 +554,8 @@ fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         log::warn!("clearing the TMDB key: {error:#}");
     }
     d.watch.tmdb_key = false;
+    d.watch.tmdb_username = None;
+    d.watch.tmdb_pending = None;
     d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
     crate::collection::watch_catalog::catalogs_changed();
     // What that key was resolving (the collection rails, TMDB's catalogs) is no
@@ -729,29 +695,25 @@ pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
             on,
         ));
     }
-    let keyed = d.watch.tmdb_key;
-    rows.push(Row::info("watch-tmdb-key", tr!("TMDB API key"), if keyed { tr!("Set") } else { tr!("Not set") }));
-    rows.push(Row::action("watch-tmdb-key-paste", tr!("Paste the key from the clipboard")));
-    rows.push(Row::action("watch-tmdb-key-set", tr!("Type it instead")));
-    if keyed {
-        rows.push(Row::action("watch-tmdb-key-remove", tr!("Remove the TMDB API key")));
-    }
-    // The account a session names: nothing browsed here needs it, and it is
-    // never asked for as a password.
+    // One entry point: connect (the key is asked for only when there is none),
+    // approve in the browser, or sign out. The key is not managed here.
     if let Some(name) = &d.watch.tmdb_username {
         let who = if name.is_empty() {
             tr!("Signed in to TMDB").to_string()
         } else {
             tr!("Signed in as {name}", name = name.clone()).to_string()
         };
-        rows.push(Row::info("watch-tmdb-account", tr!("TMDB account"), who));
+        rows.push(Row::info("watch-tmdb-account", tr!("TMDB"), who));
         rows.push(Row::action("watch-tmdb-sign-out", tr!("Sign out")));
     } else if d.watch.tmdb_pending.is_some() {
-        rows.push(Row::info("watch-tmdb-account", tr!("TMDB account"), tr!("Waiting for the approval")));
+        rows.push(Row::info("watch-tmdb-account", tr!("TMDB"), tr!("Waiting for the approval")));
         rows.push(Row::action("watch-tmdb-again", tr!("Open the page again")));
         rows.push(Row::action("watch-tmdb-approved", tr!("I approved it")));
     } else {
-        rows.push(Row::action("watch-tmdb-sign-in", tr!("Sign in with TMDB")).enabled(keyed));
+        rows.push(Row::action("watch-tmdb-connect", tr!("Connect TMDB")));
+    }
+    if d.watch.tmdb_key {
+        rows.push(Row::action("watch-tmdb-forget", tr!("Forget TMDB")));
     }
     // The collection rails: one row each, in the order they are drawn.
     if !d.watch.collections.is_empty() {
@@ -772,11 +734,8 @@ pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
 pub(crate) fn catalog_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut Window, cx: &mut Context<SettingsPage>) {
     match outcome {
         Outcome::Activate(id) => match id.as_ref() {
-            // A copied key needs one press: no typing on a couch.
-            "watch-tmdb-key-paste" => paste_tmdb_key(d, cx),
-            "watch-tmdb-key-set" => set_tmdb_key(d, window, cx),
-            "watch-tmdb-key-remove" => clear_tmdb_key(d, cx),
-            "watch-tmdb-sign-in" => start_tmdb_sign_in(d, cx),
+            "watch-tmdb-connect" => connect_tmdb(d, window, cx),
+            "watch-tmdb-forget" => clear_tmdb_key(d, cx),
             "watch-tmdb-again" => {
                 if let Some(token) = d.watch.tmdb_pending.clone() {
                     open_approval(d, &token);

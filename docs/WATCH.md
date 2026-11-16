@@ -55,11 +55,16 @@ the rules that apply while building it.
 > Signing in to TMDB exists as of this revision, and **asks for no password**.
 > The API key stays the application's credential — every call, the sign-in
 > included, is authenticated with it — and a **session** is the person's:
-> Settings → Watch → Catalogs asks TMDB for a request token, opens
+> Settings → Watch → Catalogs has **one** entry point, "Connect TMDB": it asks
+> for the API key only when there is none (the keyboard, or the on-screen one in
+> console mode) and then asks TMDB for a request token, opens
 > `themoviedb.org/authenticate/{token}` in the person's own browser (through
 > `open_url`, so luakit, Firefox or whatever they use), and exchanges the
 > approved token for a session id, kept beside the key in the same `tmdb`
-> credential (`sessionId`, `username`). A 401 on the exchange means "not
+> credential (`sessionId`, `username`). There are no separate "paste / type /
+> remove the key" rows any more: once connected, the section shows
+> "Signed in as …", "Sign out" (which keeps the key) and "Forget TMDB" (which
+> clears both). A 401 on the exchange means "not
 > approved yet", not a bad key: the key was accepted a moment earlier. Nothing
 > consumes the session yet — TMDB's watchlist, favourites and rated lists are
 > the next slice (`docs/WATCH-COLLECTIONS.md` §9) — and signing out keeps the
