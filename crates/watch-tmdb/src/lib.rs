@@ -29,11 +29,15 @@ use url::Url;
 use heronite_watch_core::catalog::{
     CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
 };
+use heronite_watch_core::http::http_status;
 use heronite_watch_core::provider::{Credentials, Secret};
 use heronite_watch_core::types::MovieItem;
 
 /// TMDB's API root.
 pub const API: &str = "https://api.themoviedb.org/3";
+/// The v4 root: TMDB documents some endpoints only under its v4 reference, and
+/// answers them under either root when the key allows it.
+pub const API_V4: &str = "https://api.themoviedb.org/4";
 /// Where TMDB keeps its images; a width follows.
 pub const IMAGE: &str = "https://image.tmdb.org/t/p";
 
@@ -173,17 +177,43 @@ impl Tmdb {
             bail!("TMDB did not say which account the session belongs to: sign in again.");
         }
         let page = request.skip / PAGE + 1;
-        let mut url = Url::parse(&format!("{API}/account/{account}/{kind}/recommendations"))?;
-        let number = page.to_string();
-        url.query_pairs_mut().extend_pairs([
-            ("api_key", key),
-            ("session_id", session.id.as_str()),
-            ("page", number.as_str()),
-            ("language", "en-US"),
-        ]);
-        let body = ctx.http.get(&url)?;
-        let found: Discover = serde_json::from_slice(&body).context("TMDB recommendations")?;
+        let found = self.recommendations_page(ctx, key, &session.id, account, kind, page)?;
         self.page_of(ctx, key, kind, found, page)
+    }
+
+    /// The account's recommendations, asked at the v3 root and — when TMDB does
+    /// not know the endpoint there — at the v4 one, which is where its reference
+    /// documents it. The path names the account, never the key, so it is safe to
+    /// put in an error: a 404 here is otherwise a silent puzzle.
+    fn recommendations_page(
+        &self,
+        ctx: &CatalogCtx<'_>,
+        key: &str,
+        session: &str,
+        account: u64,
+        kind: &str,
+        page: u32,
+    ) -> Result<Discover> {
+        let mut last: Option<anyhow::Error> = None;
+        for root in [API, API_V4] {
+            let mut url = Url::parse(&format!("{root}/account/{account}/{kind}/recommendations"))?;
+            let number = page.to_string();
+            url.query_pairs_mut().extend_pairs([
+                ("api_key", key),
+                ("session_id", session),
+                ("page", number.as_str()),
+                ("language", "en-US"),
+            ]);
+            match ctx.http.get(&url) {
+                Ok(body) => return serde_json::from_slice(&body).context("TMDB recommendations"),
+                // Only "not here" moves on: any other answer is the real one.
+                Err(error) if http_status(&error) == Some(404) => last = Some(error),
+                Err(error) => return Err(error).context("TMDB recommendations"),
+            }
+        }
+        Err(last.unwrap_or_else(|| anyhow::anyhow!("TMDB recommendations: no answer"))).with_context(|| {
+            format!("TMDB recommendations for account {account}: /account/{account}/{kind}/recommendations, at the v3 and v4 roots")
+        })
     }
 
     /// The IMDb id of every title on a page: the cache answers most of them, and
@@ -664,6 +694,59 @@ mod tests {
         let asked = seen.iter().find(|url| url.contains("/account/42/movie/recommendations")).expect("the account endpoint");
         assert!(asked.contains("session_id=sess456"), "{asked}");
         assert!(!page.more, "one page is all TMDB recommends here");
+    }
+
+    #[test]
+    fn an_account_rail_falls_back_to_the_v4_root_when_v3_does_not_know_it() {
+        use heronite_watch_core::http::HttpStatus;
+        struct OnlyAtV4 {
+            seen: Mutex<Vec<String>>,
+        }
+        impl Transport for OnlyAtV4 {
+            fn get(&self, url: &Url) -> Result<Vec<u8>> {
+                self.seen.lock().unwrap().push(url.as_str().to_owned());
+                if url.path().starts_with("/3/account/") {
+                    return Err(anyhow::Error::new(HttpStatus::new(url, 404)));
+                }
+                if url.path().contains("external_ids") {
+                    return Ok(br#"{"id":605,"imdb_id":"tt0068646"}"#.to_vec());
+                }
+                Ok(br#"{"page":1,"total_pages":1,"results":[{"id":605,"title":"The Godfather"}]}"#.to_vec())
+            }
+            fn post_json(&self, _: &Url, _: &serde_json::Value) -> Result<Vec<u8>> {
+                Ok(b"{}".to_vec())
+            }
+        }
+        let http = OnlyAtV4 { seen: Mutex::new(Vec::new()) };
+        let credentials = SignedIn;
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
+        let page = Tmdb::new().catalog(&ctx, &CatalogRequest { account: true, ..CatalogRequest::first("movie") }).unwrap();
+        assert_eq!(page.items.len(), 1, "the v4 root answered where v3 had nothing");
+        let seen = http.seen.lock().unwrap().clone();
+        assert!(seen[0].contains("/3/account/42/movie/recommendations"), "{seen:?}");
+        assert!(seen.iter().any(|url| url.contains("/4/account/42/movie/recommendations")), "the v4 root was tried: {seen:?}");
+    }
+
+    #[test]
+    fn a_recommendations_failure_names_the_account_and_the_path_never_the_key() {
+        use heronite_watch_core::http::HttpStatus;
+        struct Down;
+        impl Transport for Down {
+            fn get(&self, url: &Url) -> Result<Vec<u8>> {
+                Err(anyhow::Error::new(HttpStatus::new(url, 404)))
+            }
+            fn post_json(&self, _: &Url, _: &serde_json::Value) -> Result<Vec<u8>> {
+                Ok(b"{}".to_vec())
+            }
+        }
+        let http = Down;
+        let credentials = SignedIn;
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
+        let error = Tmdb::new().catalog(&ctx, &CatalogRequest { account: true, ..CatalogRequest::first("movie") }).unwrap_err();
+        let text = format!("{error:#}");
+        assert!(text.contains("account 42"), "the account id is not a secret and names the call: {text}");
+        assert!(text.contains("/account/42/movie/recommendations"), "{text}");
+        assert!(!text.contains("test-key") && !text.contains("sess456"), "no secret in the message: {text}");
     }
 
     #[test]
