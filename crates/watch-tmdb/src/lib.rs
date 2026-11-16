@@ -107,6 +107,11 @@ impl WatchCatalogSource for Tmdb {
         let Some(kind) = tmdb_kind(&request.kind) else {
             return Ok(CatalogPage::default());
         };
+        // The account's own suggestions: the same shape of answer as `discover`,
+        // asked of the person instead of the catalogue.
+        if request.account {
+            return self.recommendations(ctx, request, &key, kind);
+        }
         let page = request.skip / PAGE + 1;
         let search = request.search.as_deref().map(str::trim).filter(|search| !search.is_empty());
         let mut url = Url::parse(&format!("{API}/{}/{kind}", if search.is_some() { "search" } else { "discover" }))?;
@@ -133,10 +138,17 @@ impl WatchCatalogSource for Tmdb {
         url.query_pairs_mut().extend_pairs(query.iter().map(|(key, value)| (key.as_str(), value.as_str())));
         let body = ctx.http.get(&url)?;
         let found: Discover = serde_json::from_slice(&body).context("TMDB discover")?;
-        // TMDB ids mean nothing to our library, players or progress: an item
-        // without an IMDb id could not be played, so it is not shown. The ids
-        // are kept between runs, and the misses are fetched a few at a time.
-        let ids = self.imdb_ids(ctx, &key, kind, &found.results);
+        self.page_of(ctx, &key, kind, found, page)
+    }
+}
+
+impl Tmdb {
+    /// A `discover`-shaped answer as a page of Watch items. TMDB ids mean nothing
+    /// to our library, players or progress: an item without an IMDb id could not
+    /// be played, so it is not shown. The ids are kept between runs, and the
+    /// misses are fetched a few at a time.
+    fn page_of(&self, ctx: &CatalogCtx<'_>, key: &str, kind: &str, found: Discover, page: u32) -> Result<CatalogPage> {
+        let ids = self.imdb_ids(ctx, key, kind, &found.results);
         let mut items = Vec::new();
         for result in &found.results {
             if let Some(Some(imdb)) = ids.get(&result.id) {
@@ -149,9 +161,31 @@ impl WatchCatalogSource for Tmdb {
         let consumed = found.results.len() as u32;
         Ok(CatalogPage { items, more, consumed })
     }
-}
 
-impl Tmdb {
+    /// `/account/{id}/{kind}/recommendations`: what the person's own TMDB account
+    /// suggests. It takes the session they approved (Settings → Watch →
+    /// Catalogs), and the account id, which a session kept before the id was
+    /// known asks for once.
+    fn recommendations(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest, key: &str, kind: &str) -> Result<CatalogPage> {
+        let session = account_session(ctx.credentials)?;
+        let account = if session.account_id == 0 { auth::account(ctx.http, key, &session.id)?.id } else { session.account_id };
+        if account == 0 {
+            bail!("TMDB did not say which account the session belongs to: sign in again.");
+        }
+        let page = request.skip / PAGE + 1;
+        let mut url = Url::parse(&format!("{API}/account/{account}/{kind}/recommendations"))?;
+        let number = page.to_string();
+        url.query_pairs_mut().extend_pairs([
+            ("api_key", key),
+            ("session_id", session.id.as_str()),
+            ("page", number.as_str()),
+            ("language", "en-US"),
+        ]);
+        let body = ctx.http.get(&url)?;
+        let found: Discover = serde_json::from_slice(&body).context("TMDB recommendations")?;
+        self.page_of(ctx, key, kind, found, page)
+    }
+
     /// The IMDb id of every title on a page: the cache answers most of them, and
     /// the misses go out four at a time instead of twenty in a row.
     fn imdb_ids(&self, ctx: &CatalogCtx<'_>, key: &str, kind: &str, results: &[Found]) -> HashMap<u64, Option<String>> {
@@ -276,6 +310,15 @@ pub(crate) fn api_key(credentials: &dyn Credentials) -> Result<String> {
         bail!("TMDB's API key is empty: Settings → Watch → Catalogs.");
     }
     Ok(key)
+}
+
+/// The TMDB session in the credential store, or the words that say how to get
+/// one. Only the account endpoints need it; a catalogue answers with the key.
+fn account_session(credentials: &dyn Credentials) -> Result<auth::Session> {
+    let Some(secret) = credentials.get("tmdb")? else {
+        bail!("TMDB needs an API key: Settings → Watch → Catalogs.");
+    };
+    auth::session_of(&secret).with_context(|| "TMDB needs you signed in: Settings → Watch → Catalogs, Connect TMDB.")
 }
 
 /// The IMDb id TMDB holds for one of its titles, when it holds one, kept in the
@@ -434,6 +477,13 @@ mod tests {
             );
             answers.insert("movie/603/external_ids", r#"{"id":603,"imdb_id":"tt0133093"}"#);
             answers.insert("movie/604/external_ids", r#"{"id":604,"imdb_id":null}"#);
+            answers.insert("movie/605/external_ids", r#"{"id":605,"imdb_id":"tt0068646"}"#);
+            // `Fake` keys by the path without the `/3` root.
+            answers.insert("account", r#"{"id":42,"username":"cinephile"}"#);
+            answers.insert(
+                "account/42/movie/recommendations",
+                r#"{"page":1,"total_pages":1,"results":[{"id":605,"title":"The Godfather","release_date":"1972-03-14"}]}"#,
+            );
             Self { answers, seen: Mutex::new(Vec::new()) }
         }
     }
@@ -447,6 +497,22 @@ mod tests {
         }
         fn post_json(&self, _: &Url, _: &serde_json::Value) -> Result<Vec<u8>> {
             Ok(b"{}".to_vec())
+        }
+    }
+
+    /// A key and the session a person approved, whose account id is already known.
+    struct SignedIn;
+
+    impl Credentials for SignedIn {
+        fn get(&self, provider: &str) -> Result<Option<Secret>> {
+            let session = auth::Session { id: "sess456".into(), username: "cinephile".into(), account_id: 42 };
+            Ok((provider == "tmdb").then(|| auth::secret_with_session("test-key", &session)))
+        }
+        fn set(&self, _: &str, _: &Secret) -> Result<()> {
+            Ok(())
+        }
+        fn clear(&self, _: &str) -> Result<()> {
+            Ok(())
         }
     }
 
@@ -584,6 +650,61 @@ mod tests {
     }
 
     #[test]
+    fn an_account_rail_asks_the_accounts_own_recommendations() {
+        let http = Fake::new();
+        let credentials = SignedIn;
+        let cache = Cache::default();
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: Some(&cache) };
+        let request = CatalogRequest { account: true, ..CatalogRequest::first("movie") };
+        let page = Tmdb::new().catalog(&ctx, &request).unwrap();
+        assert_eq!(page.items.len(), 1, "the one with an IMDb id");
+        assert_eq!(page.items[0].id, "tt0068646");
+        assert_eq!(page.items[0].name, "The Godfather");
+        let seen = http.seen.lock().unwrap().clone();
+        let asked = seen.iter().find(|url| url.contains("/account/42/movie/recommendations")).expect("the account endpoint");
+        assert!(asked.contains("session_id=sess456"), "{asked}");
+        assert!(!page.more, "one page is all TMDB recommends here");
+    }
+
+    #[test]
+    fn an_account_rail_without_a_session_says_to_sign_in() {
+        let http = Fake::new();
+        let credentials = Keyed(Some("test-key"));
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
+        let request = CatalogRequest { account: true, ..CatalogRequest::first("movie") };
+        let error = Tmdb::new().catalog(&ctx, &request).unwrap_err();
+        assert!(format!("{error:#}").contains("signed in"), "{error:#}");
+    }
+
+    #[test]
+    fn a_session_without_an_account_id_asks_for_it_once() {
+        let http = Fake::new();
+        // The session a build kept before the account id was stored.
+        struct OldSession;
+        impl Credentials for OldSession {
+            fn get(&self, provider: &str) -> Result<Option<Secret>> {
+                let session = auth::Session { id: "sess456".into(), username: "cinephile".into(), account_id: 0 };
+                Ok((provider == "tmdb").then(|| auth::secret_with_session("test-key", &session)))
+            }
+            fn set(&self, _: &str, _: &Secret) -> Result<()> {
+                Ok(())
+            }
+            fn clear(&self, _: &str) -> Result<()> {
+                Ok(())
+            }
+        }
+        let credentials = OldSession;
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
+        let page = Tmdb::new().catalog(&ctx, &CatalogRequest { account: true, ..CatalogRequest::first("movie") }).unwrap();
+        assert_eq!(page.items.len(), 1);
+        let seen = http.seen.lock().unwrap().clone();
+        assert!(
+            seen.iter().any(|url| url.ends_with("/account?api_key=test-key&session_id=sess456") || url.contains("/3/account?")),
+            "{seen:?}"
+        );
+    }
+
+    #[test]
     fn without_a_key_tmdb_says_where_to_put_it() {
         let http = Fake::new();
         let credentials = Keyed(None);
@@ -606,11 +727,26 @@ impl heronite_watch_core::collections::WatchCollectionSource for TmdbCollections
 
     fn collections(
         &self,
-        _ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
+        ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
     ) -> Result<Vec<heronite_watch_core::collections::CollectionDescriptor>> {
         use heronite_watch_core::catalog::{CatalogRequest, CatalogSort};
         use heronite_watch_core::collections::CollectionDescriptor;
         let mut rails = Vec::new();
+        // The account's own suggestions come first, and exist only while the
+        // person is signed in: without a session there is no account to ask, and
+        // a rail nobody can answer would be a dead switch. Signing in is a
+        // credential read, not a request, so declaring here costs nothing.
+        let signed_in = ctx.credentials.get("tmdb")?.as_ref().and_then(auth::session_of).is_some();
+        if signed_in {
+            for (kind, label) in [("movie", "Films"), ("series", "Series")] {
+                rails.push(CollectionDescriptor {
+                    id: format!("tmdb:recommended:{kind}"),
+                    name: format!("{label} · Recommended for you"),
+                    kind: kind.to_owned(),
+                    rule: CatalogRequest { account: true, ..CatalogRequest::first(kind) },
+                });
+            }
+        }
         for (kind, label) in [("movie", "Films"), ("series", "Series")] {
             for (id, name, sort) in [("top-rated", "Top rated", CatalogSort::Rating), ("popular", "Popular", CatalogSort::Popular)] {
                 rails.push(CollectionDescriptor {
@@ -644,6 +780,22 @@ mod collection_tests {
         }
     }
 
+    /// A key and the session a person approved, whose account id is already known.
+    struct SignedIn;
+
+    impl Credentials for SignedIn {
+        fn get(&self, provider: &str) -> Result<Option<Secret>> {
+            let session = auth::Session { id: "sess456".into(), username: "cinephile".into(), account_id: 42 };
+            Ok((provider == "tmdb").then(|| auth::secret_with_session("test-key", &session)))
+        }
+        fn set(&self, _: &str, _: &Secret) -> Result<()> {
+            Ok(())
+        }
+        fn clear(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
     struct NoKey;
 
     impl Credentials for NoKey {
@@ -656,6 +808,19 @@ mod collection_tests {
         fn clear(&self, _: &str) -> Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn a_signed_in_tmdb_offers_the_accounts_recommendations_first() {
+        let (http, credentials) = (Nothing, SignedIn);
+        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
+        let rails = TmdbCollections.collections(&ctx).unwrap();
+        let ids: Vec<&str> = rails.iter().map(|rail| rail.id.as_str()).collect();
+        assert_eq!(ids[0], "tmdb:recommended:movie");
+        assert_eq!(ids[1], "tmdb:recommended:series");
+        assert!(rails[0].rule.account && rails[1].rule.account);
+        assert_eq!(rails[0].kind, "movie");
+        assert_eq!(rails.len(), 6, "two account rails and the four catalogue ones");
     }
 
     #[test]

@@ -432,6 +432,9 @@ fn check_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         Ok(heronite_watch::tmdb_sign_in::Step::Approved(session)) => {
             d.watch.tmdb_pending = None;
             d.watch.tmdb_username = Some(SharedString::from(session.username));
+            // The account's own rails exist only while signed in.
+            d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
+            cx.emit(crate::pages::PageEvent::LibraryChanged);
         }
         Ok(heronite_watch::tmdb_sign_in::Step::Pending) => {
             d.watch.notice = Some(tr!("TMDB has not seen the approval yet: approve it, then press again.").into());
@@ -448,6 +451,8 @@ fn sign_out_tmdb(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         Ok(()) => {
             d.watch.tmdb_username = None;
             d.watch.tmdb_pending = None;
+            d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
+            cx.emit(crate::pages::PageEvent::LibraryChanged);
         }
         Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
     }

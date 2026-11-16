@@ -66,9 +66,13 @@ the rules that apply while building it.
 > "Signed in as …", "Sign out" (which keeps the key) and "Forget TMDB" (which
 > clears both). A 401 on the exchange means "not
 > approved yet", not a bad key: the key was accepted a moment earlier. Nothing
-> consumes the session yet — TMDB's watchlist, favourites and rated lists are
-> the next slice (`docs/WATCH-COLLECTIONS.md` §9) — and signing out keeps the
-> key, so the catalogs keep working.
+> is used by the first rails of the person's own: `/account/{id}/{movie,tv}/
+> recommendations` are offered in Settings → Watch → Collections **only while a
+> session exists** (`CatalogRequest::account` routes them, `rails::title` names
+> them "Movies · Recommended for you"), drawn on the first page like any other
+> collection. Writing to the account (watchlist, favourites, rated — §9 of
+> `docs/WATCH-COLLECTIONS.md`) is still deferred, and signing out keeps the key,
+> so the catalogs keep working.
 
 > **Revision 2026-11-15 — metadata sources you choose, merged field by field.**
 > What describes a title is a **metadata source**, and which ones answer is the

@@ -71,7 +71,7 @@ mod tests {
         crate::store::write_tmdb_key(&app, "key1").unwrap();
         assert_eq!(session(&app), None, "a key alone is not a session");
 
-        let kept = auth::secret_with_session("key1", &Session { id: "sess456".into(), username: "cinephile".into() });
+        let kept = auth::secret_with_session("key1", &Session { id: "sess456".into(), username: "cinephile".into(), account_id: 42 });
         StoreCredentials::new(&app).set("tmdb", &kept).unwrap();
         assert_eq!(session(&app).map(|s| s.username), Some("cinephile".to_owned()));
 

@@ -157,6 +157,7 @@ mod tests {
             search: None,
             sort: CatalogSort::Popular,
             filters: vec![("genre".into(), "Sci-Fi".into())],
+            account: false,
         };
         let page = page_with(&fake, &app(dir.path()), "cinemeta", &request).unwrap();
         assert_eq!(page.items.len(), 2);

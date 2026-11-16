@@ -410,6 +410,9 @@ impl CollectionView {
             search: feed.looking_up.clone(),
             sort: feed.sort,
             filters: feed.filters.clone(),
+            // A tab browses a catalogue anybody can browse; the account's own
+            // suggestions are a rail, not a feed.
+            account: false,
         };
         let app = self.app_paths.clone();
         cx.spawn(async move |this, cx| {

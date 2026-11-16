@@ -236,11 +236,15 @@ rail order. Two dependencies the UI must state:
 
 ## 9. Deferred, each a slice of its own
 
-1. **TMDB account** — the **sign-in is built** (2026-11-16: request token →
-   the person approves it in their own browser → `/authentication/session/new` →
-   `session_id` beside the key, `/account` for the name; no password is ever
-   asked for, see `crates/watch-tmdb/src/auth.rs`). What remains deferred is the
-   **account state**: writes `POST /account/{id}/watchlist`, `/favorite`,
+1. **TMDB account** — the **sign-in and the account's own rails are built**
+   (2026-11-16: request token → the person approves it in their own browser →
+   `/authentication/session/new` → `session_id` and `/account`'s id beside the
+   key; no password is ever asked for, see `crates/watch-tmdb/src/auth.rs`).
+   `/account/{id}/movie/recommendations` and `/tv/recommendations` are rails the
+   person turns on in Settings → Watch → Collections, like the catalogue rails:
+   they are declared only while a session exists, marked `account` on their rule
+   (`CatalogRequest::account`), and drawn on the first page. What remains
+   deferred is the **write side**: `POST /account/{id}/watchlist`, `/favorite`,
    `/list`, and the sync below. Deferred by decision: requiring a TMDB account
    for "Add to watch" would make the button dead for most people, so the local
    file stays the truth until the remote is worth having.

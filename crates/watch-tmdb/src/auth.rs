@@ -31,6 +31,17 @@ pub struct Session {
     pub id: String,
     /// Whose account it is, when TMDB said: what "Signed in as …" shows.
     pub username: String,
+    /// TMDB's numeric id for the account, which its account endpoints take in
+    /// the path (`/account/{id}/movie/recommendations`). `0` when it was not
+    /// known — a session kept by an older build — and then it is asked for.
+    pub account_id: u64,
+}
+
+/// The account a session names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Account {
+    pub id: u64,
+    pub username: String,
 }
 
 /// What asking for a session came to.
@@ -79,21 +90,23 @@ pub fn finish(http: &dyn Transport, key: &str, token: &str) -> Result<Step> {
     if id.is_empty() {
         anyhow::bail!("TMDB answered no session");
     }
-    // Signing in worked; a name to show is not worth failing it for.
-    let username = account(http, key, &id).unwrap_or_else(|error| {
+    // Signing in worked; the name and the account id are not worth failing it
+    // for (a rail that needs the id asks for it later, once).
+    let account = account(http, key, &id).unwrap_or_else(|error| {
         log::debug!("TMDB account: {error:#}");
-        String::new()
+        Account { id: 0, username: String::new() }
     });
-    Ok(Step::Approved(Session { id, username }))
+    Ok(Step::Approved(Session { id, username: account.username, account_id: account.id }))
 }
 
-/// The username a session names (`""` when TMDB does not say).
-pub fn account(http: &dyn Transport, key: &str, session: &str) -> Result<String> {
+/// The account a session names: its id (what the account endpoints take in the
+/// path) and the name to show (`""` when TMDB does not say).
+pub fn account(http: &dyn Transport, key: &str, session: &str) -> Result<Account> {
     let mut url = Url::parse(&format!("{API}/account"))?;
-    url.query_pairs_mut().extend_pairs([("api_key", key), ("session_id", session)]);
+    url.query_pairs_mut().extend_pairs([("api_key", key), ("session_id", session.trim())]);
     let body = http.get(&url).context("TMDB account")?;
     let answer: AccountAnswer = serde_json::from_slice(&body).context("TMDB account")?;
-    Ok(answer.username.or(answer.name).unwrap_or_default().trim().to_owned())
+    Ok(Account { id: answer.id.unwrap_or(0), username: answer.username.or(answer.name).unwrap_or_default().trim().to_owned() })
 }
 
 /// Whether `error` is TMDB refusing the API key itself (a key that was reset,
@@ -109,6 +122,7 @@ pub fn secret_with_session(api_key: &str, session: &Session) -> Secret {
         "apiKey": api_key,
         "sessionId": session.id,
         "username": session.username,
+        "accountId": session.account_id,
     }))
 }
 
@@ -121,7 +135,8 @@ pub fn session_of(secret: &Secret) -> Option<Session> {
         return None;
     }
     let username = value.get("username").and_then(|name| name.as_str()).unwrap_or_default().trim().to_owned();
-    Some(Session { id, username })
+    let account_id = value.get("accountId").and_then(|id| id.as_u64()).unwrap_or(0);
+    Some(Session { id, username, account_id })
 }
 
 #[derive(Deserialize)]
@@ -138,6 +153,8 @@ struct SessionAnswer {
 
 #[derive(Deserialize)]
 struct AccountAnswer {
+    #[serde(default)]
+    id: Option<u64>,
     #[serde(default)]
     username: Option<String>,
     #[serde(default)]
@@ -162,7 +179,7 @@ mod tests {
             let mut answers = HashMap::new();
             answers.insert("/3/authentication/token/new", Some(r#"{"success":true,"request_token":"tok123"}"#));
             answers.insert("/3/authentication/session/new", Some(r#"{"success":true,"session_id":"sess456"}"#));
-            answers.insert("/3/account", Some(r#"{"username":"cinephile"}"#));
+            answers.insert("/3/account", Some(r#"{"id":42,"username":"cinephile"}"#));
             Self { answers, seen: Mutex::new(Vec::new()) }
         }
 
@@ -208,7 +225,7 @@ mod tests {
     fn an_approved_token_becomes_a_named_session() {
         let fake = Fake::new();
         let step = finish(&fake, "key1", "tok123").unwrap();
-        assert_eq!(step, Step::Approved(Session { id: "sess456".into(), username: "cinephile".into() }));
+        assert_eq!(step, Step::Approved(Session { id: "sess456".into(), username: "cinephile".into(), account_id: 42 }));
     }
 
     #[test]
@@ -216,7 +233,7 @@ mod tests {
         let mut fake = Fake::new();
         fake.answers.insert("/3/account", None);
         let step = finish(&fake, "key1", "tok123").unwrap();
-        assert_eq!(step, Step::Approved(Session { id: "sess456".into(), username: String::new() }));
+        assert_eq!(step, Step::Approved(Session { id: "sess456".into(), username: String::new(), account_id: 0 }));
     }
 
     #[test]
@@ -229,7 +246,7 @@ mod tests {
 
     #[test]
     fn the_credential_keeps_the_key_and_the_session() {
-        let session = Session { id: "sess456".into(), username: "cinephile".into() };
+        let session = Session { id: "sess456".into(), username: "cinephile".into(), account_id: 42 };
         let secret = secret_with_session("key1", &session);
         assert_eq!(session_of(&secret), Some(session));
         // A key alone has no session, and neither has an empty one.
