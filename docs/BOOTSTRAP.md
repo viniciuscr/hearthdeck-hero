@@ -85,8 +85,8 @@ each one writes its saves to:
 
 The manifests are downloaded to `~/.config/ludusavi/manifests/` and referenced
 by path, so backups work offline; a re-run refreshes them. Games appear with a
-platform suffix — `Pokemon - FireRed Version (RetroArch)`, `Tales of the Abyss
-(PS2)` — so they never merge with a PC game of the same name.
+platform suffix — `Turbo Goose Racer (RetroArch)`, `Robot Gardener 2 (PS2)` —
+so they never merge with a PC game of the same name.
 
 The step edits `~/.config/ludusavi/config.yaml` in place: it adds `roots:`
 entries of type `other` and `manifest.secondary` paths, and keeps everything
