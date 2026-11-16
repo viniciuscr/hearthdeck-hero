@@ -1,0 +1,16 @@
+[package]
+name = "heronite-watch-stats"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Watch's recap: what was watched, when, computed from the session log"
+
+[dependencies]
+heronite-watch-state = { path = "../watch-state" }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

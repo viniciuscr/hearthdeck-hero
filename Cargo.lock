@@ -4175,6 +4175,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "heronite-watch-stats"
+version = "1.7.0"
+dependencies = [
+ "chrono",
+ "heronite-watch-state",
+ "tempfile",
+]
+
+[[package]]
 name = "heronite-watch-stremio"
 version = "1.7.0"
 dependencies = [
