@@ -57,15 +57,29 @@ fn facts_line(provider: &str, details: Option<&TitleDetails>, library_year: Opti
     facts.join(" \u{b7} ")
 }
 
-/// "23m watched · Last watched Nov 12, 2026", `None` when never watched.
-fn watched_line(playtime_minutes: u64, last_played: Option<&str>, locale: DateLocale) -> Option<String> {
+/// "Watched · 23m watched · Last watched Nov 12, 2026", `None` when never watched.
+/// A film says **Watched** only once its own record reached the threshold: the
+/// position alone (opened and abandoned) is not watching it.
+fn watched_line(playtime_minutes: u64, last_played: Option<&str>, finished: bool, locale: DateLocale) -> Option<String> {
     let mut parts = Vec::new();
+    if finished {
+        parts.push(tr!("Watched").to_string());
+    }
     if playtime_minutes > 0 {
         parts.push(tr!("{time} watched", time = heronite_data::collection::format_playtime_minutes(playtime_minutes)).to_string());
     }
     let watched = last_played.map(|at| heronite_data::text::format_timestamp(at, locale)).filter(|at| !at.trim().is_empty());
     parts.extend(watched.map(|at| tr!("Last watched {at}", at = at).to_string()));
     (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
+}
+
+/// Whether a title is watched: a film by its own record, a series when every
+/// episode it has a record for is finished (and it has at least one).
+fn finished_of(progress: &heronite_watch::progress::MovieProgress, kind: &str) -> bool {
+    if kind != "series" {
+        return progress.finished;
+    }
+    !progress.episodes.is_empty() && progress.episodes.values().all(|episode| episode.finished)
 }
 
 /// The names as one line, `None` when the source listed none.
@@ -209,7 +223,9 @@ impl CollectionView {
             details.as_deref().filter(|details| !details.episodes.is_empty()).map(|details| self.watch_ensure_selection(key, details));
         let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
         let facts = facts_line(g.source_label, details.as_deref(), crate::fork::watch::sources::year(&g));
-        let watched = watched_line(g.playtime_minutes, g.last_played.as_deref(), locale);
+        let finished = heronite_watch::progress::local(&self.app_paths, &g.runner, crate::fork::watch::sources::id(&g))
+            .is_some_and(|progress| finished_of(&progress, crate::fork::watch::sources::kind(&g)));
+        let watched = watched_line(g.playtime_minutes, g.last_played.as_deref(), finished, locale);
         let lines = detail_lines(details.as_deref(), &g.details.genres, locale);
         let overview = details
             .as_deref()
@@ -365,9 +381,22 @@ impl CollectionView {
         let season = seasons.get(selection.season).copied().unwrap_or(1);
         let options: Vec<SharedString> = seasons.iter().map(|number| SharedString::from(tr!("Season {n}", n = number))).collect();
         rows.push(Row::choice("season", tr!("Season"), options, selection.season));
-        let watched = self.watch_resume().map(str::to_owned);
+        // A tick means this episode was finished, taken from the per-episode
+        // records: the resume pointer only says where playback starts, so it
+        // cannot stand for "watched" (it moves to the next episode the moment
+        // that one is opened).
+        let episodes = heronite_watch::progress::local(&self.app_paths, &game.runner, crate::fork::watch::sources::id(game))
+            .map(|progress| progress.episodes)
+            .unwrap_or_default();
+        let resuming = self.watch_resume().map(str::to_owned);
         for (index, episode) in details.episodes_of(season).enumerate() {
-            rows.push(episode_row(episode, index, watched.as_deref() == Some(episode.id.as_str()), locale));
+            let watched = episodes.get(episode.id.as_str()).is_some_and(|episode| episode.finished);
+            let mut row = episode_row(episode, index, watched, locale);
+            if !watched && resuming.as_deref() == Some(episode.id.as_str()) {
+                // Where they stopped: marked differently from a finished one.
+                row = row.desc(tr!("Resume from here"));
+            }
+            rows.push(row);
         }
         rows
     }
@@ -660,9 +689,10 @@ mod tests {
 
     #[test]
     fn a_watched_film_says_how_much_and_when() {
-        assert_eq!(watched_line(23, None, DateLocale::En).as_deref(), Some("23m watched"));
-        assert_eq!(watched_line(0, None, DateLocale::En), None);
-        let line = watched_line(0, Some("2026-11-12"), DateLocale::En).expect("a date is a fact");
+        assert_eq!(watched_line(23, None, false, DateLocale::En).as_deref(), Some("23m watched"));
+        assert_eq!(watched_line(0, None, false, DateLocale::En), None);
+        assert_eq!(watched_line(0, None, true, DateLocale::En).as_deref(), Some("Watched"), "finished is the mark");
+        let line = watched_line(0, Some("2026-11-12"), false, DateLocale::En).expect("a date is a fact");
         assert!(line.starts_with("Last watched "), "{line}");
     }
 }

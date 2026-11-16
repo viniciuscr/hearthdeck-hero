@@ -418,6 +418,9 @@ impl CollectionView {
         let app = self.app_paths.clone();
         let request = heronite_watch::playback::PlaybackRequest {
             provider: game.runner.clone(),
+            // The id Watch resolves titles by is an IMDb id (`tt…`): kept with
+            // the record so it survives a provider renaming its own.
+            imdb: Some(crate::fork::watch::sources::id(game).to_owned()).filter(|id| id.starts_with("tt")),
             id: crate::fork::watch::sources::id(game).to_owned(),
             kind: crate::fork::watch::sources::kind(game).to_owned(),
             video_id: self.watch.video.clone(),

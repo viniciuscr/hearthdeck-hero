@@ -186,6 +186,8 @@ mod tests {
                 updated_at: Utc::now(),
                 finished: false,
                 video_id: None,
+                imdb: None,
+                episodes: Default::default(),
             },
         );
         write_movies(&app, &movies).unwrap();
@@ -259,6 +261,8 @@ mod tests {
             updated_at: Utc::now(),
             finished: false,
             video_id: None,
+            imdb: None,
+            episodes: Default::default(),
         }
     }
 }

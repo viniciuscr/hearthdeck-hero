@@ -171,6 +171,10 @@ impl WatchProvider for Stremio {
             updated_at: item.state.last_watched.unwrap_or_else(chrono::Utc::now),
             finished: false,
             video_id: item.state.video_id.clone(),
+            // Another device's record says where it stopped, not which episodes
+            // were finished: that is only known here.
+            imdb: Some(item.id.clone()).filter(|id| id.starts_with("tt")),
+            episodes: std::collections::BTreeMap::new(),
         }))
     }
 

@@ -87,6 +87,16 @@ impl StreamChoice {
 /// Local, non-secret progress. Stremio remains the cross-device source.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MovieProgress {
+    /// The IMDb id the title is known by elsewhere (`tt0944947`), saved with the
+    /// record so it can still be matched after a provider changes its own ids.
+    /// Empty for a record written before it was kept.
+    #[serde(default)]
+    pub imdb: Option<String>,
+    /// A series: one record per episode watched, by its episode id. The title's
+    /// own position is only where playback resumes, so this is the watched
+    /// state; a film has none and uses the title's `finished`.
+    #[serde(default)]
+    pub episodes: std::collections::BTreeMap<String, EpisodeProgress>,
     /// The provider that owns the title. Records written before providers were
     /// recorded have an empty value and belong to Stremio.
     #[serde(default)]
@@ -99,4 +109,19 @@ pub struct MovieProgress {
     pub finished: bool,
     #[serde(default)]
     pub video_id: Option<String>,
+}
+
+/// One episode's state: where it stands and whether it was finished. Kept per
+/// episode so finishing one does not erase another — and so moving to the next
+/// episode does not un-watch the one before it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeProgress {
+    #[serde(default)]
+    pub position_ms: u64,
+    #[serde(default)]
+    pub duration_ms: u64,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub finished: bool,
 }

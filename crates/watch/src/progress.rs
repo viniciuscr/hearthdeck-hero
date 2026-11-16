@@ -5,7 +5,7 @@
 //! where the person stopped reads it here, offline, without a `Ctx`.
 
 use heronite_data::paths::AppPaths;
-use heronite_watch_core::types::MovieProgress;
+pub use heronite_watch_core::types::{EpisodeProgress, MovieProgress};
 use heronite_watch_state::store;
 
 /// The stored record of `provider`'s `id`, if there is one. A series keeps its

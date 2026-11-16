@@ -77,6 +77,7 @@ mod tests {
     fn request(video: Option<&str>) -> PlaybackRequest {
         PlaybackRequest {
             provider: "stremio".into(),
+            imdb: Some("tt1".into()),
             id: "tt1".into(),
             kind: if video.is_some() { "series".into() } else { "movie".into() },
             video_id: video.map(str::to_owned),
@@ -94,6 +95,8 @@ mod tests {
             updated_at: Utc::now(),
             finished: false,
             video_id: video.map(str::to_owned),
+            imdb: Some("tt1".into()),
+            episodes: Default::default(),
         }
     }
 

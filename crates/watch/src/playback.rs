@@ -30,6 +30,9 @@ use crate::registry;
 pub struct PlaybackRequest {
     /// The provider that owns the title, as `GameInfo.runner` names it.
     pub provider: String,
+    /// The IMDb id, when the title has one: kept with the record so it can be
+    /// matched after a provider renames its own ids.
+    pub imdb: Option<String>,
     /// The provider's id for the title, also the local progress key.
     pub id: String,
     /// `movie` or `series`.
@@ -66,7 +69,7 @@ pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Res
     let previous = progress_record(app, provider, &ctx, &request.id);
     let start_ms = previous.as_ref().filter(|progress| resumes_this(progress, request)).and_then(resume_at);
     let outcome = play_url(request, resolved, start_ms, stop)?;
-    record(app, provider, &ctx, &request.id, request.video_id.as_deref(), previous.as_ref(), &outcome);
+    record(app, provider, &ctx, &request.id, request.video_id.as_deref(), request.imdb.as_deref(), previous.as_ref(), &outcome);
     // What the recap is built from: this playback, its start and its end.
     session::record(app, request, previous.as_ref(), &outcome);
     Ok(outcome)
@@ -130,12 +133,14 @@ fn finished(position_ms: u64, duration_ms: u64) -> bool {
 
 /// Local progress first, then the provider's. A failed remote write keeps the
 /// local record for the next attempt; it never deletes anything.
+#[allow(clippy::too_many_arguments)]
 fn record(
     app: &AppPaths,
     provider: &dyn WatchProvider,
     ctx: &Ctx<'_>,
     id: &str,
     video_id: Option<&str>,
+    imdb: Option<&str>,
     previous: Option<&MovieProgress>,
     outcome: &PlaybackOutcome,
 ) {
@@ -144,19 +149,39 @@ fn record(
     if outcome.position_ms == 0 && outcome.duration_ms == 0 {
         return;
     }
+    let finished = finished(outcome.position_ms, outcome.duration_ms);
+    let at = Utc::now();
+    let mut episodes = previous.map(|progress| progress.episodes.clone()).unwrap_or_default();
+    // A series keeps each episode's state: finishing one does not erase the one
+    // before it, and moving on does not un-watch what ended.
+    if let Some(episode) = video_id {
+        episodes.insert(
+            episode.to_owned(),
+            heronite_watch_core::types::EpisodeProgress {
+                position_ms: outcome.position_ms,
+                duration_ms: outcome.duration_ms,
+                updated_at: at,
+                finished,
+            },
+        );
+    }
     let progress = MovieProgress {
         provider: provider.id().to_owned(),
         id: id.to_owned(),
         position_ms: outcome.position_ms,
         duration_ms: outcome.duration_ms,
-        updated_at: Utc::now(),
-        finished: finished(outcome.position_ms, outcome.duration_ms),
+        updated_at: at,
+        // A film's own state; a series is finished episode by episode, so the
+        // title-level flag says nothing about it.
+        finished: video_id.is_none() && finished,
         // The episode just played; without one, the pointer the record already
         // had (a series), else the film's own id.
         video_id: video_id
             .map(str::to_owned)
             .or_else(|| previous.and_then(|progress| progress.video_id.clone()))
             .or_else(|| Some(id.to_owned())),
+        imdb: imdb.map(str::to_owned).or_else(|| previous.and_then(|progress| progress.imdb.clone())),
+        episodes,
     };
     let mut movies = store::read_movies(app);
     store::upsert_progress(&mut movies, progress.clone());
@@ -182,6 +207,8 @@ mod tests {
             updated_at: Utc::now(),
             finished,
             video_id: None,
+            imdb: None,
+            episodes: Default::default(),
         }
     }
 
@@ -284,8 +311,10 @@ mod tests {
             updated_at: Utc::now(),
             finished: false,
             video_id: Some("tt1:1:2".into()),
+            imdb: Some("tt1".into()),
+            episodes: Default::default(),
         };
-        record(&app, &NoopProvider, &ctx, "tt1", None, Some(&previous), &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        record(&app, &NoopProvider, &ctx, "tt1", None, None, Some(&previous), &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
 
         let stored = store::read_movies(&app);
         assert_eq!(store::progress_for(&stored, "stremio", "tt1").unwrap().video_id.as_deref(), Some("tt1:1:2"));
@@ -298,16 +327,54 @@ mod tests {
         let credentials = StoreCredentials::new(&app);
         let http = UreqTransport::new();
         let ctx = Ctx { http: &http, credentials: &credentials };
-        record(&app, &NoopProvider, &ctx, "tt1", Some("tt1:1:3"), None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        record(&app, &NoopProvider, &ctx, "tt1", Some("tt1:1:3"), None, None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
         assert_eq!(store::progress_for(&store::read_movies(&app), "stremio", "tt1").unwrap().video_id.as_deref(), Some("tt1:1:3"));
 
-        record(&app, &NoopProvider, &ctx, "tt2", None, None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        record(&app, &NoopProvider, &ctx, "tt2", None, None, None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
         assert_eq!(store::progress_for(&store::read_movies(&app), "stremio", "tt2").unwrap().video_id.as_deref(), Some("tt2"));
+    }
+
+    #[test]
+    fn finishing_an_episode_keeps_it_watched_when_the_next_one_plays() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let credentials = StoreCredentials::new(&app);
+        let http = UreqTransport::new();
+        let ctx = Ctx { http: &http, credentials: &credentials };
+        // Episode 1 played to the end (70 % is the threshold), then episode 2 began.
+        record(
+            &app,
+            &NoopProvider,
+            &ctx,
+            "tt1",
+            Some("tt1:1:1"),
+            Some("tt1"),
+            None,
+            &PlaybackOutcome { position_ms: 1_800_000, duration_ms: 2_400_000 },
+        );
+        record(
+            &app,
+            &NoopProvider,
+            &ctx,
+            "tt1",
+            Some("tt1:1:2"),
+            Some("tt1"),
+            Some(&store::read_movies(&app).progress[0].clone()),
+            &PlaybackOutcome { position_ms: 60_000, duration_ms: 2_400_000 },
+        );
+        let stored = store::read_movies(&app);
+        let title = store::progress_for(&stored, "stremio", "tt1").expect("the title's record");
+        assert!(title.episodes.get("tt1:1:1").is_some_and(|episode| episode.finished), "the finished episode stays watched");
+        assert!(title.episodes.get("tt1:1:2").is_some_and(|episode| !episode.finished), "the new one is not");
+        assert_eq!(title.video_id.as_deref(), Some("tt1:1:2"), "the pointer moved to where playback resumes");
+        assert!(!title.finished, "a series is not finished because one episode ended");
+        assert_eq!(title.imdb.as_deref(), Some("tt1"), "the IMDb id is kept with the record");
     }
 
     fn request(id: &str, video_id: Option<&str>) -> PlaybackRequest {
         PlaybackRequest {
             provider: "stremio".into(),
+            imdb: Some(id.into()),
             id: id.into(),
             kind: if video_id.is_some() { "series".into() } else { "movie".into() },
             video_id: video_id.map(str::to_owned),
@@ -339,6 +406,8 @@ mod tests {
             updated_at: Utc::now(),
             finished: false,
             video_id: None,
+            imdb: None,
+            episodes: Default::default(),
         };
         assert_eq!(resume_at(&huge), None);
         assert!(finished(u64::MAX, u64::MAX));

@@ -245,6 +245,8 @@ mod tests {
             updated_at: Utc::now(),
             finished: false,
             video_id: None,
+            imdb: Some("tt1".into()),
+            episodes: Default::default(),
         };
         merge_progress(&mut original, &progress, Utc::now());
         assert_eq!(original.state.time_offset, 5000);

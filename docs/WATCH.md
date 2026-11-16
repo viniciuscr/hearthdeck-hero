@@ -47,6 +47,23 @@ the rules that apply while building it.
 > anything, so runtime and the IMDb score stay on the film page, which already
 > loads `TitleDetails`.
 >
+> **Watched is local, per episode** (2026-11-16): a title's record
+> (`movies.json`) keeps **one state per episode finish** — `episodes: { videoId →
+> { positionMs, durationMs, updatedAt, finished } }` — beside the resume pointer
+> (`video_id`), which only says where playback starts. Before this the page
+> ticked the *pointer's* episode whether or not it had been finished, so opening
+> the next episode un-ticked the one just watched and an unfinished episode
+> looked complete; those were the same bug. Now a tick means finished, a row says
+> "Resume from here" when it is the pointer and unfinished, a film says
+> **Watched** only once its own record crossed the threshold, and finishing an
+> episode never un-watches the one before it. The IMDb id (`tt…`, the id Watch
+> already resolves titles by) is stored **with** the record (`imdb`), so a record
+> survives a provider that renames its own ids. Stremio's remote write is
+> unchanged and still best effort: the local file is the truth, and another
+> provider can sync to it later. Stremio's own per-episode `watched` bitfield
+> remains unread — our ticks no longer depend on it, which is why they are
+> consistent.
+>
 > **A recap, from a session log** (2026-11-16): every playback appends one record
 > to `watch-sessions.json` (`crates/watch-state`): provider, kind, title, episode,
 > start and end, the time that session *covered* (the distance the position
