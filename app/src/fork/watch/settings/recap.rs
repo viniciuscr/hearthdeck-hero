@@ -69,30 +69,34 @@ pub fn blurb() -> &'static str {
     )
 }
 
-/// The desktop page: the window's chips, the bars, the totals and the top titles.
+/// The desktop page: the window's chips, then the shared body.
 pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
     let recap = heronite_watch::stats::recap(&d.ctx.app, d.watch.recap.span());
-    let mut column = div()
+    let recency = d.watch.recap;
+    div()
         .flex()
         .flex_col()
         .gap(px(14.))
         .child(caption(tr!("Recap")))
         .child(div().px(px(6.)).child(meta_text(blurb().to_string())))
-        .child(window_chips(d, cx));
+        .child(window_chips(d, cx))
+        .children(body(&recap, recency))
+        .into_any_element()
+}
 
-    let totals = totals_card(&recap);
-    column = column.child(totals);
-
-    if recap.totals.sessions > 0 {
-        column = column.child(bars(&recap, d.watch.recap));
-        let titles = top_titles(&recap);
-        if let Some(card) = titles {
-            column = column.child(caption(tr!("Most watched"))).child(card);
-        }
-    } else {
-        column = column.child(empty());
+/// The numbers, as both surfaces draw them: the totals, the bars for the window
+/// and the titles that took its time — or the "nothing here yet" card.
+pub fn body(recap: &Recap, recency: Recency) -> Vec<AnyElement> {
+    if recap.totals.sessions == 0 {
+        return vec![empty().into_any_element()];
     }
-    column.into_any_element()
+    let mut out: Vec<AnyElement> = vec![totals_card(recap).into_any_element()];
+    let chart = bars(recap, recency);
+    out.push(chart.into_any_element());
+    if let Some(titles) = top_titles(recap) {
+        out.push(div().flex().flex_col().gap(px(8.)).child(caption(tr!("Most watched"))).child(titles).into_any_element());
+    }
+    out
 }
 
 /// Console mode: the same recap as rows a controller can read.

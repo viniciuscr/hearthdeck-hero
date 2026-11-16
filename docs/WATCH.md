@@ -85,7 +85,11 @@ the rules that apply while building it.
 > be deleted without losing a position. `heronite-watch-stats` turns the log into
 > a window — week, month, year, everything — of day buckets, titles, totals,
 > streaks, binge days and the early/evening split, and Settings → Watch → **Recap**
-> draws it: bars and cards on the desktop, readable rows in console mode. History
+> draws it in Settings, and `☰ → Statistics` (the sidebar's Statistics on the
+> desktop) is **space-aware**: in the Watch space it is the recap, drawn by
+> `app/src/fork/watch/stats_page.rs` with LB / RB switching the window, and the
+> games' page in the Games space. The Watch space's menu keeps the `statistics`
+> item for exactly that reason — `space_theme::validate` used to drop it. History
 > before this shipped exists only as Stremio's lifetime `totalPlayed`, which the
 > recap deliberately does not fold in.
 >

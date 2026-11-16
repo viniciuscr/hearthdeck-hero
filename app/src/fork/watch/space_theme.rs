@@ -38,9 +38,16 @@ pub fn validate(mut theme: ConsoleTheme, space: Space) -> ConsoleTheme {
             theme
         }
         Space::Watch => {
-            theme.menu.items.retain(|item| matches!(item.item.as_str(), "customize" | "settings" | "desktop" | "power" | "separator"));
-            if !theme.menu.items.iter().any(|item| item.item == "customize") {
-                theme.menu.items.push(MenuItemSpec::new("customize"));
+            // Statistics is the Watch recap here, so the menu keeps its entry.
+            theme
+                .menu
+                .items
+                .retain(|item| matches!(item.item.as_str(), "statistics" | "customize" | "settings" | "desktop" | "power" | "separator"));
+            // Inserted at the top in reverse, so the menu reads statistics, customize.
+            for needed in ["customize", "statistics"] {
+                if !theme.menu.items.iter().any(|item| item.item == needed) {
+                    theme.menu.items.insert(0, MenuItemSpec::new(needed));
+                }
             }
             theme.tabs = theme.tabs.iter().filter_map(watch_tab).collect();
             // Two `favourites` tabs become one Shelf.
@@ -181,6 +188,21 @@ mod tests {
         // A name the person chose stays.
         theme.tabs[0].name = "Films".into();
         assert_eq!(validate(theme, Space::Watch).tabs[0].name, "Films");
+    }
+
+    #[test]
+    fn the_watch_menu_carries_statistics_because_it_is_the_recap_there() {
+        for theme in [presets::minimal(), presets::classic(), presets::cinema()] {
+            let watch = present(theme, Space::Watch);
+            assert!(watch.menu.items.iter().any(|item| item.item == "statistics"), "☰ → Statistics opens the recap in Watch");
+            assert!(watch.menu.items.iter().any(|item| item.item == "customize"));
+        }
+        // Whatever order a theme had, statistics comes before customize when added.
+        let mut theme = presets::classic();
+        theme.menu.items.retain(|item| item.item == "settings");
+        let watch = present(theme, Space::Watch);
+        let at = |item: &str| watch.menu.items.iter().position(|entry| entry.item == item).unwrap_or(usize::MAX);
+        assert!(at("statistics") < at("customize"), "the menu reads item by item: {:?}", watch.menu.items);
     }
 
     #[test]

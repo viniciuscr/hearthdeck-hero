@@ -34,6 +34,8 @@ pub struct Pages {
     rockstar: Option<AnyView>,
     emulators: Option<AnyView>,
     stats: Option<AnyView>,
+    /// The Watch space's Statistics: the recap, drawn in the same place.
+    watch_stats: Option<AnyView>,
     settings: Option<AnyView>,
     subs: Vec<Subscription>,
     meta: NavMeta,
@@ -630,7 +632,15 @@ impl CollectionView {
             Page::Ubisoft => self.pages.ubisoft.is_none(),
             Page::Rockstar => self.pages.rockstar.is_none(),
             Page::Emulators => self.pages.emulators.is_none(),
-            Page::Statistics => self.pages.stats.is_none(),
+            // Each space has its own Statistics page: the games' chart of
+            // playtime, or the recap of what was watched.
+            Page::Statistics => {
+                if self.space == crate::collection::Space::Watch {
+                    self.pages.watch_stats.is_none()
+                } else {
+                    self.pages.stats.is_none()
+                }
+            }
             Page::Settings => self.pages.settings.is_none(),
         };
         if !slot_empty {
@@ -709,6 +719,13 @@ impl CollectionView {
                 self.pages.subs.push(cx.subscribe_in(&v, window, Self::on_page_event));
                 self.pages.hooks.insert(Page::Emulators, crate::console::PadHook::new(&v));
                 self.pages.emulators = Some(v.into());
+            }
+            Page::Statistics if self.space == crate::collection::Space::Watch => {
+                // The recap reads a file and draws it: nothing to subscribe to,
+                // and no store of its own.
+                let v = cx.new(|_| crate::fork::watch::stats_page::WatchStatsPage::new(&ctx));
+                self.pages.hooks.insert(Page::Statistics, crate::console::PadHook::new(&v));
+                self.pages.watch_stats = Some(v.into());
             }
             Page::Statistics => {
                 let v = cx.new(|cx| pages::stats::StatsPage::new(ctx, window, cx));
@@ -987,10 +1004,27 @@ impl CollectionView {
             Page::Ubisoft => self.pages.ubisoft.clone(),
             Page::Rockstar => self.pages.rockstar.clone(),
             Page::Emulators => self.pages.emulators.clone(),
-            Page::Statistics => self.pages.stats.clone(),
+            Page::Statistics => self.statistics_view(),
             Page::Settings => self.pages.settings.clone(),
         }?;
         Some(view.into_any_element())
+    }
+
+    /// Drops both Statistics views: a space switch means the other one.
+    pub(super) fn forget_statistics(&mut self) {
+        self.pages.stats = None;
+        self.pages.watch_stats = None;
+        self.pages.hooks.remove(&Page::Statistics);
+    }
+
+    /// The Statistics page's view: the games' in the Games space, the recap in
+    /// the Watch one. Both are created lazily by `ensure_page`.
+    fn statistics_view(&self) -> Option<AnyView> {
+        if self.space == crate::collection::Space::Watch {
+            self.pages.watch_stats.clone()
+        } else {
+            self.pages.stats.clone()
+        }
     }
 
     /// Header + body of the current non-Collection page.
@@ -1009,7 +1043,7 @@ impl CollectionView {
             Page::Ubisoft => self.pages.ubisoft.clone(),
             Page::Rockstar => self.pages.rockstar.clone(),
             Page::Emulators => self.pages.emulators.clone(),
-            Page::Statistics => self.pages.stats.clone(),
+            Page::Statistics => self.statistics_view(),
             Page::Settings => self.pages.settings.clone(),
         }?;
         let header = div()

@@ -19,7 +19,7 @@ use crate::ui::controls::{action_button, caption, card, card_box, toggle_row, Bu
 use crate::ui::fields::meta_text;
 
 pub mod qr;
-mod recap;
+pub mod recap;
 
 pub mod registration;
 

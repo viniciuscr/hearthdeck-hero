@@ -372,6 +372,9 @@ impl CollectionView {
         self.selected = None;
         self.focus = None;
         self.console.screen = console::Screen::Tabs;
+        // Each space has its own Statistics page: rebuilding the right one is
+        // cheaper than asking which view a stale one is.
+        self.forget_statistics();
         self.reset_space_state();
         self.images.clear_failed();
         self.reload(cx);
