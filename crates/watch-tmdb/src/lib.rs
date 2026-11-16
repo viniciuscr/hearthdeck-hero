@@ -12,8 +12,10 @@
 //! TMDB's own "watch providers" (Netflix, …) are *availability*, not streams, and
 //! belong to the metadata layer — this source never reports them.
 
+pub mod auth;
 pub mod meta;
 
+pub use auth::{Session, Step};
 pub use meta::TmdbMeta;
 
 use std::collections::HashMap;

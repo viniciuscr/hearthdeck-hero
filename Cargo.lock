@@ -4093,6 +4093,7 @@ dependencies = [
  "heronite-watch-player",
  "heronite-watch-state",
  "heronite-watch-stremio",
+ "heronite-watch-tmdb",
  "log",
  "serde_json",
  "tempfile",

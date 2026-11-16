@@ -1,0 +1,243 @@
+//! Signing a person in to TMDB — the token flow, never a password.
+//!
+//! An API **key** belongs to an application: it is what the catalogs and the
+//! metadata use, and it is asked for first (Settings → Watch → Catalogs). A
+//! **session** belongs to a person: TMDB hands out a request token, the person
+//! approves it on its own site, and the token becomes a session id that names
+//! their account (watchlist, favourites, rated lists). Nothing here replaces the
+//! key — every call below is authenticated with it.
+//!
+//! The approval happens in the person's browser, so their password, a 2FA code
+//! and any bot check stay on TMDB's page, where they belong. This crate never
+//! sees any of them: the session id is the only secret that comes back, and it
+//! is kept beside the key in the credential store.
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use url::Url;
+
+use heronite_watch_core::http::{http_status, Transport};
+use heronite_watch_core::provider::Secret;
+
+use super::API;
+
+/// Where a request token is approved (the token follows).
+pub const APPROVE: &str = "https://www.themoviedb.org/authenticate";
+
+/// The person's TMDB account, once they approved a token.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Session {
+    /// The session id every account call takes.
+    pub id: String,
+    /// Whose account it is, when TMDB said: what "Signed in as …" shows.
+    pub username: String,
+}
+
+/// What asking for a session came to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// The token is real but nobody approved it yet: the person has the page
+    /// open, or closed it. Asking again is safe.
+    Pending,
+    Approved(Session),
+}
+
+/// The page the person approves `token` on.
+pub fn approve_url(token: &str) -> String {
+    format!("{APPROVE}/{}", token.trim())
+}
+
+/// Asks TMDB for a request token, which the person then approves in a browser.
+/// The key travels as `api_key`, like every other call: the transport carries
+/// no headers.
+pub fn start(http: &dyn Transport, key: &str) -> Result<String> {
+    let mut url = Url::parse(&format!("{API}/authentication/token/new"))?;
+    url.query_pairs_mut().extend_pairs([("api_key", key)]);
+    let body = http.get(&url).context("TMDB sign-in")?;
+    let answer: TokenAnswer = serde_json::from_slice(&body).context("TMDB sign-in")?;
+    let token = answer.request_token.trim().to_owned();
+    if token.is_empty() {
+        anyhow::bail!("TMDB answered no request token");
+    }
+    Ok(token)
+}
+
+/// Turns an approved request token into a session and asks whose it is.
+///
+/// A refusal here is not a bad key: the key was accepted a moment ago for
+/// [`start`], so TMDB is saying the token has not been approved yet.
+pub fn finish(http: &dyn Transport, key: &str, token: &str) -> Result<Step> {
+    let mut url = Url::parse(&format!("{API}/authentication/session/new"))?;
+    url.query_pairs_mut().extend_pairs([("api_key", key), ("request_token", token.trim())]);
+    let body = match http.get(&url) {
+        Ok(body) => body,
+        Err(error) if http_status(&error) == Some(401) => return Ok(Step::Pending),
+        Err(error) => return Err(error).context("TMDB sign-in"),
+    };
+    let answer: SessionAnswer = serde_json::from_slice(&body).context("TMDB sign-in")?;
+    let id = answer.session_id.trim().to_owned();
+    if id.is_empty() {
+        anyhow::bail!("TMDB answered no session");
+    }
+    // Signing in worked; a name to show is not worth failing it for.
+    let username = account(http, key, &id).unwrap_or_else(|error| {
+        log::debug!("TMDB account: {error:#}");
+        String::new()
+    });
+    Ok(Step::Approved(Session { id, username }))
+}
+
+/// The username a session names (`""` when TMDB does not say).
+pub fn account(http: &dyn Transport, key: &str, session: &str) -> Result<String> {
+    let mut url = Url::parse(&format!("{API}/account"))?;
+    url.query_pairs_mut().extend_pairs([("api_key", key), ("session_id", session)]);
+    let body = http.get(&url).context("TMDB account")?;
+    let answer: AccountAnswer = serde_json::from_slice(&body).context("TMDB account")?;
+    Ok(answer.username.or(answer.name).unwrap_or_default().trim().to_owned())
+}
+
+/// Whether `error` is TMDB refusing the API key itself (a key that was reset,
+/// or a paste that lost a character). The message names the host only.
+pub fn key_rejected(error: &anyhow::Error) -> bool {
+    http_status(error) == Some(401)
+}
+
+/// The `tmdb` credential with a session in it: the key stays, so signing out
+/// never means typing it again.
+pub fn secret_with_session(api_key: &str, session: &Session) -> Secret {
+    Secret::new(serde_json::json!({
+        "apiKey": api_key,
+        "sessionId": session.id,
+        "username": session.username,
+    }))
+}
+
+/// The session in the `tmdb` credential, when one was signed in. A credential
+/// with the key alone, or one whose session id is empty, has none.
+pub fn session_of(secret: &Secret) -> Option<Session> {
+    let value = secret.value();
+    let id = value.get("sessionId").and_then(|id| id.as_str())?.trim().to_owned();
+    if id.is_empty() {
+        return None;
+    }
+    let username = value.get("username").and_then(|name| name.as_str()).unwrap_or_default().trim().to_owned();
+    Some(Session { id, username })
+}
+
+#[derive(Deserialize)]
+struct TokenAnswer {
+    #[serde(default)]
+    request_token: String,
+}
+
+#[derive(Deserialize)]
+struct SessionAnswer {
+    #[serde(default)]
+    session_id: String,
+}
+
+#[derive(Deserialize)]
+struct AccountAnswer {
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use heronite_watch_core::http::HttpStatus;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// Answers by path; a path mapped to `None` is a 401.
+    struct Fake {
+        answers: HashMap<&'static str, Option<&'static str>>,
+        seen: Mutex<Vec<String>>,
+    }
+
+    impl Fake {
+        fn new() -> Self {
+            let mut answers = HashMap::new();
+            answers.insert("/3/authentication/token/new", Some(r#"{"success":true,"request_token":"tok123"}"#));
+            answers.insert("/3/authentication/session/new", Some(r#"{"success":true,"session_id":"sess456"}"#));
+            answers.insert("/3/account", Some(r#"{"username":"cinephile"}"#));
+            Self { answers, seen: Mutex::new(Vec::new()) }
+        }
+
+        fn without(mut self, path: &'static str) -> Self {
+            self.answers.insert(path, None);
+            self
+        }
+    }
+
+    impl Transport for Fake {
+        fn get(&self, url: &Url) -> Result<Vec<u8>> {
+            self.seen.lock().unwrap().push(url.as_str().to_owned());
+            match self.answers.get(url.path()) {
+                Some(Some(body)) => Ok(body.as_bytes().to_vec()),
+                Some(None) => Err(anyhow::Error::new(HttpStatus::new(url, 401))),
+                None => Err(anyhow::anyhow!("the fake has no answer for {}", url.path())),
+            }
+        }
+
+        fn post_json(&self, _: &Url, _: &serde_json::Value) -> Result<Vec<u8>> {
+            anyhow::bail!("signing in needs no POST")
+        }
+    }
+
+    #[test]
+    fn a_token_is_asked_for_with_the_key_and_approved_in_the_browser() {
+        let fake = Fake::new();
+        let token = start(&fake, "key1").unwrap();
+        assert_eq!(token, "tok123");
+        assert_eq!(approve_url(&token), "https://www.themoviedb.org/authenticate/tok123");
+        let seen = fake.seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].contains("api_key=key1"), "the key travels as a query, like every call: {}", seen[0]);
+    }
+
+    #[test]
+    fn an_unapproved_token_is_pending_not_a_failure() {
+        let fake = Fake::new().without("/3/authentication/session/new");
+        assert_eq!(finish(&fake, "key1", "tok123").unwrap(), Step::Pending);
+    }
+
+    #[test]
+    fn an_approved_token_becomes_a_named_session() {
+        let fake = Fake::new();
+        let step = finish(&fake, "key1", "tok123").unwrap();
+        assert_eq!(step, Step::Approved(Session { id: "sess456".into(), username: "cinephile".into() }));
+    }
+
+    #[test]
+    fn a_session_without_a_name_is_still_a_session() {
+        let mut fake = Fake::new();
+        fake.answers.insert("/3/account", None);
+        let step = finish(&fake, "key1", "tok123").unwrap();
+        assert_eq!(step, Step::Approved(Session { id: "sess456".into(), username: String::new() }));
+    }
+
+    #[test]
+    fn a_refused_key_is_recognised() {
+        let fake = Fake::new().without("/3/authentication/token/new");
+        let error = start(&fake, "wrong").unwrap_err();
+        assert!(key_rejected(&error), "a 401 on the key's own call is the key: {error:#}");
+        assert!(!error.to_string().contains("wrong"), "the key never reaches the message");
+    }
+
+    #[test]
+    fn the_credential_keeps_the_key_and_the_session() {
+        let session = Session { id: "sess456".into(), username: "cinephile".into() };
+        let secret = secret_with_session("key1", &session);
+        assert_eq!(session_of(&secret), Some(session));
+        // A key alone has no session, and neither has an empty one.
+        assert_eq!(session_of(&super::super::secret("key1")), None);
+        let empty = Secret::new(serde_json::json!({"apiKey": "key1", "sessionId": "  "}));
+        assert_eq!(session_of(&empty), None);
+        // The key is still read by the catalog path from the same credential.
+        let key = secret.decode::<super::super::Key>().expect("the catalog's key shape still parses");
+        assert_eq!(key.api_key, "key1");
+    }
+}

@@ -33,6 +33,11 @@ pub struct State {
     /// Whether a TMDB key is stored: read once, because Settings must not touch
     /// the credential file on every frame, and updated when it changes.
     pub tmdb_key: bool,
+    /// The TMDB account signed in on this machine, by name (empty when TMDB did
+    /// not say, `None` when there is no session).
+    pub tmdb_username: Option<SharedString>,
+    /// The request token waiting for the person to approve it in their browser.
+    pub tmdb_pending: Option<String>,
     /// The collection rails the build declares, with their source: read once for
     /// the same reason — asking a source to declare builds a transport, which a
     /// frame must not pay.
@@ -43,8 +48,9 @@ impl State {
     pub fn new(ctx: &PageCtx) -> Self {
         let linked = heronite_watch::store::read_auth(&ctx.app).ok().flatten().is_some();
         let tmdb_key = heronite_watch::store::read_tmdb_key(&ctx.app).ok().flatten().is_some();
+        let tmdb_username = heronite_watch::tmdb_sign_in::session(&ctx.app).map(|session| SharedString::from(session.username));
         let collections = heronite_watch::collections::descriptors(&ctx.app);
-        Self { linked, busy: false, offer: None, notice: None, tmdb_key, collections }
+        Self { linked, busy: false, offer: None, notice: None, tmdb_key, tmdb_username, tmdb_pending: None, collections }
     }
 }
 
@@ -316,6 +322,30 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
         );
     }
 
+    let account = card_box().py(px(12.)).child(
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(div().text_size(px(14.)).child(match (&d.watch.tmdb_username, &d.watch.tmdb_pending) {
+                        (Some(name), _) if name.is_empty() => tr!("Signed in to TMDB").to_string(),
+                        (Some(name), _) => tr!("Signed in as {name}", name = name.clone()).to_string(),
+                        (None, Some(_)) => tr!("Approve the sign-in in your browser, then come back.").to_string(),
+                        (None, None) => tr!("TMDB account").to_string(),
+                    }))
+                    .child(meta_text(tr!(
+                        "A session names your account: watchlist, favourites and rated lists. The key above is what browses."
+                    ))),
+            )
+            .child(account_buttons(d, cx)),
+    );
+
     let mut column = div()
         .flex()
         .flex_col()
@@ -325,7 +355,8 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
             "What the Movies and Series tabs may browse. A catalog decides what is listed; it never changes what plays."
         ))))
         .child(sources)
-        .child(key);
+        .child(key)
+        .child(account);
     if !collections.is_empty() {
         column = column
             .child(caption(tr!("Collections")))
@@ -336,6 +367,107 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
     }
     column.into_any_element()
+}
+
+/// The account card's buttons: sign in, finish a pending approval, or sign out.
+fn account_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
+    let mut buttons = div().flex().items_center().gap(px(8.));
+    if d.watch.tmdb_username.is_some() {
+        buttons = buttons.child(action_button(
+            "watch-tmdb-sign-out",
+            ButtonKind::Ghost,
+            tr!("Sign out"),
+            true,
+            cx.listener(|d, _, _, cx| sign_out_tmdb(d, cx)),
+        ));
+    } else if d.watch.tmdb_pending.is_some() {
+        buttons = buttons.child(action_button(
+            "watch-tmdb-again",
+            ButtonKind::Glass,
+            tr!("Open the page again"),
+            true,
+            cx.listener(|d, _, _, cx| {
+                if let Some(token) = d.watch.tmdb_pending.clone() {
+                    open_approval(d, &token);
+                }
+                cx.notify();
+            }),
+        ));
+        buttons = buttons.child(action_button(
+            "watch-tmdb-approved",
+            ButtonKind::Primary,
+            tr!("I approved it"),
+            true,
+            cx.listener(|d, _, _, cx| check_tmdb_sign_in(d, cx)),
+        ));
+    } else {
+        buttons = buttons.child(action_button(
+            "watch-tmdb-sign-in",
+            ButtonKind::Primary,
+            tr!("Sign in with TMDB"),
+            d.watch.tmdb_key,
+            cx.listener(|d, _, _, cx| start_tmdb_sign_in(d, cx)),
+        ));
+    }
+    buttons
+}
+
+/// Opens TMDB's approval page for `token`; a browser that will not open is a
+/// notice, not a failure of the sign-in.
+fn open_approval(d: &mut SettingsPage, token: &str) {
+    let url = heronite_watch::tmdb_sign_in::approve_url(token);
+    if let Err(error) = heronite_platform::shell::open(&url) {
+        d.watch.notice = Some(tr!("Could not open the browser: {error}", error = error.to_string()).into());
+    }
+}
+
+/// Asks TMDB for a request token and sends the person to its page.
+fn start_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    d.watch.notice = None;
+    if !d.watch.tmdb_key {
+        d.watch.notice = Some(tr!("Add the TMDB API key first.").into());
+        cx.notify();
+        return;
+    }
+    match heronite_watch::tmdb_sign_in::start(&d.ctx.app) {
+        Ok(token) => {
+            d.watch.tmdb_pending = Some(token.clone());
+            open_approval(d, &token);
+        }
+        Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
+    }
+    cx.notify();
+}
+
+/// Exchanges the approved token for a session; pending while TMDB has not seen
+/// the approval.
+fn check_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    d.watch.notice = None;
+    let Some(token) = d.watch.tmdb_pending.clone() else { return };
+    match heronite_watch::tmdb_sign_in::finish(&d.ctx.app, &token) {
+        Ok(heronite_watch::tmdb_sign_in::Step::Approved(session)) => {
+            d.watch.tmdb_pending = None;
+            d.watch.tmdb_username = Some(SharedString::from(session.username));
+        }
+        Ok(heronite_watch::tmdb_sign_in::Step::Pending) => {
+            d.watch.notice = Some(tr!("TMDB has not seen the approval yet: approve it, then press again.").into());
+        }
+        Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
+    }
+    cx.notify();
+}
+
+/// Forgets the session (the key stays).
+fn sign_out_tmdb(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    d.watch.notice = None;
+    match heronite_watch::tmdb_sign_in::sign_out(&d.ctx.app) {
+        Ok(()) => {
+            d.watch.tmdb_username = None;
+            d.watch.tmdb_pending = None;
+        }
+        Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
+    }
+    cx.notify();
 }
 
 fn rail_on(prefs: &ConsolePrefs, kind: &str) -> bool {
@@ -604,6 +736,23 @@ pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
     if keyed {
         rows.push(Row::action("watch-tmdb-key-remove", tr!("Remove the TMDB API key")));
     }
+    // The account a session names: nothing browsed here needs it, and it is
+    // never asked for as a password.
+    if let Some(name) = &d.watch.tmdb_username {
+        let who = if name.is_empty() {
+            tr!("Signed in to TMDB").to_string()
+        } else {
+            tr!("Signed in as {name}", name = name.clone()).to_string()
+        };
+        rows.push(Row::info("watch-tmdb-account", tr!("TMDB account"), who));
+        rows.push(Row::action("watch-tmdb-sign-out", tr!("Sign out")));
+    } else if d.watch.tmdb_pending.is_some() {
+        rows.push(Row::info("watch-tmdb-account", tr!("TMDB account"), tr!("Waiting for the approval")));
+        rows.push(Row::action("watch-tmdb-again", tr!("Open the page again")));
+        rows.push(Row::action("watch-tmdb-approved", tr!("I approved it")));
+    } else {
+        rows.push(Row::action("watch-tmdb-sign-in", tr!("Sign in with TMDB")).enabled(keyed));
+    }
     // The collection rails: one row each, in the order they are drawn.
     if !d.watch.collections.is_empty() {
         rows.push(Row::header(tr!("Collections")));
@@ -627,6 +776,15 @@ pub(crate) fn catalog_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut
             "watch-tmdb-key-paste" => paste_tmdb_key(d, cx),
             "watch-tmdb-key-set" => set_tmdb_key(d, window, cx),
             "watch-tmdb-key-remove" => clear_tmdb_key(d, cx),
+            "watch-tmdb-sign-in" => start_tmdb_sign_in(d, cx),
+            "watch-tmdb-again" => {
+                if let Some(token) = d.watch.tmdb_pending.clone() {
+                    open_approval(d, &token);
+                }
+                cx.notify();
+            }
+            "watch-tmdb-approved" => check_tmdb_sign_in(d, cx),
+            "watch-tmdb-sign-out" => sign_out_tmdb(d, cx),
             _ => {}
         },
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-catalog:") => {

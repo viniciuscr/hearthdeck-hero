@@ -236,12 +236,14 @@ rail order. Two dependencies the UI must state:
 
 ## 9. Deferred, each a slice of its own
 
-1. **TMDB account** — `/authentication/token/new` → approve at
-   `themoviedb.org/authenticate/{token}` → `/authentication/session/new` →
-   `session_id`, plus `/account`; writes `POST /account/{id}/watchlist`,
-   `/favorite`, `/list`. Deferred by decision: requiring a TMDB account for "Add to
-   watch" would make the button dead for most people. The flow needs an approval
-   screen (the app already owns a WebKit login window) and a new secret.
+1. **TMDB account** — the **sign-in is built** (2026-11-16: request token →
+   the person approves it in their own browser → `/authentication/session/new` →
+   `session_id` beside the key, `/account` for the name; no password is ever
+   asked for, see `crates/watch-tmdb/src/auth.rs`). What remains deferred is the
+   **account state**: writes `POST /account/{id}/watchlist`, `/favorite`,
+   `/list`, and the sync below. Deferred by decision: requiring a TMDB account
+   for "Add to watch" would make the button dead for most people, so the local
+   file stays the truth until the remote is worth having.
    **Sync policy, corrected:** the local file is the offline truth; each write marks
    the title **dirty with a time**; a push resolves the IMDb id to TMDB's media id
    (`/find`, the reverse of the metadata source's use) and titles TMDB does not know

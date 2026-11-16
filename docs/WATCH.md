@@ -51,6 +51,19 @@ the rules that apply while building it.
 > is edited from the Watch space (Customize, or Settings → Console mode while
 > Watch is on screen). A `shelf` tab cannot reach Games any more: `validate`
 > drops it, and the shelf source draws nothing outside the Watch space.
+>
+> Signing in to TMDB exists as of this revision, and **asks for no password**.
+> The API key stays the application's credential — every call, the sign-in
+> included, is authenticated with it — and a **session** is the person's:
+> Settings → Watch → Catalogs asks TMDB for a request token, opens
+> `themoviedb.org/authenticate/{token}` in the person's own browser (through
+> `open_url`, so luakit, Firefox or whatever they use), and exchanges the
+> approved token for a session id, kept beside the key in the same `tmdb`
+> credential (`sessionId`, `username`). A 401 on the exchange means "not
+> approved yet", not a bad key: the key was accepted a moment earlier. Nothing
+> consumes the session yet — TMDB's watchlist, favourites and rated lists are
+> the next slice (`docs/WATCH-COLLECTIONS.md` §9) — and signing out keeps the
+> key, so the catalogs keep working.
 
 > **Revision 2026-11-15 — metadata sources you choose, merged field by field.**
 > What describes a title is a **metadata source**, and which ones answer is the

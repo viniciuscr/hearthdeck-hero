@@ -38,7 +38,7 @@ app
 
 | Crate | Responsibility | May depend on | Must not |
 |---|---|---|---|
-| `heronite-watch` | provider registry, `available()`, browse → synthetic `Library`, the single post-session progress write, the app's import surface | `heronite-watch-{core,state,player,stremio}`, `heronite-data` | GPUI, provider protocol code, file formats of its own |
+| `heronite-watch` | provider registry, `available()`, browse → synthetic `Library`, the single post-session progress write, TMDB's sign-in, the app's import surface | `heronite-watch-{core,state,player,stremio,tmdb,catalogs,metadata}`, `heronite-data` | GPUI, provider protocol code, file formats of its own |
 | `heronite-watch-core` | `WatchItem`, `StreamChoice`, `WatchProgress`, `PosterShape`, `AuthKey`, `WatchProvider`, `WatchCatalogSource`, `Ctx`, `CatalogCtx`, `Transport`, `Credentials`, `Throttle`, `finished` | serde, serde_json, anyhow, url, chrono, ureq | `heronite-*`, files, processes, provider names |
 | `heronite-watch-addon` | Stremio addon protocol: manifest, catalog, meta, stream, `AddonClient`, size and seeders parsing | `heronite-watch-core` | account, datastore, endpoints, Cinemeta constants |
 | `heronite-watch-player` | mpv discovery, argument construction, IPC supervision, `PlaybackOutcome`, stream-origin policy | `heronite-data` (`proc`), url, serde_json, anyhow | protocol or provider types |
@@ -46,7 +46,7 @@ app
 | `heronite-watch-metadata` | the metadata sources: `WatchMetadataSource`, the ordered registry, and TMDB + Cinemeta | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, files, GPUI |
 | `heronite-watch-stremio` | endpoints, link code, `addonCollectionGet`, datastore and merge, streaming server, `impl WatchProvider` | `heronite-watch-{core,addon}` | files, processes, `heronite-data`, catalogs |
 | `heronite-watch-catalogs` | the catalog sources' registry (`sources`, `enabled`, `find`) and Cinemeta's catalogue | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, GPUI |
-| `heronite-watch-tmdb` | TMDB discover, genres and external ids as a catalog source; the key from the credential store | `heronite-watch-core` | accounts, playback, files, GPUI |
+| `heronite-watch-tmdb` | TMDB discover, genres and external ids as a catalog source; the key from the credential store; the sign-in (request token → session, no password) | `heronite-watch-core` | accounts, playback, files, GPUI |
 
 A provider crate takes everything it needs from `Ctx`; it never opens a file or
 spawns a process. That is what keeps a provider testable on fixtures alone.

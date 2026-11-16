@@ -14,6 +14,7 @@ pub mod playback;
 pub mod progress;
 pub mod registry;
 pub mod service;
+pub mod tmdb_sign_in;
 
 pub use heronite_watch_core::auth::AuthKey;
 pub use heronite_watch_core::http::{Transport, UreqTransport};
