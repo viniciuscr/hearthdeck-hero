@@ -35,11 +35,16 @@ pub struct Settings {
     /// already right when it lands.
     #[serde(default = "metadata_by_default")]
     pub metadata_sources: Vec<String>,
-    /// The collection rails the person turned on for the Shelf tab, in rail order
-    /// (Settings → Watch → Collections). Ids are the sources' own
-    /// (`tmdb:top-rated:movie`); one this build does not have is skipped.
-    #[serde(default)]
-    pub collections: Vec<String>,
+    /// The rails the Watch space's **first page** draws, in order
+    /// (Settings → Watch → Home). Two kinds of id: `continue:<provider>` is that
+    /// provider's Continue watching, and anything else is a collection a source
+    /// declared (`tmdb:top-rated:movie`, `tmdb:recommended:movie`). One this
+    /// build does not have is skipped, and the list is hand-editable.
+    ///
+    /// `collections` is what the field was called while the rails lived on the
+    /// Shelf: a file written then still reads.
+    #[serde(default, alias = "collections")]
+    pub home_rails: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -65,7 +70,7 @@ impl Default for Settings {
             stop_service_when_done: true,
             catalog_sources: catalogs_by_default(),
             metadata_sources: metadata_by_default(),
-            collections: Vec::new(),
+            home_rails: Vec::new(),
             extra: Map::new(),
         }
     }
@@ -123,10 +128,10 @@ mod tests {
     fn no_collection_rail_is_on_to_begin_with() {
         let dir = tempfile::tempdir().unwrap();
         assert!(
-            read(&app(dir.path())).collections.is_empty(),
+            read(&app(dir.path())).home_rails.is_empty(),
             "the Shelf starts with Continue watching, the watchlist and the favourites only"
         );
-        assert!(Settings::default().collections.is_empty());
+        assert!(Settings::default().home_rails.is_empty());
     }
 
     #[test]

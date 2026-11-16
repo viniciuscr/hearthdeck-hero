@@ -306,7 +306,7 @@ mod tests {
         // Turned on, but the credential store holds no TMDB key: the rule cannot
         // be resolved, and that is a log line rather than a broken library.
         let settings =
-            heronite_watch_state::settings::Settings { collections: vec!["tmdb:top-rated:movie".to_owned()], ..Default::default() };
+            heronite_watch_state::settings::Settings { home_rails: vec!["tmdb:top-rated:movie".to_owned()], ..Default::default() };
         heronite_watch_state::settings::write(&app, &settings).unwrap();
         let (rails, answered) = collection_rails(&NoNet, &app, &crate::collections::enabled(&app));
         assert!(rails.is_empty() && answered.is_empty(), "a keyless source is skipped, not fatal");

@@ -3,7 +3,6 @@
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
-use heronite_data::console_theme::{ConsolePrefs, ShelfSpec};
 use heronite_i18n::tr;
 use heronite_watch::account::{create_link, read_link, LinkOffer, LinkPoll};
 use heronite_watch::{Endpoints, UreqTransport};
@@ -55,6 +54,332 @@ impl State {
 }
 
 pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let reset = action_button(
+        "watch-reset",
+        ButtonKind::Glass,
+        tr!("Reset Watch theme"),
+        true,
+        cx.listener(|d, _, _, cx| {
+            themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
+                prefs.theme = watch_default_theme();
+                prefs.based_on = crate::fork::watch::prefs::base_id().into();
+                prefs.last_tab = 0;
+            });
+            cx.notify();
+        }),
+    );
+    let theme = card_box().py(px(12.)).child(
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(div().text_size(px(14.)).child(tr!("Watch theme")))
+                    .child(meta_text(tr!("Colours, layouts and tabs. ☰ → Customize edits the same theme from the couch."))),
+            )
+            .child(reset),
+    );
+    let mut column = div().flex().flex_col().gap(px(14.)).child(caption(tr!("Appearance"))).child(theme);
+    if let Some(notice) = &d.watch.notice {
+        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
+    }
+    column.into_any_element()
+}
+
+/// Settings → Watch → Home: the rails the first page draws, each with the
+/// provider it comes from. This list is the drawing order, and the only owner of
+/// that page: a theme's shelves do not apply in Watch.
+pub fn render_home(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let on = |id: &str| settings.home_rails.iter().any(|rail| rail == id);
+    let mut column = div().flex().flex_col().gap(px(14.)).child(caption(tr!("Home"))).child(div().px(px(6.)).child(meta_text(tr!(
+        "What the first page shows. They are drawn in the order they were turned on, and a rail with nothing in it is hidden."
+    ))));
+
+    let media: Vec<Provider> = providers().into_iter().filter(|provider| provider.media).collect();
+    if !media.is_empty() {
+        let rows: Vec<AnyElement> = media
+            .iter()
+            .map(|provider| {
+                let id = format!("continue:{}", provider.id);
+                let label = tr!("Continue watching · {provider}", provider = provider.name.clone());
+                let label: SharedString = SharedString::from(label);
+                toggle_row(format!("watch-home:{id}"), label, Some(tr!("What you have started there.")), on(&id))
+                    .on_click(cx.listener({
+                        let id = id.clone();
+                        move |d, _, _, cx| set_home_rail(d, &id, None, cx)
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        column = column.child(caption(tr!("Continue watching"))).child(card(rows));
+    }
+
+    for provider in providers().into_iter().filter(|provider| provider.collections) {
+        let rails: Vec<AnyElement> = d
+            .watch
+            .collections
+            .iter()
+            .filter(|(source, _)| *source == provider.id)
+            .map(|(_, rail)| {
+                let label = format!("{} · {}", crate::fork::watch::rails::title(rail), provider.name);
+                let label: SharedString = SharedString::from(label);
+                toggle_row(
+                    format!("watch-home:{}", rail.id),
+                    label,
+                    Some(tr!("Recommended and ranked by {provider}.", provider = provider.name.clone()).as_str()),
+                    on(&rail.id),
+                )
+                .on_click(cx.listener({
+                    let id = rail.id.clone();
+                    move |d, _, _, cx| set_home_rail(d, &id, None, cx)
+                }))
+                .into_any_element()
+            })
+            .collect();
+        if !rails.is_empty() {
+            column = column.child(caption(provider.name.clone())).child(card(rails));
+        }
+    }
+
+    if let Some(notice) = &d.watch.notice {
+        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
+    }
+    column.into_any_element()
+}
+
+/// Settings → Watch → Home, as rows: the same rails as a list.
+pub(crate) fn home_rows(d: &SettingsPage) -> Vec<Row> {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let on = |id: &str| settings.home_rails.iter().any(|rail| rail == id);
+    let mut rows = vec![Row::header(tr!("Home"))];
+    for provider in providers().into_iter().filter(|provider| provider.media) {
+        let id = format!("continue:{}", provider.id);
+        let label = tr!("Continue watching · {provider}", provider = provider.name);
+        rows.push(Row::toggle(SharedString::from(format!("watch-home:{id}")), SharedString::from(label), on(&id)));
+    }
+    for (source, rail) in &d.watch.collections {
+        let name = heronite_watch::collections::source_name(source);
+        let label = format!("{} · {name}", crate::fork::watch::rails::title(rail));
+        rows.push(Row::toggle(SharedString::from(format!("watch-home:{}", rail.id)), SharedString::from(label), on(&rail.id)));
+    }
+    rows.push(Row::info("watch-home-note", tr!("Order"), tr!("Rails are drawn in the order they were turned on.")));
+    rows
+}
+
+/// The Home page's toggles.
+pub(crate) fn home_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
+    if let Outcome::Changed(id, Value::Toggle(on)) = outcome {
+        if let Some(rail) = id.strip_prefix("watch-home:") {
+            set_home_rail(d, rail, Some(on), cx);
+        }
+    }
+}
+
+/// Turns a rail on or off. The list is also the drawing order, so a rail turned
+/// on joins at the end.
+fn set_home_rail(d: &mut SettingsPage, id: &str, on: Option<bool>, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    let want = on.unwrap_or(!settings.home_rails.iter().any(|rail| rail == id));
+    toggled(&mut settings.home_rails, id, want);
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    // The first page's rails are read with the library.
+    cx.emit(crate::pages::PageEvent::LibraryChanged);
+    cx.notify();
+}
+
+fn set_metadata_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    if on {
+        if !settings.metadata_sources.iter().any(|id| id == source) {
+            settings.metadata_sources.push(source.to_owned());
+        }
+    } else {
+        settings.metadata_sources.retain(|id| id != source);
+    }
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    cx.notify();
+}
+
+/// One provider as Settings shows it: what it is, and what it can do. Generated
+/// from the registries, so a provider this build gains needs no Settings code.
+#[derive(Debug)]
+struct Provider {
+    id: String,
+    name: String,
+    /// Owns titles, streams, progress and the person's account.
+    media: bool,
+    /// May be browsed by the Movies and Series tabs.
+    catalog: bool,
+    /// Describes a title on its page.
+    metadata: bool,
+    /// Declares rails for the first page.
+    collections: bool,
+}
+
+/// Every provider Watch has, the streaming services first. An id that is more
+/// than one kind of source is one provider.
+fn providers() -> Vec<Provider> {
+    let mut out: Vec<Provider> = Vec::new();
+    let mut add = |id: &str, name: &str, set: fn(&mut Provider)| match out.iter_mut().find(|provider| provider.id == id) {
+        Some(provider) => set(provider),
+        None => {
+            let mut provider =
+                Provider { id: id.to_owned(), name: name.to_owned(), media: false, catalog: false, metadata: false, collections: false };
+            set(&mut provider);
+            out.push(provider);
+        }
+    };
+    for provider in heronite_watch::registry::providers() {
+        add(provider.id(), provider.name(), |entry| entry.media = true);
+    }
+    for source in heronite_watch::catalog::sources() {
+        let descriptor = source.descriptor();
+        add(descriptor.id, descriptor.name, |entry| entry.catalog = true);
+    }
+    for source in heronite_watch::metadata::sources() {
+        let descriptor = source.descriptor();
+        add(descriptor.id, descriptor.name, |entry| entry.metadata = true);
+    }
+    for source in heronite_watch::collections::sources() {
+        let descriptor = source.descriptor();
+        add(descriptor.id, descriptor.name, |entry| entry.collections = true);
+    }
+    // The streaming services first: they hold the person's account, and the
+    // sources only fill in what those provide.
+    out.sort_by_key(|provider| !provider.media);
+    out
+}
+
+/// What a provider gives, in one line under its name.
+fn capabilities(provider: &Provider) -> String {
+    let mut parts = Vec::new();
+    if provider.media {
+        parts.push(tr!("Titles and streams"));
+    }
+    if provider.catalog {
+        parts.push(tr!("Catalogs"));
+    }
+    if provider.metadata {
+        parts.push(tr!("Metadata"));
+    }
+    if provider.collections {
+        parts.push(tr!("Rails"));
+    }
+    parts.join(" \u{b7} ")
+}
+
+/// Settings → Watch → Providers: one card per provider and nothing else. What
+/// each provider offers the screens is set on the Home page.
+pub fn render_providers(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let all = providers();
+    let (media, sources): (Vec<Provider>, Vec<Provider>) = all.into_iter().partition(|provider| provider.media);
+
+    let mut column = div().flex().flex_col().gap(px(14.));
+    if !media.is_empty() {
+        column = column
+            .child(caption(tr!("Streaming services")))
+            .child(div().px(px(6.)).child(meta_text(tr!("They own the titles, the streams and where you stopped."))));
+        for provider in &media {
+            column = column.child(provider_card(d, provider, &settings, cx));
+        }
+    }
+    if !sources.is_empty() {
+        column = column.child(caption(tr!("Sources"))).child(div().px(px(6.)).child(meta_text(tr!(
+            "What the tabs browse and what describes a title. Metadata sources are asked in this order: the first answer for a field wins."
+        ))));
+        for provider in &sources {
+            column = column.child(provider_card(d, provider, &settings, cx));
+        }
+    }
+    if let Some(notice) = &d.watch.notice {
+        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
+    }
+    column.into_any_element()
+}
+
+/// One provider's card: its name and what it gives, then its account or key and
+/// the one switch that turns it on.
+fn provider_card(
+    d: &mut SettingsPage,
+    provider: &Provider,
+    settings: &heronite_watch::settings::Settings,
+    cx: &mut Context<SettingsPage>,
+) -> AnyElement {
+    let mut rows: Vec<AnyElement> = Vec::new();
+    if provider.catalog {
+        let on = settings.catalog_sources.iter().any(|id| id == &provider.id);
+        let id = provider.id.clone();
+        rows.push(
+            toggle_row(
+                format!("watch-catalog-{}", provider.id),
+                SharedString::from(tr!("Browse its catalogs")),
+                Some(tr!("The Movies and Series tabs may page through what it lists.")),
+                on,
+            )
+            .on_click(cx.listener(move |d, _, _, cx| set_catalog_source(d, &id, !on, cx)))
+            .into_any_element(),
+        );
+    }
+    if provider.metadata {
+        let on = settings.metadata_sources.iter().any(|id| id == &provider.id);
+        let id = provider.id.clone();
+        rows.push(
+            toggle_row(
+                format!("watch-metadata-{}", provider.id),
+                SharedString::from(tr!("Describe titles")),
+                Some(tr!("Its answer fills the film page; what another source already said stays.")),
+                on,
+            )
+            .on_click(cx.listener(move |d, _, _, cx| set_metadata_source(d, &id, !on, cx)))
+            .into_any_element(),
+        );
+    }
+    if provider.media && provider.id == "stremio" {
+        rows.push(stremio_account(d, cx));
+        let settings = heronite_watch::settings::read(&d.ctx.app);
+        rows.push(
+            toggle_row(
+                "watch-service-stop",
+                SharedString::from(tr!("Stop the service after watching")),
+                Some(tr!("Frees its memory; it is started again when you play a torrent.")),
+                settings.stop_service_when_done,
+            )
+            .on_click(cx.listener(|d, _, _, cx| toggle_service(d, cx)))
+            .into_any_element(),
+        );
+    }
+    if provider.id == "tmdb" {
+        rows.push(tmdb_card(d, cx));
+    }
+    card_box()
+        .py(px(12.))
+        .px(px(14.))
+        .gap(px(10.))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .child(div().text_size(px(14.)).child(provider.name.clone()))
+                .child(meta_text(capabilities(provider))),
+        )
+        .children(rows)
+        .into_any_element()
+}
+
+/// The Stremio account: linked or not, the code to link it, and the actions.
+fn stremio_account(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) -> AnyElement {
     let linked = d.watch.linked;
     let busy = d.watch.busy;
     let mut actions = div().flex().items_center().gap(px(8.));
@@ -78,8 +403,7 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
             cx.listener(|d, _, _, cx| start_link(d, cx)),
         ));
     }
-
-    let mut account = card_box().py(px(12.)).child(
+    let mut account = div().child(
         div()
             .flex()
             .items_center()
@@ -90,7 +414,7 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
                     .flex()
                     .flex_col()
                     .gap(px(3.))
-                    .child(div().text_size(px(14.)).child(if linked { tr!("Linked") } else { tr!("Not linked") }))
+                    .child(div().text_size(px(13.5)).child(if linked { tr!("Linked") } else { tr!("Not linked") }))
                     .child(meta_text(tr!("Stremio account"))),
             )
             .child(actions),
@@ -108,178 +432,13 @@ pub fn render(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Setti
                 .child(div().text_size(px(13.)).child(tr!("Code {code}", code = offer.code.clone())))
                 .child(meta_text(tr!("Scan the code with the Stremio app, or open {link}", link = offer.link.clone()))),
         );
-        account = div().flex().flex_col().gap(px(8.)).child(account).child(detail);
+        account = account.child(detail);
     }
-
-    let prefs = themes::prefs_for(&d.ctx.app, Space::Watch);
-    let rails = card([toggle_row(
-        "watch-rail-recent",
-        tr!("Continue watching"),
-        Some(tr!("Films and series you have started.")),
-        rail_on(&prefs, "recent"),
-    )
-    .on_click(cx.listener(|d, _, _, cx| toggle_rail(d, "recent", cx)))
-    .into_any_element()]);
-
-    let settings = heronite_watch::settings::read(&d.ctx.app);
-    let service = card([toggle_row(
-        "watch-service-stop",
-        tr!("Stop the Stremio service after watching"),
-        Some(tr!("Frees its memory; it is started again when you play a torrent.")),
-        settings.stop_service_when_done,
-    )
-    .on_click(cx.listener(|d, _, _, cx| toggle_service(d, cx)))
-    .into_any_element()]);
-
-    let reset = action_button(
-        "watch-reset",
-        ButtonKind::Glass,
-        tr!("Reset Watch theme"),
-        true,
-        cx.listener(|d, _, _, cx| {
-            themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
-                prefs.theme = watch_default_theme();
-                prefs.based_on = crate::fork::watch::prefs::base_id().into();
-                prefs.last_tab = 0;
-            });
-            cx.notify();
-        }),
-    );
-
-    let mut column = div()
-        .flex()
-        .flex_col()
-        .gap(px(14.))
-        .child(caption(tr!("Stremio account")))
-        .child(account)
-        .child(caption(tr!("Home rails")))
-        .child(
-            div()
-                .px(px(6.))
-                .pb(px(8.))
-                .child(meta_text(tr!("Choose what the Watch home shows. The console uses this theme; ☰ → Customize edits it in detail."))),
-        )
-        .child(rails)
-        .child(caption(tr!("Stremio service")))
-        .child(service)
-        .child(div().flex().items_center().gap(px(8.)).child(reset));
-    if let Some(notice) = &d.watch.notice {
-        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
-    }
-    column.into_any_element()
+    account.into_any_element()
 }
 
-/// Settings → Watch → Metadata providers: what describes a title, asked in the
-/// order they are listed.
-pub fn render_metadata(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
-    let settings = heronite_watch::settings::read(&d.ctx.app);
-    let rows: Vec<AnyElement> = heronite_watch::metadata::sources()
-        .iter()
-        .map(|source| {
-            let descriptor = source.descriptor();
-            let on = settings.metadata_sources.iter().any(|id| id == descriptor.id);
-            toggle_row(format!("watch-metadata-{}", descriptor.id), SharedString::from(descriptor.name.to_owned()), None, on)
-                .on_click(cx.listener(move |d, _, _, cx| set_metadata_source(d, descriptor.id, !on, cx)))
-                .into_any_element()
-        })
-        .collect();
-    let mut column = div()
-        .flex()
-        .flex_col()
-        .gap(px(14.))
-        .child(caption(tr!("Metadata providers")))
-        .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!(
-            "What describes a film or a series on its page. They are asked in this order: the first answer for a field wins, the next fills what is still empty."
-        ))))
-        .child(card(rows));
-    if let Some(notice) = &d.watch.notice {
-        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
-    }
-    column.into_any_element()
-}
-
-/// Settings → Watch → Metadata providers, as rows.
-pub(crate) fn metadata_rows(d: &SettingsPage) -> Vec<Row> {
-    let settings = heronite_watch::settings::read(&d.ctx.app);
-    let mut rows = vec![Row::header(tr!("Metadata providers"))];
-    for source in heronite_watch::metadata::sources() {
-        let descriptor = source.descriptor();
-        let on = settings.metadata_sources.iter().any(|id| id == descriptor.id);
-        rows.push(Row::toggle(
-            SharedString::from(format!("watch-metadata:{}", descriptor.id)),
-            SharedString::from(descriptor.name.to_owned()),
-            on,
-        ));
-    }
-    rows.push(Row::info(
-        "watch-metadata-order",
-        tr!("Order"),
-        tr!("The first answer for a field wins; the next fills what is still empty."),
-    ));
-    rows
-}
-
-/// The metadata page's rows: the source toggles.
-pub(crate) fn metadata_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
-    if let Outcome::Changed(id, Value::Toggle(on)) = outcome {
-        if let Some(source) = id.strip_prefix("watch-metadata:") {
-            set_metadata_source(d, source, on, cx);
-        }
-    }
-}
-
-/// Turns a metadata source on or off. The list is also the priority order, so a
-/// source turned on joins at the end — behind the one that answers first.
-fn set_metadata_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Context<SettingsPage>) {
-    let mut settings = heronite_watch::settings::read(&d.ctx.app);
-    if on {
-        if !settings.metadata_sources.iter().any(|id| id == source) {
-            settings.metadata_sources.push(source.to_owned());
-        }
-    } else {
-        settings.metadata_sources.retain(|id| id != source);
-    }
-    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
-        log::warn!("saving the Watch settings: {error:#}");
-    }
-    cx.notify();
-}
-
-/// Settings → Watch → Catalog providers: what the Movies and Series tabs may
-/// browse. Nothing here can change how a title plays.
-pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
-    let settings = heronite_watch::settings::read(&d.ctx.app);
-    let source_rows: Vec<AnyElement> = heronite_watch::catalog::sources()
-        .iter()
-        .map(|source| {
-            let descriptor = source.descriptor();
-            let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
-            toggle_row(format!("watch-catalog-{}", descriptor.id), SharedString::from(descriptor.name.to_owned()), None, on)
-                .on_click(cx.listener(move |d, _, _, cx| set_catalog_source(d, descriptor.id, !on, cx)))
-                .into_any_element()
-        })
-        .collect();
-    let sources = card(source_rows);
-
-    // The collection rails: the source order is the rail order, and the ids are
-    // the sources' own, so a settings file stays readable. The list is read with
-    // the page (a source's declaration costs a transport), not per frame.
-    let mut collections: Vec<AnyElement> = Vec::new();
-    for (source, rail) in &d.watch.collections {
-        let on = settings.collections.contains(&rail.id);
-        let note = rail_note(d, source);
-        let label = SharedString::from(crate::fork::watch::rails::title(rail));
-        let id = rail.id.clone();
-        collections.push(
-            toggle_row(format!("watch-collection-{id}"), label, Some(note.as_str()), on)
-                .on_click(cx.listener(move |d, _, _, cx| set_collection(d, &id, !on, cx)))
-                .into_any_element(),
-        );
-    }
-
-    // One entry point for TMDB: connect (the key is asked for only when there is
-    // none), approve in the browser, or sign out. The key is not a separate thing
-    // to manage here.
+/// The TMDB credential: one Connect button, the approval, or who is signed in.
+fn tmdb_card(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> AnyElement {
     let browse = tr!("Browsing uses this account's key. Signing out keeps the key, so the catalogs keep working.");
     let (title, desc) = match (&d.watch.tmdb_username, &d.watch.tmdb_pending) {
         (Some(name), _) if name.is_empty() => (tr!("Signed in to TMDB").to_string(), browse),
@@ -296,40 +455,16 @@ pub fn render_catalogs(d: &mut SettingsPage, _window: &mut Window, cx: &mut Cont
             tr!("Browsing needs an API key from your TMDB account: Connect asks for it once, then opens TMDB to approve the sign-in."),
         ),
     };
-    let account = card_box().py(px(12.)).child(
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.))
-            .child(div().flex().flex_col().gap(px(3.)).child(div().text_size(px(14.)).child(title)).child(meta_text(desc)))
-            .child(tmdb_buttons(d, cx)),
-    );
-
-    let mut column = div()
+    div()
         .flex()
-        .flex_col()
-        .gap(px(14.))
-        .child(caption(tr!("Catalog providers")))
-        .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!(
-            "What the Movies and Series tabs may browse. A catalog decides what is listed; it never changes what plays."
-        ))))
-        .child(sources)
-        .child(account);
-    if !collections.is_empty() {
-        column = column
-            .child(caption(tr!("Collections")))
-            .child(div().px(px(6.)).pb(px(8.)).child(meta_text(tr!("Rails the first page draws, in this order."))))
-            .child(card(collections));
-    }
-    if let Some(notice) = &d.watch.notice {
-        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
-    }
-    column.into_any_element()
+        .items_center()
+        .justify_between()
+        .gap(px(12.))
+        .child(div().flex().flex_col().gap(px(3.)).child(div().text_size(px(13.5)).child(title)).child(meta_text(desc)))
+        .child(tmdb_buttons(d, cx))
+        .into_any_element()
 }
 
-/// The card's buttons: connect (the key is asked for only if there is none),
-/// finish a pending approval, or sign out — plus forgetting TMDB entirely.
 fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
     let mut buttons = div().flex().items_center().gap(px(8.));
     if d.watch.tmdb_username.is_some() {
@@ -459,42 +594,6 @@ fn sign_out_tmdb(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     cx.notify();
 }
 
-fn rail_on(prefs: &ConsolePrefs, kind: &str) -> bool {
-    prefs.theme.shelves.iter().any(|shelf| shelf.kind == kind && shelf.on)
-}
-
-/// Whether the app can see that a collection source has its key. A source whose
-/// key the app does not track is taken as keyed: its rows say nothing.
-fn source_keyed(d: &SettingsPage, source: &str) -> bool {
-    match source {
-        "tmdb" => d.watch.tmdb_key,
-        _ => true,
-    }
-}
-
-/// What a collection row says under its name: where the rail is drawn, or the key
-/// its source still needs.
-fn rail_note(d: &SettingsPage, source: &str) -> String {
-    if source_keyed(d, source) {
-        return tr!("Shown on the first page.").to_string();
-    }
-    let name = heronite_watch::collections::source_name(source);
-    tr!("{source} has no key yet: add it above, or this rail stays empty.", source = name).to_string()
-}
-
-/// Turns a collection rail on or off. The list is also the rail order: a rail
-/// turned on joins at the end, so a new one is drawn last. The rails are resolved
-/// with the library, so the Collection looks again.
-fn set_collection(d: &mut SettingsPage, id: &str, on: bool, cx: &mut Context<SettingsPage>) {
-    let mut settings = heronite_watch::settings::read(&d.ctx.app);
-    toggled(&mut settings.collections, id, on);
-    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
-        log::warn!("saving the Watch settings: {error:#}");
-    }
-    cx.emit(crate::pages::PageEvent::LibraryChanged);
-    cx.notify();
-}
-
 /// The enabled rails after a toggle: a rail turned on joins at the end (the list
 /// is the rail order), and one already there keeps its place — a press must not
 /// reorder the tab.
@@ -578,24 +677,6 @@ fn toggle_service(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     cx.notify();
 }
 
-fn toggle_rail(d: &mut SettingsPage, kind: &str, cx: &mut Context<SettingsPage>) {
-    themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
-        if let Some(shelf) = prefs.theme.shelves.iter_mut().find(|shelf| shelf.kind == kind) {
-            shelf.on = !shelf.on;
-        } else {
-            prefs.theme.shelves.push(ShelfSpec { kind: kind.into(), on: true, title: rail_title(kind) });
-        }
-    });
-    cx.notify();
-}
-
-fn rail_title(kind: &str) -> String {
-    match kind {
-        "recent" => tr!("Continue watching").to_string(),
-        _ => kind.to_string(),
-    }
-}
-
 fn start_link(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     if d.watch.busy {
         return;
@@ -666,79 +747,79 @@ fn unlink(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
 }
 
 /// Console mode: the account, the code and the rails as rows.
-pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
+pub(crate) fn console_rows(_d: &SettingsPage) -> Vec<Row> {
+    vec![
+        Row::info("watch-theme", tr!("Watch theme"), tr!("Edited from ☰ → Customize.")),
+        Row::action("watch-reset", tr!("Reset Watch theme")),
+    ]
+}
+
+/// Settings → Watch → Providers, as rows: a header per provider, its account or
+/// key, and the switches that turn it on.
+pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let all = providers();
+    let (media, sources): (Vec<Provider>, Vec<Provider>) = all.into_iter().partition(|provider| provider.media);
     let mut rows = Vec::new();
-    rows.push(Row::info("watch-account", tr!("Stremio account"), if d.watch.linked { tr!("Linked") } else { tr!("Not linked") }));
-    if d.watch.linked {
-        rows.push(Row::action("watch-unlink", tr!("Unlink")));
-    } else if let Some(offer) = &d.watch.offer {
-        rows.push(Row::info("watch-code", tr!("Code {code}", code = offer.code.clone()), offer.link.clone()));
-        rows.push(Row::action("watch-check", tr!("Check")));
-    } else {
-        rows.push(Row::action("watch-link", tr!("Link with a code")));
-    }
-    rows.push(Row::header(tr!("Home rails")));
-    let prefs = themes::prefs_for(&d.ctx.app, Space::Watch);
-    rows.push(Row::toggle("watch-rail:recent", tr!("Continue watching"), rail_on(&prefs, "recent")));
-    rows.push(Row::action("watch-reset", tr!("Reset Watch theme")));
-    rows.push(Row::header(tr!("Stremio service")));
-    let settings = heronite_watch::settings::read(&d.ctx.app);
-    rows.push(Row::toggle("watch-service-stop", tr!("Stop the Stremio service after watching"), settings.stop_service_when_done));
-    rows
-}
-
-/// Settings → Watch → Catalog providers, as rows.
-pub(crate) fn catalog_rows(d: &SettingsPage) -> Vec<Row> {
-    let settings = heronite_watch::settings::read(&d.ctx.app);
-    let mut rows = vec![Row::header(tr!("Catalog providers"))];
-    for source in heronite_watch::catalog::sources() {
-        let descriptor = source.descriptor();
-        let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
-        rows.push(Row::toggle(
-            SharedString::from(format!("watch-catalog:{}", descriptor.id)),
-            SharedString::from(descriptor.name.to_owned()),
-            on,
-        ));
-    }
-    // One entry point: connect (the key is asked for only when there is none),
-    // approve in the browser, or sign out. The key is not managed here.
-    if let Some(name) = &d.watch.tmdb_username {
-        let who = if name.is_empty() {
-            tr!("Signed in to TMDB").to_string()
-        } else {
-            tr!("Signed in as {name}", name = name.clone()).to_string()
-        };
-        rows.push(Row::info("watch-tmdb-account", tr!("TMDB"), who));
-        rows.push(Row::action("watch-tmdb-sign-out", tr!("Sign out")));
-    } else if d.watch.tmdb_pending.is_some() {
-        rows.push(Row::info("watch-tmdb-account", tr!("TMDB"), tr!("Waiting for the approval")));
-        rows.push(Row::action("watch-tmdb-again", tr!("Open the page again")));
-        rows.push(Row::action("watch-tmdb-approved", tr!("I approved it")));
-    } else {
-        rows.push(Row::action("watch-tmdb-connect", tr!("Connect TMDB")));
-    }
-    if d.watch.tmdb_key {
-        rows.push(Row::action("watch-tmdb-forget", tr!("Forget TMDB")));
-    }
-    // The collection rails: one row each, in the order they are drawn.
-    if !d.watch.collections.is_empty() {
-        rows.push(Row::header(tr!("Collections")));
-        for (source, rail) in &d.watch.collections {
-            let on = settings.collections.contains(&rail.id);
-            let title = SharedString::from(crate::fork::watch::rails::title(rail));
-            let note = rail_note(d, source);
-            rows.push(Row::toggle(SharedString::from(format!("watch-collection:{}", rail.id)), title, on).desc(note));
+    for (group, providers) in [(tr!("Streaming services"), media), (tr!("Sources"), sources)] {
+        if providers.is_empty() {
+            continue;
         }
-        rows.push(Row::info("watch-collections-note", tr!("Collections"), tr!("Rails the first page draws, in this order.")));
+        rows.push(Row::header(group));
+        for provider in providers {
+            rows.push(Row::header(provider.name.clone()));
+            if provider.catalog {
+                let on = settings.catalog_sources.iter().any(|id| id == &provider.id);
+                rows.push(Row::toggle(SharedString::from(format!("watch-catalog:{}", provider.id)), tr!("Browse its catalogs"), on));
+            }
+            if provider.metadata {
+                let on = settings.metadata_sources.iter().any(|id| id == &provider.id);
+                rows.push(Row::toggle(SharedString::from(format!("watch-metadata:{}", provider.id)), tr!("Describe titles"), on));
+            }
+            if provider.media && provider.id == "stremio" {
+                rows.push(Row::info("watch-account", tr!("Account"), if d.watch.linked { tr!("Linked") } else { tr!("Not linked") }));
+                if d.watch.linked {
+                    rows.push(Row::action("watch-unlink", tr!("Unlink")));
+                } else if let Some(offer) = &d.watch.offer {
+                    rows.push(Row::info("watch-code", tr!("Code {code}", code = offer.code.clone()), offer.link.clone()));
+                    rows.push(Row::action("watch-check", tr!("Check")));
+                } else {
+                    rows.push(Row::action("watch-link", tr!("Link with a code")));
+                }
+                rows.push(Row::toggle("watch-service-stop", tr!("Stop the service after watching"), settings.stop_service_when_done));
+            }
+            if provider.id == "tmdb" {
+                if let Some(name) = &d.watch.tmdb_username {
+                    let who = if name.is_empty() {
+                        tr!("Signed in to TMDB").to_string()
+                    } else {
+                        tr!("Signed in as {name}", name = name.clone()).to_string()
+                    };
+                    rows.push(Row::info("watch-tmdb-account", tr!("Account"), who));
+                    rows.push(Row::action("watch-tmdb-sign-out", tr!("Sign out")));
+                } else if d.watch.tmdb_pending.is_some() {
+                    rows.push(Row::info("watch-tmdb-account", tr!("Account"), tr!("Waiting for the approval")));
+                    rows.push(Row::action("watch-tmdb-again", tr!("Open the page again")));
+                    rows.push(Row::action("watch-tmdb-approved", tr!("I approved it")));
+                } else {
+                    rows.push(Row::action("watch-tmdb-connect", tr!("Connect TMDB")));
+                }
+                if d.watch.tmdb_key {
+                    rows.push(Row::action("watch-tmdb-forget", tr!("Forget TMDB")));
+                }
+            }
+        }
     }
-    rows.push(Row::info("watch-catalogs-note", tr!("Catalogs"), tr!("A catalog decides what is listed; it never changes what plays.")));
     rows
 }
 
-/// The catalog page's rows: the source toggles and the key.
-pub(crate) fn catalog_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut Window, cx: &mut Context<SettingsPage>) {
+/// The Providers page's rows: the switches, the account and the TMDB flow.
+pub(crate) fn provider_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut Window, cx: &mut Context<SettingsPage>) {
     match outcome {
         Outcome::Activate(id) => match id.as_ref() {
+            "watch-link" => start_link(d, cx),
+            "watch-check" => check_link(d, cx),
+            "watch-unlink" => unlink(d, cx),
             "watch-tmdb-connect" => connect_tmdb(d, window, cx),
             "watch-tmdb-forget" => clear_tmdb_key(d, cx),
             "watch-tmdb-again" => {
@@ -755,33 +836,9 @@ pub(crate) fn catalog_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut
             let source = id.trim_start_matches("watch-catalog:").to_owned();
             set_catalog_source(d, &source, on, cx);
         }
-        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-collection:") => {
-            let rail = id.trim_start_matches("watch-collection:").to_owned();
-            set_collection(d, &rail, on, cx);
-        }
-        _ => {}
-    }
-}
-
-pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
-    match outcome {
-        Outcome::Activate(id) => match id.as_ref() {
-            "watch-link" => start_link(d, cx),
-            "watch-check" => check_link(d, cx),
-            "watch-unlink" => unlink(d, cx),
-            "watch-reset" => {
-                themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
-                    prefs.theme = watch_default_theme();
-                    prefs.based_on = crate::fork::watch::prefs::base_id().into();
-                    prefs.last_tab = 0;
-                });
-                cx.notify();
-            }
-            _ => {}
-        },
-        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-rail:") => {
-            let kind = id.trim_start_matches("watch-rail:");
-            set_rail(d, kind, on, cx);
+        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-metadata:") => {
+            let source = id.trim_start_matches("watch-metadata:").to_owned();
+            set_metadata_source(d, &source, on, cx);
         }
         Outcome::Changed(id, Value::Toggle(on)) if id.as_ref() == "watch-service-stop" => {
             let mut settings = heronite_watch::settings::read(&d.ctx.app);
@@ -795,15 +852,18 @@ pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mu
     }
 }
 
-fn set_rail(d: &mut SettingsPage, kind: &str, on: bool, cx: &mut Context<SettingsPage>) {
-    themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
-        if let Some(shelf) = prefs.theme.shelves.iter_mut().find(|shelf| shelf.kind == kind) {
-            shelf.on = on;
-        } else {
-            prefs.theme.shelves.push(ShelfSpec { kind: kind.into(), on, title: rail_title(kind) });
+/// The Watch page's own action.
+pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
+    if let Outcome::Activate(id) = outcome {
+        if id.as_ref() == "watch-reset" {
+            themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
+                prefs.theme = watch_default_theme();
+                prefs.based_on = crate::fork::watch::prefs::base_id().into();
+                prefs.last_tab = 0;
+            });
+            cx.notify();
         }
-    });
-    cx.notify();
+    }
 }
 
 #[cfg(test)]
@@ -811,6 +871,25 @@ mod tests {
     use super::*;
     // `gpui_kit::*` brings gpui's `test` macro into scope.
     use core::prelude::v1::test;
+
+    #[test]
+    fn every_registered_provider_is_one_card_and_the_streaming_ones_come_first() {
+        let all = providers();
+        assert!(!all.is_empty(), "the registries always declare something");
+        assert!(all[0].media, "a streaming service leads: it holds the account");
+        let find = |id: &str| all.iter().find(|provider| provider.id == id).unwrap_or_else(|| panic!("{id} is missing: {all:?}"));
+        let stremio = find("stremio");
+        assert!(stremio.media && !stremio.catalog && !stremio.metadata);
+        let tmdb = find("tmdb");
+        assert!(tmdb.catalog && tmdb.metadata && tmdb.collections && !tmdb.media, "one provider, every capability");
+        let cinemeta = find("cinemeta");
+        assert!(cinemeta.catalog && cinemeta.metadata, "a source that is no account at all");
+        let ids: Vec<&str> = all.iter().map(|provider| provider.id.as_str()).collect();
+        let mut unique = ids.clone();
+        unique.dedup();
+        assert_eq!(unique.len(), ids.len(), "a provider that is several kinds is one card: {ids:?}");
+        assert!(capabilities(tmdb).contains(tr!("Catalogs")), "the card says what it gives");
+    }
 
     #[test]
     fn a_rail_joins_the_end_of_the_order_and_leaves_it() {

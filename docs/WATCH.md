@@ -47,6 +47,20 @@ the rules that apply while building it.
 > anything, so runtime and the IMDb score stay on the film page, which already
 > loads `TitleDetails`.
 >
+> **Settings are grouped by provider** (2026-11-16): **Watch** (the theme and its
+> reset) / **Providers** (a card per registered provider, streaming services
+> first, then the sources: name, what it gives, its account or key and status,
+> and the one switch that turns it on — generated from the registries, so a new
+> provider needs no Settings code) / **Home** (every rail the first page draws,
+> each labelled with its provider and toggled there). `settings.homeRails` is the
+> list and the drawing order; it holds `continue:<provider>` for a media
+> provider's Continue watching and collection ids for the rest, and it is what
+> `collections` was called while the rails lived on the Shelf (the old key still
+> reads). In Watch the first page is **only** that list: a theme brings no
+> shelves, `validate` empties them and the Shelves card is locked again. Deferred:
+> a Defaults page choosing which provider owns a new watchlist/favourite entry,
+> until more than one provider can own a list.
+>
 > The desktop theme editor only ever writes the **Games** prefs; the Watch theme
 > is edited from the Watch space (Customize, or Settings → Console mode while
 > Watch is on screen). A `shelf` tab cannot reach Games any more: `validate`

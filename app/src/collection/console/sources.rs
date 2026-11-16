@@ -238,7 +238,7 @@ impl CollectionView {
                 }
             })
             .collect();
-        let mut shelves: Vec<Shelf> = specs
+        let shelves: Vec<Shelf> = specs
             .iter()
             .filter_map(|spec| {
                 let mut keys = keys(self.shelf_games(lib, &games, &spec.kind));
@@ -252,12 +252,41 @@ impl CollectionView {
                 })
             })
             .collect();
-        // The provider collections the person turned on are drawn on the first
-        // page, after the theme's own rails and in the settings' order: the
-        // catalogues they name are what the tabs browse, these are their picks.
+        // In Watch the first page is the rails Settings lists, not a theme's
+        // shelves: a theme can neither add to them nor reorder what the person
+        // turned on. `validate(Watch)` has already emptied the theme's.
         if source == "all" && self.space == crate::collection::Space::Watch {
-            let marked = games.iter().filter_map(|game| Some((crate::fork::watch::sources::rail_marker(game)?, game.key.as_str())));
-            shelves.extend(collection_shelves(&self.watch_collections, marked));
+            return self.watch_home_rails(&games);
+        }
+        shelves
+    }
+
+    /// The Watch space's first page, in the settings' order: a media provider's
+    /// Continue watching (`continue:<provider>`), or a collection a source
+    /// declared. A rail with nothing in it is not drawn, and an id this build
+    /// does not have is skipped.
+    fn watch_home_rails(&self, all: &[&CollectionGame]) -> Vec<Shelf> {
+        let wanted = heronite_watch::settings::read(&self.app_paths).home_rails;
+        let marked: Vec<(&str, &str)> =
+            all.iter().filter_map(|game| Some((crate::fork::watch::sources::rail_marker(game)?, game.key.as_str()))).collect();
+        let mut shelves = Vec::new();
+        for id in &wanted {
+            if let Some(provider) = id.strip_prefix("continue:") {
+                let resumed = all
+                    .iter()
+                    .copied()
+                    .filter(|game| game.runner == provider && game.last_played.is_some())
+                    .map(|game| (game.runner.as_str(), game.source_label, game.last_played.as_deref().unwrap_or_default(), game));
+                for (kind, title, games) in continue_groups(resumed) {
+                    shelves.push(shelf(kind, title, by_last_played(games)));
+                }
+                continue;
+            }
+            if let Some((_, descriptor)) = self.watch_collections.iter().find(|(_, rail)| rail.id == *id) {
+                if let Some(rail) = collection_shelf(descriptor, marked.iter().copied()) {
+                    shelves.push(rail);
+                }
+            }
         }
         shelves
     }
@@ -268,12 +297,6 @@ impl CollectionView {
     /// not drawn.
     fn personal_shelves(&self, lib: &Library) -> Vec<Shelf> {
         let all: Vec<&CollectionGame> = lib.games.iter().map(|game| game.as_ref()).collect();
-        let shelf = |kind: &str, title: String, games: Vec<&CollectionGame>| Shelf {
-            title: SharedString::from(title),
-            total: games.len(),
-            kind: SharedString::from(kind),
-            keys: games.iter().map(|game| SharedString::from(game.key.clone())).collect(),
-        };
         let mut shelves = Vec::new();
 
         // Continue watching, one rail per provider: several providers (Stremio
@@ -285,7 +308,7 @@ impl CollectionView {
             .filter(|game| game.last_played.is_some())
             .map(|game| (game.runner.as_str(), game.source_label, game.last_played.as_deref().unwrap_or_default(), game));
         for (kind, title, games) in continue_groups(resumed) {
-            shelves.push(shelf(&kind, title, by_last_played(games)));
+            shelves.push(shelf(kind, title, by_last_played(games)));
         }
 
         // The two flags: the shelf's snapshots, resolved against this library. A
@@ -305,7 +328,7 @@ impl CollectionView {
                     })
                 })
                 .collect();
-            shelves.push(shelf(kind, title.to_string(), games));
+            shelves.push(shelf(kind.to_string(), title.to_string(), games));
         }
 
         shelves.retain(|shelf| !shelf.keys.is_empty());
@@ -413,25 +436,35 @@ fn continue_groups<'a, G>(items: impl Iterator<Item = (&'a str, &'a str, &'a str
     rails.into_iter().map(|(provider, _, title, games)| (format!("shelf:continue:{provider}"), title, games)).collect()
 }
 
+/// A rail from the titles it holds.
+fn shelf(kind: String, title: String, games: Vec<&CollectionGame>) -> Shelf {
+    let keys: Vec<SharedString> = games.iter().map(|game| SharedString::from(game.key.clone())).collect();
+    Shelf { title: SharedString::from(title), total: keys.len(), kind: SharedString::from(kind), keys }
+}
+
+/// One collection rail's titles: the titles carrying its mark, which is what the
+/// refresh wrote when the rail answered.
+fn collection_shelf<'a>(
+    descriptor: &heronite_watch::collections::CollectionDescriptor,
+    marked: impl Iterator<Item = (&'a str, &'a str)>,
+) -> Option<Shelf> {
+    let mark = heronite_watch::collections::mark(&descriptor.id);
+    let keys: Vec<SharedString> = marked.filter(|(marker, _)| *marker == mark).map(|(_, key)| SharedString::from(key)).collect();
+    (!keys.is_empty()).then(|| Shelf {
+        title: SharedString::from(crate::fork::watch::rails::title(descriptor)),
+        total: keys.len(),
+        kind: SharedString::from(mark),
+        keys,
+    })
+}
+
+#[cfg(test)]
 fn collection_shelves<'a>(
     enabled: &[(String, heronite_watch::collections::CollectionDescriptor)],
     marked: impl Iterator<Item = (&'a str, &'a str)>,
 ) -> Vec<Shelf> {
     let marked: Vec<(&str, &str)> = marked.collect();
-    enabled
-        .iter()
-        .filter_map(|(_, descriptor)| {
-            let mark = heronite_watch::collections::mark(&descriptor.id);
-            let keys: Vec<SharedString> =
-                marked.iter().filter(|(marker, _)| **marker == mark).map(|(_, key)| SharedString::from(*key)).collect();
-            (!keys.is_empty()).then(|| Shelf {
-                title: SharedString::from(crate::fork::watch::rails::title(descriptor)),
-                total: keys.len(),
-                kind: SharedString::from(mark),
-                keys,
-            })
-        })
-        .collect()
+    enabled.iter().filter_map(|(_, descriptor)| collection_shelf(descriptor, marked.iter().copied())).collect()
 }
 
 #[cfg(test)]

@@ -7,6 +7,9 @@
 //!   removes what Watch cannot draw).
 //! - **Hero** is editable: its two game-worded lines say watch facts instead
 //!   (`CollectionView::console_facts` / `console_stats`).
+//! - **Shelves** stay locked: in Watch the first page's rails are the ones
+//!   Settings → Watch → Home lists, so a theme's shelves would be a second,
+//!   invisible owner of the same screen.
 //! - **Menu** stays locked: its entries are the shell's and Watch has no
 //!   stores, downloads or emulators to put in them.
 //! - **Game page** stays locked: a film page is fork-owned (`watch_page.rs`) and
@@ -17,7 +20,7 @@ use crate::console::theme_rows::Card;
 
 /// The space the editor is in, and whether `card` is game-only.
 pub fn locked_in(space: Space, card: Card) -> bool {
-    space == Space::Watch && matches!(card, Card::Menu | Card::GamePage)
+    space == Space::Watch && matches!(card, Card::Menu | Card::GamePage | Card::Shelves)
 }
 
 #[cfg(test)]
@@ -44,21 +47,11 @@ mod tests {
 
     #[test]
     fn watch_hides_only_the_game_cards() {
-        for card in [Card::Menu, Card::GamePage] {
+        for card in [Card::Menu, Card::GamePage, Card::Shelves] {
             assert!(locked_in(Space::Watch, card), "{card:?} is not lockable in Watch");
             assert!(!locked_in(Space::Games, card), "{card:?} is hidden in Games");
         }
-        for card in [
-            Card::Theme,
-            Card::Tabs,
-            Card::Shelves,
-            Card::Hero,
-            Card::Background,
-            Card::Interface,
-            Card::Colours,
-            Card::Controls,
-            Card::Covers,
-        ] {
+        for card in [Card::Theme, Card::Tabs, Card::Hero, Card::Background, Card::Interface, Card::Colours, Card::Controls, Card::Covers] {
             assert!(!locked_in(Space::Watch, card), "{card:?} should stay editable in Watch");
         }
     }

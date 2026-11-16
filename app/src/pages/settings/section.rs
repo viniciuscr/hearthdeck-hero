@@ -16,10 +16,10 @@ pub enum Section {
     ConsoleMode,
     /// The Stremio account and the service that plays torrents.
     Watch,
-    /// The catalog sources the Movies and Series tabs browse.
-    WatchCatalogs,
-    /// The sources that describe a title on its page.
-    WatchMetadata,
+    /// Every provider Watch can use: its account or key, and its one switch.
+    WatchProviders,
+    /// What the Watch first page shows, rail by rail, with its provider.
+    WatchHome,
     Advanced,
     GameDefaults,
     Downloads,
@@ -76,8 +76,8 @@ impl Section {
         Section::Controls,
         Section::QuickLauncher,
         crate::fork::watch::settings::watch_registration::SECTION,
-        crate::fork::watch::settings::watch_registration::CATALOGS,
-        crate::fork::watch::settings::watch_registration::METADATA,
+        crate::fork::watch::settings::watch_registration::PROVIDERS,
+        crate::fork::watch::settings::watch_registration::HOME,
         Section::GameDefaults,
         Section::Downloads,
         Section::Launchers,
@@ -113,7 +113,7 @@ impl Section {
             Section::Mods => supported(Feature::Mods),
             // Its options are mostly Wine's.
             Section::GameDefaults => supported(Feature::Wine),
-            Section::Watch | Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::available(),
+            Section::Watch | Section::WatchProviders => crate::fork::watch::settings::watch_registration::available(),
             _ => true,
         }
     }
@@ -125,8 +125,8 @@ impl Section {
             Section::QuickLauncher => tr!("Quick launcher"),
             Section::ConsoleMode => tr!("Console mode"),
             Section::Watch => crate::fork::watch::settings::watch_registration::label(),
-            Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_label(),
-            Section::WatchMetadata => crate::fork::watch::settings::watch_registration::metadata_label(),
+            Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_label(),
+            Section::WatchHome => crate::fork::watch::settings::watch_registration::home_label(),
             Section::Advanced => tr!("Advanced"),
             Section::GameDefaults => tr!("Game defaults"),
             Section::Downloads => tr!("Downloads"),
@@ -156,8 +156,8 @@ impl Section {
             Section::QuickLauncher => Icon::FaSearch,
             Section::ConsoleMode => Icon::Tv,
             Section::Watch => crate::fork::watch::settings::watch_registration::icon(),
-            Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_icon(),
-            Section::WatchMetadata => crate::fork::watch::settings::watch_registration::metadata_icon(),
+            Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_icon(),
+            Section::WatchHome => crate::fork::watch::settings::watch_registration::home_icon(),
             Section::Advanced => Icon::Build,
             Section::GameDefaults => Icon::Tune,
             Section::Downloads => Icon::Download,
@@ -188,8 +188,8 @@ impl Section {
             Section::QuickLauncher => tr!("The command palette in a small window of its own: open it from anywhere with a key, type a few letters and press Enter to play, without opening Hearthdeck Hero."),
             Section::ConsoleMode => tr!("The controller-first TV mode: its themes, tabs and shelves, covers, background, interface and controls. Changes show at once; ☰ → Customize in console mode has the same options."),
             Section::Watch => crate::fork::watch::settings::watch_registration::blurb(),
-            Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::catalogs_blurb(),
-            Section::WatchMetadata => crate::fork::watch::settings::watch_registration::metadata_blurb(),
+            Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_blurb(),
+            Section::WatchHome => crate::fork::watch::settings::watch_registration::home_blurb(),
             Section::Advanced => tr!("Logs, folders and cache."),
             Section::GameDefaults => tr!("What new games start with. To change a game you already have, open its own settings."),
             Section::Downloads => tr!("Downloads and updates of Epic Games, GOG and Amazon Games games."),
@@ -223,8 +223,8 @@ impl Section {
             Section::QuickLauncher => "quick launcher launch run play search spotlight palette command global shortcut hotkey key anywhere tray lancador rapido iniciar jogar buscar paleta comando atalho global tecla",
             Section::ConsoleMode => "console mode tv couch controller gamepad theme themes tabs shelves layout covers background font scale clock accent colours glyphs hints menu startup customize export import preset modo console televisao sofa controle tema temas abas prateleiras capas fundo fonte tamanho relogio destaque cores botoes dicas menu personalizar exportar importar perfil",
             Section::Watch => crate::fork::watch::settings::watch_registration::KEYWORDS,
-            Section::WatchCatalogs => crate::fork::watch::settings::watch_registration::CATALOG_KEYWORDS,
-            Section::WatchMetadata => crate::fork::watch::settings::watch_registration::METADATA_KEYWORDS,
+            Section::WatchProviders => crate::fork::watch::settings::watch_registration::PROVIDER_KEYWORDS,
+            Section::WatchHome => crate::fork::watch::settings::watch_registration::HOME_KEYWORDS,
             Section::Advanced => "advanced cache folders copy settings avancado pastas copiar configuracoes",
             Section::GameDefaults => "game defaults wine proton version prefix dxvk nvapi esync fsync sync wayland wow64 gpu performance fps gamescope launch options new games padroes dos jogos versao prefixo desempenho opcoes de inicializacao novos jogos",
             Section::Downloads => "downloads epic updates install atualizacoes instalar baixar",

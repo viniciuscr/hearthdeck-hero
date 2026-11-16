@@ -34,6 +34,15 @@ curates. TMDB's *lists*, *watchlist* and *favourites* are account state and need
 session (§9). "Most played" does not exist anywhere in our vocabulary: a catalogue
 sorts by `Popular | Rating | Newest | Title`, so the rail is called **Popular**.
 
+> **Revision 2026-11-16 (later) — the first page is a settings list.** Every rail
+> the first page draws is one row on **Settings → Watch → Home**, labelled with
+> the provider it comes from ("Continue watching · Stremio", "Movies · Recommended
+> for you · TMDB"), and the list order is the drawing order. A row is either
+> `continue:<provider>` (that provider's Continue watching, derived from the local
+> progress, never from a request) or a collection a source declared. No theme
+> supplies rails in Watch any more. The old `collections` key in
+> `watch-settings.json` still reads (`homeRails` is its name now).
+>
 > **Revision 2026-11-16 — the collections are the first page's, the Shelf is the
 > person's.** The enabled provider collections are no longer drawn in the Shelf
 > tab: the **first page** (the `all` tab) appends one rail per enabled collection,

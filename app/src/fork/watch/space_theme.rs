@@ -16,7 +16,7 @@
 //!   fitted to `MAX_TABS`. It never renames or reorders what the theme already
 //!   brought.
 
-use heronite_data::console_theme::{ConsoleTheme, Layout, MenuItemSpec, ShelfSpec, TabSpec, MAX_TABS};
+use heronite_data::console_theme::{ConsoleTheme, Layout, MenuItemSpec, TabSpec, MAX_TABS};
 use heronite_i18n::tr;
 
 use crate::collection::Space;
@@ -61,7 +61,9 @@ pub fn validate(mut theme: ConsoleTheme, space: Space) -> ConsoleTheme {
                     tab.name = tr!("Watch").to_string();
                 }
             }
-            theme.shelves.retain(|shelf| watch_shelf(&shelf.kind));
+            // The first page is the rails Settings lists: a theme's shelves would
+            // be a second, invisible owner of the same screen.
+            theme.shelves.clear();
             theme
         }
     }
@@ -87,11 +89,8 @@ pub fn present(theme: ConsoleTheme, space: Space) -> ConsoleTheme {
     if theme.tabs.len() < MAX_TABS && !theme.tabs.iter().any(|tab| tab.source == "shelf") {
         theme.tabs.push(TabSpec::new(tr!("Shelf"), Layout::Shelves, "shelf"));
     }
-    if !theme.shelves.iter().any(|shelf| shelf.kind == "recent") {
-        theme.shelves.insert(0, ShelfSpec { kind: "recent".into(), on: true, title: tr!("Continue watching").to_string() });
-    }
-    // The provider collections are not theme shelves: Settings → Watch →
-    // Collections lists them, and the first page draws the ones that are on.
+    // No shelves: Settings → Watch → Home owns the first page's rails, and a
+    // theme brought here has none of them.
     theme
 }
 
@@ -115,16 +114,10 @@ fn watch_tab(tab: &TabSpec) -> Option<TabSpec> {
     keep.then(|| tab.clone())
 }
 
-/// Whether a theme shelf can draw watch titles. The provider collections are
-/// not theme shelves: the first page appends the ones Settings lists.
-fn watch_shelf(kind: &str) -> bool {
-    matches!(kind, "recent") || kind.starts_with("genre:") || kind.starts_with("store:")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use heronite_data::console_theme::presets;
+    use heronite_data::console_theme::{presets, ShelfSpec};
 
     #[test]
     fn a_preset_gets_one_tab_per_watch_source() {
@@ -134,7 +127,7 @@ mod tests {
         assert_eq!(theme.tabs.iter().filter(|tab| tab.source == "type:series").count(), 1);
         assert_eq!(theme.tabs.iter().filter(|tab| tab.source == "shelf").count(), 1);
         assert!(theme.tabs.len() <= MAX_TABS);
-        assert!(theme.shelves.iter().all(|shelf| !matches!(shelf.kind.as_str(), "installed" | "statuses" | "backlog-short" | "forgotten")));
+        assert!(theme.shelves.is_empty(), "the first page's rails are Settings', not a theme's");
     }
 
     #[test]
@@ -191,12 +184,11 @@ mod tests {
     }
 
     #[test]
-    fn the_provider_rails_are_not_theme_shelves() {
+    fn a_theme_brings_no_rails_to_watch() {
         let mut theme = presets::classic();
         theme.shelves.push(ShelfSpec { kind: "provider:top-movies".into(), on: true, title: "Top movies".into() });
         let watch = present(theme, Space::Watch);
-        assert!(watch.shelves.iter().all(|shelf| !shelf.kind.starts_with("provider:")), "the first page draws them");
-        assert!(watch.shelves.iter().any(|shelf| shelf.kind == "recent"));
+        assert!(watch.shelves.is_empty(), "Settings → Watch → Home owns the first page");
     }
 
     #[test]

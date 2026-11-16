@@ -48,11 +48,13 @@ pub fn descriptors_with(http: &dyn Transport, app: &AppPaths) -> Vec<(String, Co
     rails
 }
 
-/// The rails the settings turned on, in the person's order. An id this build does
-/// not have is skipped, the way every other settings list treats one, and a list
-/// that names one rail twice draws it once (it is hand-editable).
+/// The **collection** rails the settings turned on, in the person's order: a
+/// `continue:<provider>` id names a provider's own Continue watching instead, and
+/// is skipped here (the first page draws those itself). An id this build does not
+/// have is skipped, the way every other settings list treats one, and a list that
+/// names one rail twice draws it once (it is hand-editable).
 pub fn enabled(app: &AppPaths) -> Vec<(String, CollectionDescriptor)> {
-    let wanted = heronite_watch_state::settings::read(app).collections;
+    let wanted = heronite_watch_state::settings::read(app).home_rails;
     let declared = descriptors(app);
     let mut rails: Vec<(String, CollectionDescriptor)> = Vec::new();
     for id in &wanted {
@@ -164,7 +166,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = app(dir.path());
         let settings = crate::settings::Settings {
-            collections: vec![
+            home_rails: vec![
                 "tmdb:popular:series".to_owned(),
                 "gone".to_owned(),
                 "tmdb:top-rated:movie".to_owned(),
