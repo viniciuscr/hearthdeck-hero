@@ -28,7 +28,7 @@
   "Continue watching · {provider}": "Reprendre la lecture · {provider}",
   "Could not load more titles: {error}": "Impossible de charger plus de titres : {error}",
   "Could not load streams: {error}": "Impossible de charger les sources : {error}",
-  "Could not open the browser: {error}": "Impossible d’ouvrir le navigateur : {error}",
+  "Could not open the browser, but the QR code works: {error}": "Impossible d’ouvrir le navigateur, mais le code QR fonctionne : {error}",
   "Could not play: {error}": "Impossible de lire : {error}",
   "Could not save that: {error}": "Impossible d'enregistrer : {error}",
   "Could not start the Stremio service: {error}": "Impossible de démarrer le service Stremio : {error}",

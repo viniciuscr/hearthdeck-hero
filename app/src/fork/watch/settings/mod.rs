@@ -619,7 +619,8 @@ fn open_qr(d: &mut SettingsPage, title: &str, url: &str, window: &mut Window, cx
 fn open_approval(d: &mut SettingsPage, token: &str) {
     let url = heronite_watch::tmdb_sign_in::approve_url(token);
     if let Err(error) = heronite_platform::shell::open(&url) {
-        d.watch.notice = Some(tr!("Could not open the browser: {error}", error = error.to_string()).into());
+        log::warn!("opening {url}: {error}");
+        d.watch.notice = Some(tr!("Could not open the browser, but the QR code works: {error}", error = error.to_string()).into());
     }
 }
 
@@ -631,17 +632,28 @@ fn start_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         cx.notify();
         return;
     }
-    match heronite_watch::tmdb_sign_in::start(&d.ctx.app) {
-        Ok(token) => {
-            d.watch.tmdb_pending = Some(token.clone());
-            open_approval(d, &token);
-            // TMDB only says "approved" through step 3, and a phone approves on a
-            // different device: ask again every few seconds instead of waiting for
-            // a button. `finish` answers `Pending` until the person is done.
-            wait_for_approval(d, token, cx);
-        }
-        Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
-    }
+    // Asking TMDB for a token is a network call: off the UI thread, or a slow
+    // answer looks exactly like a dead button.
+    let app = d.ctx.app.clone();
+    cx.spawn(async move |this, cx| {
+        let started = cx.background_spawn(async move { heronite_watch::tmdb_sign_in::start(&app) }).await;
+        this.update(cx, |d, cx| match started {
+            Ok(token) => {
+                d.watch.tmdb_pending = Some(token.clone());
+                open_approval(d, &token);
+                // TMDB only says "approved" through step 3, and a phone approves on
+                // a different device: ask again every few seconds instead of waiting
+                // for a button. `finish` answers `Pending` until the person is done.
+                wait_for_approval(d, token, cx);
+            }
+            Err(error) => {
+                log::warn!("TMDB sign-in did not start: {error:#}");
+                d.watch.notice = Some(format!("{error:#}").into());
+            }
+        })
+        .ok();
+    })
+    .detach();
     cx.notify();
 }
 
@@ -910,11 +922,14 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                     rows.push(Row::action("watch-tmdb-again", tr!("Open the page again")));
                     rows.push(Row::action("watch-tmdb-approved", tr!("I approved it")));
                 } else {
-                    // The hint under a focused row is where a sentence fits.
-                    let hint = if d.watch.tmdb_ready {
-                        tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.")
-                    } else {
-                        tr!("TMDB needs this app's key: the bootstrap sets it (or ~/.config/hearthdeck/tmdb-api-key).")
+                    // The hint under a focused row is where a sentence fits — and
+                    // where a failure has to show, since a console row cannot.
+                    let hint: String = match &d.watch.notice {
+                        Some(notice) => notice.to_string(),
+                        None if d.watch.tmdb_ready => {
+                            tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.").to_string()
+                        }
+                        None => tr!("TMDB needs this app's key: the bootstrap sets it (or ~/.config/hearthdeck/tmdb-api-key).").to_string(),
                     };
                     rows.push(Row::action("watch-tmdb-connect", tr!("Connect TMDB")).desc(hint));
                 }

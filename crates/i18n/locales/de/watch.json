@@ -28,7 +28,7 @@
   "Continue watching · {provider}": "Weiterschauen · {provider}",
   "Could not load more titles: {error}": "Weitere Titel konnten nicht geladen werden: {error}",
   "Could not load streams: {error}": "Quellen konnten nicht geladen werden: {error}",
-  "Could not open the browser: {error}": "Der Browser ließ sich nicht öffnen: {error}",
+  "Could not open the browser, but the QR code works: {error}": "Der Browser ließ sich nicht öffnen, der QR-Code funktioniert aber: {error}",
   "Could not play: {error}": "Wiedergabe fehlgeschlagen: {error}",
   "Could not save that: {error}": "Konnte nicht gespeichert werden: {error}",
   "Could not start the Stremio service: {error}": "Der Stremio-Dienst konnte nicht gestartet werden: {error}",
