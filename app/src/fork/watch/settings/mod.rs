@@ -201,6 +201,22 @@ pub(crate) fn home_rows(d: &SettingsPage) -> Vec<Row> {
         let label = format!("{} · {name}", crate::fork::watch::rails::title(rail));
         rows.push(Row::toggle(SharedString::from(format!("watch-home:{}", rail.id)), SharedString::from(label), on(&rail.id)));
     }
+    // TMDB's account rails are offered even when the v4 read token is not in
+    // place yet: the switch is where a person looks for them, and its hint says
+    // what it still needs. A rail that is declared is already in the list above.
+    let recommended = tr!("Recommended for you");
+    for (kind, label) in [("movie", tr!("Movies")), ("series", tr!("Series"))] {
+        let id = format!("tmdb:recommended:{kind}");
+        if d.watch.collections.iter().any(|(_, rail)| rail.id == id) {
+            continue;
+        }
+        rows.push(
+            Row::toggle(SharedString::from(format!("watch-home:{id}")), SharedString::from(format!("{label} · {recommended}")), on(&id))
+                .desc(tr!(
+                    "TMDB needs its v4 read access token for this rail: the bootstrap sets it (or ~/.config/hearthdeck/tmdb-access-token)."
+                )),
+        );
+    }
     rows.push(Row::info("watch-home-note", tr!("Order"), tr!("Rails are drawn in the order they were turned on.")));
     rows
 }
