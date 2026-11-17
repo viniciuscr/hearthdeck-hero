@@ -325,19 +325,31 @@ fn years() -> Vec<String> {
     (0..YEARS).map(|back| (this - back).to_string()).collect()
 }
 
-/// The API key, from the credential store and nowhere else.
+/// The TMDB API key this build carries (`HEARTHDECK_TMDB_API_KEY` when it was
+/// compiled). TMDB needs a key for **every** call, the login included — there is
+/// no anonymous way in — so the application is what holds one, and the person
+/// only ever approves a session.
+pub fn built_in_key() -> Option<&'static str> {
+    option_env!("HEARTHDECK_TMDB_API_KEY").map(str::trim).filter(|key| !key.is_empty())
+}
+
+/// The API key to use: the build's own, else one kept in the credential store
+/// (a build made without the variable still works when a key was stored).
 pub(crate) fn api_key(credentials: &dyn Credentials) -> Result<String> {
+    if let Some(key) = built_in_key() {
+        return Ok(key.to_owned());
+    }
     let Some(secret) = credentials.get("tmdb")? else {
-        bail!("TMDB needs an API key: Settings → Watch → Catalogs.");
+        bail!("This build carries no TMDB API key: compile with HEARTHDECK_TMDB_API_KEY.");
     };
     let key = match secret.decode::<Key>() {
         Ok(Key { api_key }) => api_key,
-        // A bare string is accepted too: it is what a person pastes.
+        // A bare string is accepted too: it is what an older build stored.
         Err(_) => secret.value().as_str().unwrap_or_default().to_owned(),
     };
     let key = key.trim().to_owned();
     if key.is_empty() {
-        bail!("TMDB's API key is empty: Settings → Watch → Catalogs.");
+        bail!("This build carries no TMDB API key: compile with HEARTHDECK_TMDB_API_KEY.");
     }
     Ok(key)
 }
@@ -346,9 +358,9 @@ pub(crate) fn api_key(credentials: &dyn Credentials) -> Result<String> {
 /// one. Only the account endpoints need it; a catalogue answers with the key.
 fn account_session(credentials: &dyn Credentials) -> Result<auth::Session> {
     let Some(secret) = credentials.get("tmdb")? else {
-        bail!("TMDB needs an API key: Settings → Watch → Catalogs.");
+        bail!("TMDB needs you signed in: Settings → Watch → Providers, Connect TMDB.");
     };
-    auth::session_of(&secret).with_context(|| "TMDB needs you signed in: Settings → Watch → Catalogs, Connect TMDB.")
+    auth::session_of(&secret).with_context(|| "TMDB needs you signed in: Settings → Watch → Providers, Connect TMDB.")
 }
 
 /// The IMDb id TMDB holds for one of its titles, when it holds one, kept in the
@@ -792,7 +804,7 @@ mod tests {
         let http = Fake::new();
         let credentials = Keyed(None);
         let error = Tmdb::new().catalogs(&ctx_with(&http, &credentials)).unwrap_err();
-        assert!(format!("{error:#}").contains("Settings → Watch → Catalogs"), "{error:#}");
+        assert!(format!("{error:#}").contains("HEARTHDECK_TMDB_API_KEY"), "the build holds the key: {error:#}");
     }
 }
 

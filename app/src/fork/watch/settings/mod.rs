@@ -31,9 +31,10 @@ pub struct State {
     busy: bool,
     offer: Option<LinkOffer>,
     notice: Option<SharedString>,
-    /// Whether a TMDB key is stored: read once, because Settings must not touch
-    /// the credential file on every frame, and updated when it changes.
-    pub tmdb_key: bool,
+    /// Whether TMDB can be used in this build: it carries the application key
+    /// (`HEARTHDECK_TMDB_API_KEY`), or an older build stored one. The person is
+    /// never asked for it.
+    pub tmdb_ready: bool,
     /// The TMDB account signed in on this machine, by name (empty when TMDB did
     /// not say, `None` when there is no session).
     pub tmdb_username: Option<SharedString>,
@@ -50,7 +51,7 @@ pub struct State {
 impl State {
     pub fn new(ctx: &PageCtx) -> Self {
         let linked = heronite_watch::store::read_auth(&ctx.app).ok().flatten().is_some();
-        let tmdb_key = heronite_watch::store::read_tmdb_key(&ctx.app).ok().flatten().is_some();
+        let tmdb_ready = heronite_watch::tmdb_sign_in::configured(&ctx.app);
         let tmdb_username = heronite_watch::tmdb_sign_in::session(&ctx.app).map(|session| SharedString::from(session.username));
         let collections = heronite_watch::collections::descriptors(&ctx.app);
         Self {
@@ -58,7 +59,7 @@ impl State {
             busy: false,
             offer: None,
             notice: None,
-            tmdb_key,
+            tmdb_ready,
             tmdb_username,
             tmdb_pending: None,
             recap: recap::Recency::default(),
@@ -476,13 +477,10 @@ fn tmdb_card(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> AnyElement {
             tr!("Approve the sign-in in your browser, then come back.").to_string(),
             tr!("TMDB opened in your browser: there is nothing to type here."),
         ),
-        (None, None) if d.watch.tmdb_key => {
-            (tr!("TMDB").to_string(), tr!("The key is set. Sign in to let your watchlist and favourites follow the account."))
+        (None, None) if d.watch.tmdb_ready => {
+            (tr!("TMDB").to_string(), tr!("Connect and approve it on your phone: your watchlist and favourites then follow the account."))
         }
-        (None, None) => (
-            tr!("TMDB").to_string(),
-            tr!("Browsing needs an API key from your TMDB account: Connect asks for it once, then opens TMDB to approve the sign-in."),
-        ),
+        (None, None) => (tr!("TMDB").to_string(), tr!("This build carries no TMDB API key: it is compiled with HEARTHDECK_TMDB_API_KEY.")),
     };
     let mut card = div().flex().flex_col().gap(px(10.)).child(
         div()
@@ -549,11 +547,11 @@ fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
             "watch-tmdb-connect",
             ButtonKind::Primary,
             tr!("Connect TMDB"),
-            true,
+            d.watch.tmdb_ready,
             cx.listener(|d, _, window, cx| connect_tmdb(d, window, cx)),
         ));
     }
-    if d.watch.tmdb_key {
+    if d.watch.tmdb_username.is_some() {
         buttons = buttons.child(action_button(
             "watch-tmdb-forget",
             ButtonKind::Ghost,
@@ -569,22 +567,12 @@ fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
 /// on-screen one in console mode), then send the person to TMDB's approval page.
 fn connect_tmdb(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) {
     d.watch.notice = None;
-    if d.watch.tmdb_key {
-        start_tmdb_sign_in(d, cx);
-        return;
-    }
-    // The key comes from the clipboard — nobody types 32 characters, least of all
-    // on a couch — and then TMDB's own page approves the account. No token is
-    // ever written by hand here.
-    let text = cx.read_from_clipboard().and_then(|item| item.text()).map(|text| text.to_owned()).unwrap_or_default();
-    if text.trim().is_empty() {
-        d.watch.notice = Some(tr!("Copy the TMDB API key first: it is read from the clipboard, you type nothing.").into());
+    if !d.watch.tmdb_ready {
+        d.watch.notice = Some(tr!("This build carries no TMDB API key: it is compiled with HEARTHDECK_TMDB_API_KEY.").into());
         cx.notify();
         return;
     }
-    if save_tmdb_key(d, &text, cx) {
-        start_tmdb_sign_in(d, cx);
-    }
+    start_tmdb_sign_in(d, cx);
 }
 
 /// Shows `url` as a QR code over the settings, for a phone to scan: console mode
@@ -614,7 +602,7 @@ fn open_approval(d: &mut SettingsPage, token: &str) {
 /// Asks TMDB for a request token and sends the person to its page.
 fn start_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     d.watch.notice = None;
-    if !d.watch.tmdb_key {
+    if !d.watch.tmdb_ready {
         d.watch.notice = Some(tr!("Add the TMDB API key first.").into());
         cx.notify();
         return;
@@ -696,39 +684,10 @@ fn set_catalog_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Con
     cx.notify();
 }
 
-/// Stores the key and says what happened; whether it took it.
-fn save_tmdb_key(d: &mut SettingsPage, text: &str, cx: &mut Context<SettingsPage>) -> bool {
-    let key = text.trim();
-    if key.is_empty() {
-        d.watch.notice = Some(tr!("That key is empty.").into());
-        cx.notify();
-        return false;
-    }
-    match heronite_watch::store::write_tmdb_key(&d.ctx.app, key) {
-        Ok(()) => {
-            d.watch.tmdb_key = true;
-            // A source's rails can depend on its key, so the list is read again.
-            d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
-            d.watch.notice = Some(tr!("The TMDB API key was saved.").into());
-            crate::collection::watch_catalog::catalogs_changed();
-            // The collection rails are resolved with the library: the ones that
-            // were waiting for this key are drawn from now on.
-            cx.emit(crate::pages::PageEvent::LibraryChanged);
-            true
-        }
-        Err(error) => {
-            log::warn!("saving the TMDB key: {error:#}");
-            d.watch.notice = Some(tr!("The TMDB API key could not be saved.").into());
-            false
-        }
-    }
-}
-
 fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     if let Err(error) = heronite_watch::store::clear_tmdb_key(&d.ctx.app) {
         log::warn!("clearing the TMDB key: {error:#}");
     }
-    d.watch.tmdb_key = false;
     d.watch.tmdb_username = None;
     d.watch.tmdb_pending = None;
     d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
@@ -878,7 +837,7 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                 } else {
                     rows.push(Row::action("watch-tmdb-connect", tr!("Connect TMDB")));
                 }
-                if d.watch.tmdb_key {
+                if d.watch.tmdb_username.is_some() {
                     rows.push(Row::action("watch-tmdb-forget", tr!("Forget TMDB")));
                 }
             }

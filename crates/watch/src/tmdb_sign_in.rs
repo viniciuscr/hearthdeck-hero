@@ -49,8 +49,19 @@ pub fn sign_out(app: &AppPaths) -> Result<()> {
 /// a character) rather than a network fault.
 pub use heronite_watch_tmdb::auth::key_rejected;
 
+/// The key to sign in with: the build's own when it carries one, else a key an
+/// older build stored. The person never supplies one — TMDB's application key is
+/// the app's, and the login is the only thing they do.
 fn key(app: &AppPaths) -> Result<String> {
-    crate::store::read_tmdb_key(app)?.context("TMDB needs an API key first: Settings → Watch → Catalogs.")
+    if let Some(key) = heronite_watch_tmdb::built_in_key() {
+        return Ok(key.to_owned());
+    }
+    crate::store::read_tmdb_key(app)?.context("This build carries no TMDB API key: compile with HEARTHDECK_TMDB_API_KEY.")
+}
+
+/// Whether TMDB can be used at all in this build: a key to send.
+pub fn configured(app: &AppPaths) -> bool {
+    key(app).is_ok()
 }
 
 #[cfg(test)]

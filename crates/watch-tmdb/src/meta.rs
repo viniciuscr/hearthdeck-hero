@@ -526,7 +526,7 @@ mod tests {
         let credentials = Keyed(None);
         let title = TitleRef::new("stremio", "tt0133093", "movie");
         let error = TmdbMeta.details(&ctx(&http, &credentials), &title).unwrap_err();
-        assert!(format!("{error:#}").contains("Settings → Watch"), "{error:#}");
+        assert!(format!("{error:#}").contains("HEARTHDECK_TMDB_API_KEY"), "the build holds the key: {error:#}");
     }
 
     #[test]
