@@ -334,6 +334,9 @@ pub fn render_providers(d: &mut SettingsPage, _window: &mut Window, cx: &mut Con
         for provider in &sources {
             column = column.child(provider_card(d, provider, &settings, cx));
         }
+        // TMDB's terms require the credit wherever its data is shown.
+        column = column
+            .child(div().px(px(6.)).child(meta_text(tr!("This product uses the TMDB API but is not endorsed or certified by TMDB."))));
     }
     if let Some(notice) = &d.watch.notice {
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
@@ -893,6 +896,11 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                 }
             }
         }
+    }
+    // TMDB's terms require the credit wherever its data is shown.
+    rows.push(Row::info("watch-tmdb-credit", tr!("TMDB"), tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.")));
+    if let Some(notice) = &d.watch.notice {
+        rows.push(Row::info("watch-notice", tr!("Notice"), SharedString::from(notice.to_string())));
     }
     rows
 }
