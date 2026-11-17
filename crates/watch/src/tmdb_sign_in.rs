@@ -53,10 +53,18 @@ pub use heronite_watch_tmdb::auth::key_rejected;
 /// older build stored. The person never supplies one — TMDB's application key is
 /// the app's, and the login is the only thing they do.
 fn key(app: &AppPaths) -> Result<String> {
+    // This machine's key first (the bootstrap writes one; so does whoever runs
+    // their own), then the one the build was shipped with.
+    if let Some(key) = crate::store::read_tmdb_key(app)? {
+        let key = key.trim().to_owned();
+        if !key.is_empty() {
+            return Ok(key);
+        }
+    }
     if let Some(key) = heronite_watch_tmdb::built_in_key() {
         return Ok(key.to_owned());
     }
-    crate::store::read_tmdb_key(app)?.context("This build carries no TMDB API key: compile with HEARTHDECK_TMDB_API_KEY.")
+    anyhow::bail!("TMDB needs this app's key: the bootstrap sets it, or set HEARTHDECK_TMDB_API_KEY when building.")
 }
 
 /// Whether TMDB can be used at all in this build: a key to send.
@@ -126,7 +134,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = app_paths(dir.path());
         let error = start(&app).unwrap_err();
-        assert!(format!("{error:#}").contains("API key"), "{error:#}");
+        assert!(format!("{error:#}").contains("this app's key"), "{error:#}");
         // And the empty credential shape is not mistaken for a session.
         assert_eq!(auth::session_of(&Secret::new(serde_json::json!({ "apiKey": "key1" }))), None);
     }

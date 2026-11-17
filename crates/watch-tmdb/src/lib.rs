@@ -349,22 +349,27 @@ pub fn key_file(dir: &std::path::Path) -> Option<String> {
 /// may carry, else one kept in the credential store (a build made without the
 /// variable still works when a key was stored).
 pub(crate) fn api_key(credentials: &dyn Credentials) -> Result<String> {
+    // The key this machine carries wins: the bootstrap writes one for the console
+    // box, and someone running their own key keeps it. The build's own key is the
+    // default a release ships with.
+    let stored = credentials
+        .get("tmdb")
+        .ok()
+        .flatten()
+        .map(|secret| match secret.decode::<Key>() {
+            Ok(Key { api_key }) => api_key,
+            // A bare string is accepted too: it is what the key file holds.
+            Err(_) => secret.value().as_str().unwrap_or_default().to_owned(),
+        })
+        .map(|key| key.trim().to_owned())
+        .filter(|key| !key.is_empty());
+    if let Some(key) = stored {
+        return Ok(key);
+    }
     if let Some(key) = built_in_key() {
         return Ok(key.to_owned());
     }
-    let Some(secret) = credentials.get("tmdb")? else {
-        bail!("This build carries no TMDB API key: compile with HEARTHDECK_TMDB_API_KEY.");
-    };
-    let key = match secret.decode::<Key>() {
-        Ok(Key { api_key }) => api_key,
-        // A bare string is accepted too: it is what an older build stored.
-        Err(_) => secret.value().as_str().unwrap_or_default().to_owned(),
-    };
-    let key = key.trim().to_owned();
-    if key.is_empty() {
-        bail!("This build carries no TMDB API key: compile with HEARTHDECK_TMDB_API_KEY.");
-    }
-    Ok(key)
+    bail!("TMDB needs this app's key: the bootstrap sets it, or set HEARTHDECK_TMDB_API_KEY when building.");
 }
 
 /// The TMDB session in the credential store, or the words that say how to get
