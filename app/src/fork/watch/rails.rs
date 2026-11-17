@@ -16,11 +16,6 @@ pub fn title(descriptor: &CollectionDescriptor) -> String {
         "series" => tr!("Series"),
         _ => return descriptor.name.clone(),
     };
-    // What the person's own account suggests: no order to name, so the screen
-    // says it instead of the source's words.
-    if descriptor.rule.account {
-        return format!("{kind} · {}", tr!("Recommended for you"));
-    }
     if descriptor.rule.search.is_some() || !descriptor.rule.filters.is_empty() {
         return descriptor.name.clone();
     }
@@ -53,18 +48,6 @@ mod tests {
         assert_eq!(title(&rail("Films · Top rated", "movie", CatalogSort::Rating)), named(tr!("Movies"), tr!("Top rated")));
         assert_eq!(title(&rail("Series · Popular", "series", CatalogSort::Popular)), named(tr!("Series"), tr!("Popular")));
         assert_eq!(title(&rail("Films · Newest", "movie", CatalogSort::Newest)), named(tr!("Movies"), tr!("Newest")));
-    }
-
-    #[test]
-    fn an_account_rail_says_what_it_is() {
-        let mut recommended = rail("Films · Recommended for you", "movie", CatalogSort::Popular);
-        recommended.rule.account = true;
-        assert_eq!(title(&recommended), format!("{} · {}", tr!("Movies"), tr!("Recommended for you")));
-        assert_eq!(
-            title(&rail("Films · Recommended for you", "series", CatalogSort::Popular)).find("Recommended"),
-            None,
-            "without the account flag it is a plain Popular rail again"
-        );
     }
 
     #[test]

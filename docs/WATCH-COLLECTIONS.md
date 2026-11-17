@@ -373,3 +373,17 @@ and the Settings rows all ask that registry, and an id a build does not have is
 skipped like every other settings list. The one place the app names a source is
 the row that says whether its key is set (`fork/watch/settings::source_keyed`) —
 the same place that already names TMDB's key.
+
+### Why the account's recommendations are not there yet
+
+`/account/{id}/movie/recommendations` is a **v4** endpoint
+(`api.themoviedb.org/4/account/{account_object_id}/movie/recommendations` —
+doc fetched from the v4 reference, 2026-11-17); the v3 root has no such path, which
+is the 404 the log showed at both roots. v4 authenticates with
+`Authorization: Bearer <v4 read access token>`, and `heronite-watch-core`'s
+`Transport` sends no headers at all (`get(url)`, `post_json(url, body)`), so the
+rails were removed rather than left failing every frame.
+
+Putting them back means two additions, not one: a header on the transport, and the
+person's **v4 read token** (a second credential, next to the session) — which would
+have to be asked for at bootstrap, like the v3 key.

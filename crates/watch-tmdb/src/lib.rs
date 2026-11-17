@@ -29,7 +29,6 @@ use url::Url;
 use heronite_watch_core::catalog::{
     CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
 };
-use heronite_watch_core::http::http_status;
 use heronite_watch_core::provider::{Credentials, Secret};
 use heronite_watch_core::types::MovieItem;
 
@@ -111,11 +110,6 @@ impl WatchCatalogSource for Tmdb {
         let Some(kind) = tmdb_kind(&request.kind) else {
             return Ok(CatalogPage::default());
         };
-        // The account's own suggestions: the same shape of answer as `discover`,
-        // asked of the person instead of the catalogue.
-        if request.account {
-            return self.recommendations(ctx, request, &key, kind);
-        }
         let page = request.skip / PAGE + 1;
         let search = request.search.as_deref().map(str::trim).filter(|search| !search.is_empty());
         let mut url = Url::parse(&format!("{API}/{}/{kind}", if search.is_some() { "search" } else { "discover" }))?;
@@ -164,56 +158,6 @@ impl Tmdb {
         let more = page < found.total_pages.clamp(1, MAX_PAGE);
         let consumed = found.results.len() as u32;
         Ok(CatalogPage { items, more, consumed })
-    }
-
-    /// `/account/{id}/{kind}/recommendations`: what the person's own TMDB account
-    /// suggests. It takes the session they approved (Settings → Watch →
-    /// Catalogs), and the account id, which a session kept before the id was
-    /// known asks for once.
-    fn recommendations(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest, key: &str, kind: &str) -> Result<CatalogPage> {
-        let session = account_session(ctx.credentials)?;
-        let account = if session.account_id == 0 { auth::account(ctx.http, key, &session.id)?.id } else { session.account_id };
-        if account == 0 {
-            bail!("TMDB did not say which account the session belongs to: sign in again.");
-        }
-        let page = request.skip / PAGE + 1;
-        let found = self.recommendations_page(ctx, key, &session.id, account, kind, page)?;
-        self.page_of(ctx, key, kind, found, page)
-    }
-
-    /// The account's recommendations, asked at the v3 root and — when TMDB does
-    /// not know the endpoint there — at the v4 one, which is where its reference
-    /// documents it. The path names the account, never the key, so it is safe to
-    /// put in an error: a 404 here is otherwise a silent puzzle.
-    fn recommendations_page(
-        &self,
-        ctx: &CatalogCtx<'_>,
-        key: &str,
-        session: &str,
-        account: u64,
-        kind: &str,
-        page: u32,
-    ) -> Result<Discover> {
-        let mut last: Option<anyhow::Error> = None;
-        for root in [API, API_V4] {
-            let mut url = Url::parse(&format!("{root}/account/{account}/{kind}/recommendations"))?;
-            let number = page.to_string();
-            url.query_pairs_mut().extend_pairs([
-                ("api_key", key),
-                ("session_id", session),
-                ("page", number.as_str()),
-                ("language", "en-US"),
-            ]);
-            match ctx.http.get(&url) {
-                Ok(body) => return serde_json::from_slice(&body).context("TMDB recommendations"),
-                // Only "not here" moves on: any other answer is the real one.
-                Err(error) if http_status(&error) == Some(404) => last = Some(error),
-                Err(error) => return Err(error).context("TMDB recommendations"),
-            }
-        }
-        Err(last.unwrap_or_else(|| anyhow::anyhow!("TMDB recommendations: no answer"))).with_context(|| {
-            format!("TMDB recommendations for account {account}: /account/{account}/{kind}/recommendations, at the v3 and v4 roots")
-        })
     }
 
     /// The IMDb id of every title on a page: the cache answers most of them, and
@@ -380,15 +324,6 @@ pub(crate) fn api_key(credentials: &dyn Credentials) -> Result<String> {
         return Ok(key.to_owned());
     }
     bail!("TMDB needs this app's key: the bootstrap sets it, or set HEARTHDECK_TMDB_API_KEY when building.");
-}
-
-/// The TMDB session in the credential store, or the words that say how to get
-/// one. Only the account endpoints need it; a catalogue answers with the key.
-fn account_session(credentials: &dyn Credentials) -> Result<auth::Session> {
-    let Some(secret) = credentials.get("tmdb")? else {
-        bail!("TMDB needs you signed in: Settings → Watch → Providers, Connect TMDB.");
-    };
-    auth::session_of(&secret).with_context(|| "TMDB needs you signed in: Settings → Watch → Providers, Connect TMDB.")
 }
 
 /// The IMDb id TMDB holds for one of its titles, when it holds one, kept in the
@@ -570,22 +505,6 @@ mod tests {
         }
     }
 
-    /// A key and the session a person approved, whose account id is already known.
-    struct SignedIn;
-
-    impl Credentials for SignedIn {
-        fn get(&self, provider: &str) -> Result<Option<Secret>> {
-            let session = auth::Session { id: "sess456".into(), username: "cinephile".into(), account_id: 42 };
-            Ok((provider == "tmdb").then(|| auth::secret_with_session("test-key", &session)))
-        }
-        fn set(&self, _: &str, _: &Secret) -> Result<()> {
-            Ok(())
-        }
-        fn clear(&self, _: &str) -> Result<()> {
-            Ok(())
-        }
-    }
-
     struct Keyed(Option<&'static str>);
 
     impl Credentials for Keyed {
@@ -720,114 +639,6 @@ mod tests {
     }
 
     #[test]
-    fn an_account_rail_asks_the_accounts_own_recommendations() {
-        let http = Fake::new();
-        let credentials = SignedIn;
-        let cache = Cache::default();
-        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: Some(&cache) };
-        let request = CatalogRequest { account: true, ..CatalogRequest::first("movie") };
-        let page = Tmdb::new().catalog(&ctx, &request).unwrap();
-        assert_eq!(page.items.len(), 1, "the one with an IMDb id");
-        assert_eq!(page.items[0].id, "tt0068646");
-        assert_eq!(page.items[0].name, "The Godfather");
-        let seen = http.seen.lock().unwrap().clone();
-        let asked = seen.iter().find(|url| url.contains("/account/42/movie/recommendations")).expect("the account endpoint");
-        assert!(asked.contains("session_id=sess456"), "{asked}");
-        assert!(!page.more, "one page is all TMDB recommends here");
-    }
-
-    #[test]
-    fn an_account_rail_falls_back_to_the_v4_root_when_v3_does_not_know_it() {
-        use heronite_watch_core::http::HttpStatus;
-        struct OnlyAtV4 {
-            seen: Mutex<Vec<String>>,
-        }
-        impl Transport for OnlyAtV4 {
-            fn get(&self, url: &Url) -> Result<Vec<u8>> {
-                self.seen.lock().unwrap().push(url.as_str().to_owned());
-                if url.path().starts_with("/3/account/") {
-                    return Err(anyhow::Error::new(HttpStatus::new(url, 404)));
-                }
-                if url.path().contains("external_ids") {
-                    return Ok(br#"{"id":605,"imdb_id":"tt0068646"}"#.to_vec());
-                }
-                Ok(br#"{"page":1,"total_pages":1,"results":[{"id":605,"title":"The Godfather"}]}"#.to_vec())
-            }
-            fn post_json(&self, _: &Url, _: &serde_json::Value) -> Result<Vec<u8>> {
-                Ok(b"{}".to_vec())
-            }
-        }
-        let http = OnlyAtV4 { seen: Mutex::new(Vec::new()) };
-        let credentials = SignedIn;
-        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
-        let page = Tmdb::new().catalog(&ctx, &CatalogRequest { account: true, ..CatalogRequest::first("movie") }).unwrap();
-        assert_eq!(page.items.len(), 1, "the v4 root answered where v3 had nothing");
-        let seen = http.seen.lock().unwrap().clone();
-        assert!(seen[0].contains("/3/account/42/movie/recommendations"), "{seen:?}");
-        assert!(seen.iter().any(|url| url.contains("/4/account/42/movie/recommendations")), "the v4 root was tried: {seen:?}");
-    }
-
-    #[test]
-    fn a_recommendations_failure_names_the_account_and_the_path_never_the_key() {
-        use heronite_watch_core::http::HttpStatus;
-        struct Down;
-        impl Transport for Down {
-            fn get(&self, url: &Url) -> Result<Vec<u8>> {
-                Err(anyhow::Error::new(HttpStatus::new(url, 404)))
-            }
-            fn post_json(&self, _: &Url, _: &serde_json::Value) -> Result<Vec<u8>> {
-                Ok(b"{}".to_vec())
-            }
-        }
-        let http = Down;
-        let credentials = SignedIn;
-        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
-        let error = Tmdb::new().catalog(&ctx, &CatalogRequest { account: true, ..CatalogRequest::first("movie") }).unwrap_err();
-        let text = format!("{error:#}");
-        assert!(text.contains("account 42"), "the account id is not a secret and names the call: {text}");
-        assert!(text.contains("/account/42/movie/recommendations"), "{text}");
-        assert!(!text.contains("test-key") && !text.contains("sess456"), "no secret in the message: {text}");
-    }
-
-    #[test]
-    fn an_account_rail_without_a_session_says_to_sign_in() {
-        let http = Fake::new();
-        let credentials = Keyed(Some("test-key"));
-        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
-        let request = CatalogRequest { account: true, ..CatalogRequest::first("movie") };
-        let error = Tmdb::new().catalog(&ctx, &request).unwrap_err();
-        assert!(format!("{error:#}").contains("signed in"), "{error:#}");
-    }
-
-    #[test]
-    fn a_session_without_an_account_id_asks_for_it_once() {
-        let http = Fake::new();
-        // The session a build kept before the account id was stored.
-        struct OldSession;
-        impl Credentials for OldSession {
-            fn get(&self, provider: &str) -> Result<Option<Secret>> {
-                let session = auth::Session { id: "sess456".into(), username: "cinephile".into(), account_id: 0 };
-                Ok((provider == "tmdb").then(|| auth::secret_with_session("test-key", &session)))
-            }
-            fn set(&self, _: &str, _: &Secret) -> Result<()> {
-                Ok(())
-            }
-            fn clear(&self, _: &str) -> Result<()> {
-                Ok(())
-            }
-        }
-        let credentials = OldSession;
-        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
-        let page = Tmdb::new().catalog(&ctx, &CatalogRequest { account: true, ..CatalogRequest::first("movie") }).unwrap();
-        assert_eq!(page.items.len(), 1);
-        let seen = http.seen.lock().unwrap().clone();
-        assert!(
-            seen.iter().any(|url| url.ends_with("/account?api_key=test-key&session_id=sess456") || url.contains("/3/account?")),
-            "{seen:?}"
-        );
-    }
-
-    #[test]
     fn without_a_key_tmdb_says_where_to_put_it() {
         let http = Fake::new();
         let credentials = Keyed(None);
@@ -850,26 +661,11 @@ impl heronite_watch_core::collections::WatchCollectionSource for TmdbCollections
 
     fn collections(
         &self,
-        ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
+        _ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
     ) -> Result<Vec<heronite_watch_core::collections::CollectionDescriptor>> {
         use heronite_watch_core::catalog::{CatalogRequest, CatalogSort};
         use heronite_watch_core::collections::CollectionDescriptor;
         let mut rails = Vec::new();
-        // The account's own suggestions come first, and exist only while the
-        // person is signed in: without a session there is no account to ask, and
-        // a rail nobody can answer would be a dead switch. Signing in is a
-        // credential read, not a request, so declaring here costs nothing.
-        let signed_in = ctx.credentials.get("tmdb")?.as_ref().and_then(auth::session_of).is_some();
-        if signed_in {
-            for (kind, label) in [("movie", "Films"), ("series", "Series")] {
-                rails.push(CollectionDescriptor {
-                    id: format!("tmdb:recommended:{kind}"),
-                    name: format!("{label} · Recommended for you"),
-                    kind: kind.to_owned(),
-                    rule: CatalogRequest { account: true, ..CatalogRequest::first(kind) },
-                });
-            }
-        }
         for (kind, label) in [("movie", "Films"), ("series", "Series")] {
             for (id, name, sort) in [("top-rated", "Top rated", CatalogSort::Rating), ("popular", "Popular", CatalogSort::Popular)] {
                 rails.push(CollectionDescriptor {
@@ -903,22 +699,6 @@ mod collection_tests {
         }
     }
 
-    /// A key and the session a person approved, whose account id is already known.
-    struct SignedIn;
-
-    impl Credentials for SignedIn {
-        fn get(&self, provider: &str) -> Result<Option<Secret>> {
-            let session = auth::Session { id: "sess456".into(), username: "cinephile".into(), account_id: 42 };
-            Ok((provider == "tmdb").then(|| auth::secret_with_session("test-key", &session)))
-        }
-        fn set(&self, _: &str, _: &Secret) -> Result<()> {
-            Ok(())
-        }
-        fn clear(&self, _: &str) -> Result<()> {
-            Ok(())
-        }
-    }
-
     struct NoKey;
 
     impl Credentials for NoKey {
@@ -931,19 +711,6 @@ mod collection_tests {
         fn clear(&self, _: &str) -> Result<()> {
             Ok(())
         }
-    }
-
-    #[test]
-    fn a_signed_in_tmdb_offers_the_accounts_recommendations_first() {
-        let (http, credentials) = (Nothing, SignedIn);
-        let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
-        let rails = TmdbCollections.collections(&ctx).unwrap();
-        let ids: Vec<&str> = rails.iter().map(|rail| rail.id.as_str()).collect();
-        assert_eq!(ids[0], "tmdb:recommended:movie");
-        assert_eq!(ids[1], "tmdb:recommended:series");
-        assert!(rails[0].rule.account && rails[1].rule.account);
-        assert_eq!(rails[0].kind, "movie");
-        assert_eq!(rails.len(), 6, "two account rails and the four catalogue ones");
     }
 
     #[test]

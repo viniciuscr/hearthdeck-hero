@@ -32,11 +32,6 @@ pub struct CatalogRequest {
     pub sort: CatalogSort,
     /// The chosen filters as `filter id → value` (`genre` → `Action`).
     pub filters: Vec<(String, String)>,
-    /// Asked of the person's own account (what TMDB recommends to them), not of a
-    /// catalogue anybody can browse. The source answers it with its account
-    /// endpoint and the session the person approved, so such a rail exists only
-    /// while they are signed in.
-    pub account: bool,
 }
 
 impl CatalogRequest {
