@@ -8,7 +8,7 @@ use heronite_watch::account::{create_link, read_link, LinkOffer, LinkPoll};
 use heronite_watch::{Endpoints, UreqTransport};
 
 use crate::collection::Space;
-use crate::console::layers::{self, HasLayer};
+use crate::console::layers::HasLayer;
 use crate::console::list::{Outcome, Row, Value};
 use crate::console::themes;
 use crate::fork::watch::prefs::default_theme as watch_default_theme;
@@ -19,6 +19,7 @@ use crate::ui::controls::{action_button, caption, card, card_box, toggle_row, Bu
 use crate::ui::fields::meta_text;
 
 pub mod qr;
+mod qr_overlay;
 pub mod recap;
 
 pub mod registration;
@@ -483,14 +484,34 @@ fn tmdb_card(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> AnyElement {
             tr!("Browsing needs an API key from your TMDB account: Connect asks for it once, then opens TMDB to approve the sign-in."),
         ),
     };
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(12.))
-        .child(div().flex().flex_col().gap(px(3.)).child(div().text_size(px(13.5)).child(title)).child(meta_text(desc)))
-        .child(tmdb_buttons(d, cx))
-        .into_any_element()
+    let mut card = div().flex().flex_col().gap(px(10.)).child(
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.))
+            .child(div().flex().flex_col().gap(px(3.)).child(div().text_size(px(13.5)).child(title)).child(meta_text(desc)))
+            .child(tmdb_buttons(d, cx)),
+    );
+    // Waiting for the approval: the same page as a QR, so a phone approves it
+    // without the host's browser.
+    if let Some(token) = d.watch.tmdb_pending.as_deref() {
+        let url = heronite_watch::tmdb_sign_in::approve_url(token);
+        let mut row = div().flex().items_center().gap(px(16.));
+        if let Some(code) = qr::qr_code(&url, 3.0) {
+            row = row.child(code);
+        }
+        row = row.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .child(meta_text(tr!("Scan it with a phone to approve, or open it here.")))
+                .child(div().text_size(px(12.)).text_color(theme::text_muted()).child(url)),
+        );
+        card = card.child(row);
+    }
+    card.into_any_element()
 }
 
 fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
@@ -546,17 +567,39 @@ fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
 
 /// The one way in: ask for the key when there is none (the keyboard, or the
 /// on-screen one in console mode), then send the person to TMDB's approval page.
-fn connect_tmdb(d: &mut SettingsPage, window: &mut Window, cx: &mut Context<SettingsPage>) {
+fn connect_tmdb(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) {
     d.watch.notice = None;
     if d.watch.tmdb_key {
         start_tmdb_sign_in(d, cx);
         return;
     }
-    layers::open_osk(d.layer_mut(), tr!("TMDB API key"), "", window, cx, |d, text, _, cx| {
-        if save_tmdb_key(d, &text, cx) {
-            start_tmdb_sign_in(d, cx);
+    // The key comes from the clipboard — nobody types 32 characters, least of all
+    // on a couch — and then TMDB's own page approves the account. No token is
+    // ever written by hand here.
+    let text = cx.read_from_clipboard().and_then(|item| item.text()).map(|text| text.to_owned()).unwrap_or_default();
+    if text.trim().is_empty() {
+        d.watch.notice = Some(tr!("Copy the TMDB API key first: it is read from the clipboard, you type nothing.").into());
+        cx.notify();
+        return;
+    }
+    if save_tmdb_key(d, &text, cx) {
+        start_tmdb_sign_in(d, cx);
+    }
+}
+
+/// Shows `url` as a QR code over the settings, for a phone to scan: console mode
+/// has no other way to draw one, and a phone approves the link without the host's
+/// browser.
+fn open_qr(d: &mut SettingsPage, title: &str, url: &str, window: &mut Window, cx: &mut Context<SettingsPage>) {
+    let overlay = cx.new(|_| qr_overlay::QrOverlay::new(title, url));
+    let sub = cx.subscribe_in(&overlay, window, |d, _, event: &qr_overlay::QrEvent, _, cx| {
+        if *event == qr_overlay::QrEvent::Close {
+            d.layer_mut().close();
+            cx.notify();
         }
     });
+    d.layer_mut().open(&overlay, sub);
+    cx.notify();
 }
 
 /// Opens TMDB's approval page for `token`; a browser that will not open is a
@@ -810,6 +853,8 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                     rows.push(Row::action("watch-unlink", tr!("Unlink")));
                 } else if let Some(offer) = &d.watch.offer {
                     rows.push(Row::info("watch-code", tr!("Code {code}", code = offer.code.clone()), offer.link.clone()));
+                    // A phone scans this; the console can only draw the code as text.
+                    rows.push(Row::action("watch-qr", tr!("Show the code as a QR")));
                     rows.push(Row::action("watch-check", tr!("Check")));
                 } else {
                     rows.push(Row::action("watch-link", tr!("Link with a code")));
@@ -827,6 +872,7 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                     rows.push(Row::action("watch-tmdb-sign-out", tr!("Sign out")));
                 } else if d.watch.tmdb_pending.is_some() {
                     rows.push(Row::info("watch-tmdb-account", tr!("Account"), tr!("Waiting for the approval")));
+                    rows.push(Row::action("watch-tmdb-qr", tr!("Approve with your phone (QR)")));
                     rows.push(Row::action("watch-tmdb-again", tr!("Open the page again")));
                     rows.push(Row::action("watch-tmdb-approved", tr!("I approved it")));
                 } else {
@@ -849,6 +895,17 @@ pub(crate) fn provider_apply(d: &mut SettingsPage, outcome: Outcome, window: &mu
             "watch-check" => check_link(d, cx),
             "watch-unlink" => unlink(d, cx),
             "watch-tmdb-connect" => connect_tmdb(d, window, cx),
+            "watch-qr" => {
+                if let Some(offer) = d.watch.offer.clone() {
+                    open_qr(d, tr!("Link Stremio"), &offer.link, window, cx);
+                }
+            }
+            "watch-tmdb-qr" => {
+                if let Some(token) = d.watch.tmdb_pending.clone() {
+                    let url = heronite_watch::tmdb_sign_in::approve_url(&token);
+                    open_qr(d, tr!("Approve TMDB"), &url, window, cx);
+                }
+            }
             "watch-tmdb-forget" => clear_tmdb_key(d, cx),
             "watch-tmdb-again" => {
                 if let Some(token) = d.watch.tmdb_pending.clone() {
