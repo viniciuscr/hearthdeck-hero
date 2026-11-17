@@ -420,7 +420,11 @@ fn provider_card(
         .flex_col()
         .gap(px(8.))
         .child(card)
-        .child(div().max_w(px(460.)).child(meta_text(tr!("This product uses the TMDB API but is not endorsed or certified by TMDB."))))
+        .child(div().max_w(px(460.)).child(meta_text(if d.watch.tmdb_ready {
+            tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.")
+        } else {
+            tr!("TMDB needs this app's key: the bootstrap sets it (or ~/.config/hearthdeck/tmdb-api-key).")
+        })))
         .into_any_element()
 }
 
@@ -895,7 +899,10 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                     } else {
                         tr!("Signed in as {name}", name = name.clone()).to_string()
                     };
-                    rows.push(Row::info("watch-tmdb-account", tr!("Account"), who));
+                    rows.push(
+                        Row::info("watch-tmdb-account", tr!("Account"), who)
+                            .desc(tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.")),
+                    );
                     rows.push(Row::action("watch-tmdb-sign-out", tr!("Sign out")));
                 } else if d.watch.tmdb_pending.is_some() {
                     rows.push(Row::info("watch-tmdb-account", tr!("Account"), tr!("Waiting for the approval")));
@@ -903,16 +910,19 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                     rows.push(Row::action("watch-tmdb-again", tr!("Open the page again")));
                     rows.push(Row::action("watch-tmdb-approved", tr!("I approved it")));
                 } else {
-                    rows.push(Row::action("watch-tmdb-connect", tr!("Connect TMDB")));
+                    // The hint under a focused row is where a sentence fits.
+                    let hint = if d.watch.tmdb_ready {
+                        tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.")
+                    } else {
+                        tr!("TMDB needs this app's key: the bootstrap sets it (or ~/.config/hearthdeck/tmdb-api-key).")
+                    };
+                    rows.push(Row::action("watch-tmdb-connect", tr!("Connect TMDB")).desc(hint));
                 }
                 if d.watch.tmdb_username.is_some() {
                     rows.push(Row::action("watch-tmdb-forget", tr!("Forget TMDB")));
                 }
             }
         }
-    }
-    if let Some(notice) = &d.watch.notice {
-        rows.push(Row::info("watch-notice", tr!("Notice"), SharedString::from(notice.to_string())));
     }
     rows
 }
