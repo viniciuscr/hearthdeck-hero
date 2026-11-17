@@ -16,6 +16,11 @@ pub fn title(descriptor: &CollectionDescriptor) -> String {
         "series" => tr!("Series"),
         _ => return descriptor.name.clone(),
     };
+    // The account's own suggestions: a rule with no order to name, so the screen
+    // says what it is instead of the sort it happens to carry.
+    if descriptor.rule.catalog == "recommended" {
+        return format!("{kind} · {}", tr!("Recommended for you"));
+    }
     if descriptor.rule.search.is_some() || !descriptor.rule.filters.is_empty() {
         return descriptor.name.clone();
     }
@@ -48,6 +53,16 @@ mod tests {
         assert_eq!(title(&rail("Films · Top rated", "movie", CatalogSort::Rating)), named(tr!("Movies"), tr!("Top rated")));
         assert_eq!(title(&rail("Series · Popular", "series", CatalogSort::Popular)), named(tr!("Series"), tr!("Popular")));
         assert_eq!(title(&rail("Films · Newest", "movie", CatalogSort::Newest)), named(tr!("Movies"), tr!("Newest")));
+    }
+
+    #[test]
+    fn an_account_rail_is_named_for_what_it_is() {
+        let mut recommended = rail("Films · Recommended for you", "movie", CatalogSort::Popular);
+        recommended.rule.catalog = "recommended".to_owned();
+        assert_eq!(title(&recommended), format!("{} · {}", tr!("Movies"), tr!("Recommended for you")));
+        let mut series = rail("Series · Recommended for you", "series", CatalogSort::Popular);
+        series.rule.catalog = "recommended".to_owned();
+        assert_eq!(title(&series), format!("{} · {}", tr!("Series"), tr!("Recommended for you")));
     }
 
     #[test]
