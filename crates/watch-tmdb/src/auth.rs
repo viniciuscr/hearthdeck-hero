@@ -133,6 +133,23 @@ pub fn secret_with_session(api_key: &str, session: &Session) -> Secret {
     }))
 }
 
+/// The v4 read access token in the `tmdb` credential, when one was set. v4 is
+/// the only place TMDB serves the account's recommendations, and it takes this
+/// token as a `Bearer` header rather than the v3 key in the query.
+pub fn access_token_of(secret: &Secret) -> Option<String> {
+    let token = secret.value().get("accessToken").and_then(|token| token.as_str())?.trim().to_owned();
+    (!token.is_empty()).then_some(token)
+}
+
+/// The same credential with a v4 read token kept beside the key and the session.
+pub fn secret_with_access_token(secret: &Secret, token: &str) -> Secret {
+    let mut value = secret.value().clone();
+    if let Some(map) = value.as_object_mut() {
+        map.insert("accessToken".to_owned(), serde_json::Value::String(token.trim().to_owned()));
+    }
+    Secret::new(value)
+}
+
 /// The session in the `tmdb` credential, when one was signed in. A credential
 /// with the key alone, or one whose session id is empty, has none.
 pub fn session_of(secret: &Secret) -> Option<Session> {

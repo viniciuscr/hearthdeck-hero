@@ -12,6 +12,15 @@ use url::Url;
 pub trait Transport: Send + Sync {
     fn get(&self, url: &Url) -> Result<Vec<u8>>;
     fn post_json(&self, url: &Url, body: &Value) -> Result<Vec<u8>>;
+
+    /// A GET carrying `Authorization: Bearer <token>`: what TMDB's v4 endpoints
+    /// take instead of a key in the query. A transport that cannot send headers
+    /// says so rather than sending an unauthenticated request that would come
+    /// back as a puzzle.
+    fn get_bearer(&self, url: &Url, token: &str) -> Result<Vec<u8>> {
+        let _ = (url, token);
+        anyhow::bail!("this transport cannot carry an Authorization header")
+    }
 }
 
 /// The status a server answered with, as an error. It carries the redacted
@@ -76,6 +85,19 @@ impl Transport for UreqTransport {
     fn get(&self, url: &Url) -> Result<Vec<u8>> {
         let mut response =
             self.agent.get(url.as_str()).config().timeout_global(Some(self.timeout)).build().call().map_err(|e| transport_error(url, e))?;
+        read(url, &mut response, self.max_bytes)
+    }
+
+    fn get_bearer(&self, url: &Url, token: &str) -> Result<Vec<u8>> {
+        let mut response = self
+            .agent
+            .get(url.as_str())
+            .config()
+            .timeout_global(Some(self.timeout))
+            .build()
+            .header("authorization", format!("Bearer {token}"))
+            .call()
+            .map_err(|e| transport_error(url, e))?;
         read(url, &mut response, self.max_bytes)
     }
 

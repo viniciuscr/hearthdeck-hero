@@ -110,6 +110,10 @@ impl WatchCatalogSource for Tmdb {
         let Some(kind) = tmdb_kind(&request.kind) else {
             return Ok(CatalogPage::default());
         };
+        // The account's own suggestions: v4 is the only place they exist.
+        if request.catalog == "recommended" {
+            return self.recommendations(ctx, request, &key, kind);
+        }
         let page = request.skip / PAGE + 1;
         let search = request.search.as_deref().map(str::trim).filter(|search| !search.is_empty());
         let mut url = Url::parse(&format!("{API}/{}/{kind}", if search.is_some() { "search" } else { "discover" }))?;
@@ -158,6 +162,31 @@ impl Tmdb {
         let more = page < found.total_pages.clamp(1, MAX_PAGE);
         let consumed = found.results.len() as u32;
         Ok(CatalogPage { items, more, consumed })
+    }
+
+    /// `/account/{id}/{kind}/recommendations` on the v4 root: what the person's
+    /// own TMDB account suggests. v4 takes the *read access token* as a `Bearer`
+    /// header (the v3 key in the query gets a 404 there), and the session as a
+    /// query parameter. Everything else in this module stays on v3.
+    fn recommendations(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest, key: &str, kind: &str) -> Result<CatalogPage> {
+        let secret = ctx.credentials.get("tmdb")?.context("TMDB needs you signed in")?;
+        let session = auth::session_of(&secret).context("TMDB needs you signed in: Settings → Watch → Providers, Connect TMDB.")?;
+        let token = auth::access_token_of(&secret)
+            .context("TMDB's v4 read access token is not set: it is what recommendations need (Settings → Watch → Providers).")?;
+        // A session kept before the account id was stored asks for it once.
+        let account = if session.account_id == 0 { auth::account(ctx.http, key, &session.id)?.id } else { session.account_id };
+        if account == 0 {
+            bail!("TMDB did not say which account the session belongs to: sign in again.");
+        }
+        let page = request.skip / PAGE + 1;
+        let mut url = Url::parse(&format!("{API_V4}/account/{account}/{kind}/recommendations"))?;
+        let number = page.to_string();
+        url.query_pairs_mut().extend_pairs([("session_id", session.id.as_str()), ("page", number.as_str()), ("language", "en-US")]);
+        // The path names the account; the token travels in a header and must not
+        // reach an error message.
+        let body = ctx.http.get_bearer(&url, &token).with_context(|| format!("TMDB recommendations for account {account}"))?;
+        let found: Discover = serde_json::from_slice(&body).context("TMDB recommendations")?;
+        self.page_of(ctx, key, kind, found, page)
     }
 
     /// The IMDb id of every title on a page: the cache answers most of them, and
@@ -275,6 +304,17 @@ fn years() -> Vec<String> {
 /// only ever approves a session.
 pub fn built_in_key() -> Option<&'static str> {
     option_env!("HEARTHDECK_TMDB_API_KEY").map(str::trim).filter(|key| !key.is_empty())
+}
+
+/// The file holding the v4 **read access token** (the long one on TMDB's API
+/// page), which is what v4 endpoints take as a `Bearer` header.
+pub const TOKEN_FILE: &str = "tmdb-access-token";
+
+/// The v4 read token in `dir/` ([`TOKEN_FILE`]), when the file is there.
+pub fn token_file(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(TOKEN_FILE)).ok()?;
+    let token = text.lines().next().unwrap_or_default().trim().trim_matches(|c: char| c == '"' || c == '\'').to_owned();
+    (!token.is_empty()).then_some(token)
 }
 
 /// The file a maintainer build reads when it was compiled without the variable:
@@ -661,11 +701,26 @@ impl heronite_watch_core::collections::WatchCollectionSource for TmdbCollections
 
     fn collections(
         &self,
-        _ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
+        ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
     ) -> Result<Vec<heronite_watch_core::collections::CollectionDescriptor>> {
         use heronite_watch_core::catalog::{CatalogRequest, CatalogSort};
         use heronite_watch_core::collections::CollectionDescriptor;
         let mut rails = Vec::new();
+        // The account's own suggestions need a session *and* the v4 read token:
+        // without either, a rail nobody can answer would be a dead switch.
+        let secret = ctx.credentials.get("tmdb")?;
+        let signed_in = secret.as_ref().and_then(auth::session_of).is_some();
+        let v4 = secret.as_ref().and_then(auth::access_token_of).is_some();
+        if signed_in && v4 {
+            for (kind, label) in [("movie", "Films"), ("series", "Series")] {
+                rails.push(CollectionDescriptor {
+                    id: format!("tmdb:recommended:{kind}"),
+                    name: format!("{label} · Recommended for you"),
+                    kind: kind.to_owned(),
+                    rule: CatalogRequest { catalog: "recommended".to_owned(), ..CatalogRequest::first(kind) },
+                });
+            }
+        }
         for (kind, label) in [("movie", "Films"), ("series", "Series")] {
             for (id, name, sort) in [("top-rated", "Top rated", CatalogSort::Rating), ("popular", "Popular", CatalogSort::Popular)] {
                 rails.push(CollectionDescriptor {

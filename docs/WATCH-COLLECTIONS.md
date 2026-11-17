@@ -374,16 +374,19 @@ skipped like every other settings list. The one place the app names a source is
 the row that says whether its key is set (`fork/watch/settings::source_keyed`) —
 the same place that already names TMDB's key.
 
-### Why the account's recommendations are not there yet
+### The account's recommendations are on v4
 
-`/account/{id}/movie/recommendations` is a **v4** endpoint
-(`api.themoviedb.org/4/account/{account_object_id}/movie/recommendations` —
-doc fetched from the v4 reference, 2026-11-17); the v3 root has no such path, which
-is the 404 the log showed at both roots. v4 authenticates with
-`Authorization: Bearer <v4 read access token>`, and `heronite-watch-core`'s
-`Transport` sends no headers at all (`get(url)`, `post_json(url, body)`), so the
-rails were removed rather than left failing every frame.
+`/account/{id}/movie/recommendations` exists only on the **v4** root
+(`api.themoviedb.org/4/account/{account_object_id}/movie/recommendations`); v3
+answers 404, which is what the log showed. v4 takes `Authorization: Bearer
+<v4 read access token>`, so:
 
-Putting them back means two additions, not one: a header on the transport, and the
-person's **v4 read token** (a second credential, next to the session) — which would
-have to be asked for at bootstrap, like the v3 key.
+- `Transport` gained `get_bearer` (`heronite-watch-core`), and `UreqTransport`
+  sends the header; a transport that cannot send one says so instead of making an
+  unauthenticated request.
+- the token is a **second** value on TMDB's API page ("API Read Access Token (v4)")
+  kept in the `tmdb` credential beside the key and the session, and written to
+  `~/.config/hearthdeck/tmdb-access-token` by the bootstrap (optional).
+- the two rails are declared only when a session **and** the token are both there,
+  so there is no dead switch; they resolve on `/4`, and every other call stays on
+  v3 with the key.

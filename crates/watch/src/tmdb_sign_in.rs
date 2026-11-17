@@ -77,20 +77,32 @@ pub fn configured(app: &AppPaths) -> bool {
 /// adopted into the credential store once, and everything else reads it from
 /// there. Releases never need this — they carry the key.
 pub fn adopt_key_file(app: &AppPaths) -> bool {
-    // The file is an explicit act by whoever set the machine up, so it wins over
-    // whatever the store already held (an older build could have kept a key that
-    // TMDB refuses).
-    let Some(key) = heronite_watch_tmdb::key_file(&app.config) else { return false };
-    if crate::store::read_tmdb_key(app).ok().flatten().as_deref() == Some(key.as_str()) {
-        return false;
-    }
-    match crate::store::write_tmdb_key(app, &key) {
-        Ok(()) => true,
-        Err(error) => {
-            log::warn!("reading the TMDB key file: {error:#}");
-            false
+    let mut changed = false;
+    // The key file is an explicit act by whoever set the machine up, so it wins
+    // over whatever the store already held (an older build could have kept a key
+    // that TMDB refuses).
+    if let Some(key) = heronite_watch_tmdb::key_file(&app.config) {
+        if crate::store::read_tmdb_key(app).ok().flatten().as_deref() != Some(key.as_str()) {
+            match crate::store::write_tmdb_key(app, &key) {
+                Ok(()) => changed = true,
+                Err(error) => log::warn!("reading the TMDB key file: {error:#}"),
+            }
         }
     }
+    // The v4 read token rides in the same credential, beside the key: it is what
+    // the account's recommendations need.
+    if let Some(token) = heronite_watch_tmdb::token_file(&app.config) {
+        if let Ok(Some(stored)) = StoreCredentials::new(app).get("tmdb") {
+            if heronite_watch_tmdb::auth::access_token_of(&stored).as_deref() != Some(token.as_str()) {
+                let stamped = heronite_watch_tmdb::auth::secret_with_access_token(&stored, &token);
+                match StoreCredentials::new(app).set("tmdb", &stamped) {
+                    Ok(()) => changed = true,
+                    Err(error) => log::warn!("keeping the TMDB read token: {error:#}"),
+                }
+            }
+        }
+    }
+    changed
 }
 
 #[cfg(test)]

@@ -1787,6 +1787,35 @@ step_tmdb() {
   else
     warn "could not write $file"
   fi
+
+  # The v4 read access token: what the account's own recommendations need. It is
+  # the long value on the same TMDB page, and optional — without it the home page
+  # keeps TMDB's catalogue rails and no account rails.
+  local token_file="$home/.config/$HD_DATA_DIR/tmdb-access-token" token
+  if [[ -s $token_file ]]; then
+    info "the TMDB read token is already set ($token_file)"
+    return 0
+  fi
+  say "  Optional: the API Read Access Token (v4) from the same page powers the"
+  say "  \"recommended for you\" rails. Leave it empty to skip them."
+  if ! prompt "TMDB read access token (v4, empty to skip)" ""; then
+    return 0
+  fi
+  token=$(printf '%s' "$REPLY" | tr -d '[:space:]')
+  if [[ -z $token ]]; then
+    note "no read token: the account's recommendations stay off"
+    return 0
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "  [dry-run] would write $token_file"
+    return 0
+  fi
+  if printf '%s\n' "$token" >"$token_file"; then
+    chown "$user" "$token_file" && chmod 600 "$token_file"
+    info "the TMDB read token is set for $user"
+  else
+    warn "could not write $token_file"
+  fi
 }
 
 step_lockdown() {
