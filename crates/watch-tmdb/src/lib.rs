@@ -696,24 +696,23 @@ impl heronite_watch_core::collections::WatchCollectionSource for TmdbCollections
 
     fn collections(
         &self,
-        ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
+        _ctx: &heronite_watch_core::catalog::CatalogCtx<'_>,
     ) -> Result<Vec<heronite_watch_core::collections::CollectionDescriptor>> {
         use heronite_watch_core::catalog::{CatalogRequest, CatalogSort};
         use heronite_watch_core::collections::CollectionDescriptor;
         let mut rails = Vec::new();
         // The account's own suggestions need a session *and* the v4 read token:
         // without either, a rail nobody can answer would be a dead switch.
-        let secret = ctx.credentials.get("tmdb")?;
-        let v4 = secret.as_ref().and_then(auth::access_token_of).is_some();
-        if v4 {
-            for (kind, label) in [("movie", "Films"), ("series", "Series")] {
-                rails.push(CollectionDescriptor {
-                    id: format!("tmdb:recommended:{kind}"),
-                    name: format!("{label} · Recommended for you"),
-                    kind: kind.to_owned(),
-                    rule: CatalogRequest { catalog: "recommended".to_owned(), ..CatalogRequest::first(kind) },
-                });
-            }
+        // Declared unconditionally: the rail is a switch the person turns on, and
+        // whether it can answer (the v4 read token) is the resolver's business —
+        // a switch that disappears is worse than one that explains itself.
+        for (kind, label) in [("movie", "Films"), ("series", "Series")] {
+            rails.push(CollectionDescriptor {
+                id: format!("tmdb:recommended:{kind}"),
+                name: format!("{label} · Recommended for you"),
+                kind: kind.to_owned(),
+                rule: CatalogRequest { catalog: "recommended".to_owned(), ..CatalogRequest::first(kind) },
+            });
         }
         for (kind, label) in [("movie", "Films"), ("series", "Series")] {
             for (id, name, sort) in [("top-rated", "Top rated", CatalogSort::Rating), ("popular", "Popular", CatalogSort::Popular)] {
@@ -768,11 +767,23 @@ mod collection_tests {
         let ctx = CatalogCtx { http: &http, credentials: &credentials, cache: None };
         let rails = TmdbCollections.collections(&ctx).unwrap();
         let ids: Vec<&str> = rails.iter().map(|rail| rail.id.as_str()).collect();
-        assert_eq!(ids, ["tmdb:top-rated:movie", "tmdb:popular:movie", "tmdb:top-rated:series", "tmdb:popular:series"]);
-        assert_eq!(rails[0].rule.sort, CatalogSort::Rating);
-        assert_eq!(rails[1].rule.sort, CatalogSort::Popular);
-        assert_eq!(rails[0].kind, "movie");
-        assert_eq!(rails[2].kind, "series");
-        assert!(rails[0].name.contains("Top rated"));
+        assert_eq!(
+            ids,
+            [
+                // Declared without a key or a token: the switches are always there,
+                // and the resolver says what it needs.
+                "tmdb:recommended:movie",
+                "tmdb:recommended:series",
+                "tmdb:top-rated:movie",
+                "tmdb:popular:movie",
+                "tmdb:top-rated:series",
+                "tmdb:popular:series",
+            ]
+        );
+        assert_eq!(rails[2].rule.sort, CatalogSort::Rating);
+        assert_eq!(rails[3].rule.sort, CatalogSort::Popular);
+        assert_eq!(rails[2].kind, "movie");
+        assert_eq!(rails[4].kind, "series");
+        assert!(rails[2].name.contains("Top rated"));
     }
 }

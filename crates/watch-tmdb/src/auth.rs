@@ -228,8 +228,6 @@ struct AccountAnswer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     fn base64url_of(bytes: &[u8]) -> String {
         const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         let mut out = String::new();
