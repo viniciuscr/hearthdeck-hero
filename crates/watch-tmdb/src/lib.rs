@@ -164,27 +164,22 @@ impl Tmdb {
         Ok(CatalogPage { items, more, consumed })
     }
 
-    /// `/account/{id}/{kind}/recommendations` on the v4 root: what the person's
-    /// own TMDB account suggests. v4 takes the *read access token* as a `Bearer`
-    /// header (the v3 key in the query gets a 404 there), and the session as a
-    /// query parameter. Everything else in this module stays on v3.
+    /// `/4/account/{object}/{kind}/recommendations`: what the person's own TMDB
+    /// account suggests. The id in the path is the **object id** inside the read
+    /// token (`sub`), not the numeric v3 id — `/4/account/22226384/...` is a 404,
+    /// and `?session_id=` is not wanted here at all: the token is the user.
     fn recommendations(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest, key: &str, kind: &str) -> Result<CatalogPage> {
-        let secret = ctx.credentials.get("tmdb")?.context("TMDB needs you signed in")?;
-        let session = auth::session_of(&secret).context("TMDB needs you signed in: Settings → Watch → Providers, Connect TMDB.")?;
+        let secret = ctx.credentials.get("tmdb")?.context("TMDB needs its read access token")?;
         let token = auth::access_token_of(&secret)
             .context("TMDB's v4 read access token is not set: it is what recommendations need (Settings → Watch → Providers).")?;
-        // A session kept before the account id was stored asks for it once.
-        let account = if session.account_id == 0 { auth::account(ctx.http, key, &session.id)?.id } else { session.account_id };
-        if account == 0 {
-            bail!("TMDB did not say which account the session belongs to: sign in again.");
-        }
+        let object = auth::account_object_id(&token).context("TMDB's read token names no account")?;
         let page = request.skip / PAGE + 1;
-        let mut url = Url::parse(&format!("{API_V4}/account/{account}/{kind}/recommendations"))?;
+        let mut url = Url::parse(&format!("{API_V4}/account/{object}/{kind}/recommendations"))?;
         let number = page.to_string();
-        url.query_pairs_mut().extend_pairs([("session_id", session.id.as_str()), ("page", number.as_str()), ("language", "en-US")]);
+        url.query_pairs_mut().extend_pairs([("page", number.as_str()), ("language", "en-US")]);
         // The path names the account; the token travels in a header and must not
         // reach an error message.
-        let body = ctx.http.get_bearer(&url, &token).with_context(|| format!("TMDB recommendations for account {account}"))?;
+        let body = ctx.http.get_bearer(&url, &token).with_context(|| format!("TMDB recommendations for account {object}"))?;
         let found: Discover = serde_json::from_slice(&body).context("TMDB recommendations")?;
         self.page_of(ctx, key, kind, found, page)
     }
@@ -709,9 +704,8 @@ impl heronite_watch_core::collections::WatchCollectionSource for TmdbCollections
         // The account's own suggestions need a session *and* the v4 read token:
         // without either, a rail nobody can answer would be a dead switch.
         let secret = ctx.credentials.get("tmdb")?;
-        let signed_in = secret.as_ref().and_then(auth::session_of).is_some();
         let v4 = secret.as_ref().and_then(auth::access_token_of).is_some();
-        if signed_in && v4 {
+        if v4 {
             for (kind, label) in [("movie", "Films"), ("series", "Series")] {
                 rails.push(CollectionDescriptor {
                     id: format!("tmdb:recommended:{kind}"),

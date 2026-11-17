@@ -143,7 +143,16 @@ pub fn clear_auth(app: &AppPaths) -> Result<()> {
 /// The TMDB API key (v3), written where the TMDB catalog source reads it and
 /// nowhere else. The credentials file is 0600, like the account's.
 pub fn write_tmdb_key(app: &AppPaths, api_key: &str) -> Result<()> {
-    StoreCredentials::new(app).set("tmdb", &Secret::new(serde_json::json!({"apiKey": api_key.trim()})))
+    let store = StoreCredentials::new(app);
+    // Keep what the credential already holds: the session a person approved and
+    // the v4 read token live in the same object, and replacing it would sign them
+    // out (and drop the token) every time the key file is adopted.
+    let mut value = store.get("tmdb")?.map(|secret| secret.value().clone()).unwrap_or_else(|| serde_json::json!({}));
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["apiKey"] = serde_json::json!(api_key.trim());
+    store.set("tmdb", &Secret::new(value))
 }
 
 /// The stored TMDB key, when there is one. A key that is only whitespace is no

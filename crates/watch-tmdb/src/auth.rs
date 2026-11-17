@@ -67,9 +67,12 @@ pub fn start(http: &dyn Transport, key: &str) -> Result<String> {
     let body = match http.get(&url) {
         Ok(body) => body,
         // Nothing but the key is in this request, so a refusal is the key.
-        Err(error) if http_status(&error) == Some(401) => anyhow::bail!(
-            "TMDB refused this app's key (HTTP 401): use the v3 API key from themoviedb.org → Settings → API (32 characters); a v4 read token is not accepted."
-        ),
+        // Kept as a context, not a fresh error: `key_rejected` reads the status.
+        Err(error) if http_status(&error) == Some(401) => {
+            return Err(error).context(
+                "TMDB refused this app's key (HTTP 401): use the v3 API key from themoviedb.org → Settings → API (32 characters); a v4 read token is not accepted.",
+            )
+        }
         Err(error) => return Err(error).context("TMDB sign-in"),
     };
     let answer: TokenAnswer = serde_json::from_slice(&body).context("TMDB sign-in")?;
@@ -141,6 +144,44 @@ pub fn access_token_of(secret: &Secret) -> Option<String> {
     (!token.is_empty()).then_some(token)
 }
 
+/// The account's **object id**: the 24-character id v4 puts in the path. It is
+/// the token's `sub` claim, so it is read from the token rather than asked for —
+/// `/4/account` itself is 404 for this app, and the numeric v3 id is a different
+/// value (`/4/account/{numeric}` is a 404 too).
+pub fn account_object_id(read_token: &str) -> Option<String> {
+    let payload = read_token.split('.').nth(1)?;
+    let bytes = base64url(payload)?;
+    let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let sub = claims.get("sub")?.as_str()?.trim().to_owned();
+    (!sub.is_empty()).then_some(sub)
+}
+
+/// base64url without padding, which is what a JWT segment is. Written out rather
+/// than pulling a dependency in for twenty lines.
+fn base64url(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let mut buffer: u32 = 0;
+    let mut bits = 0;
+    for byte in text.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            b'=' => continue,
+            _ => return None,
+        } as u32;
+        buffer = (buffer << 6) | value;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
 /// The same credential with a v4 read token kept beside the key and the session.
 pub fn secret_with_access_token(secret: &Secret, token: &str) -> Secret {
     let mut value = secret.value().clone();
@@ -187,6 +228,31 @@ struct AccountAnswer {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn base64url_of(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let mut buffer = 0u32;
+            for (index, byte) in chunk.iter().enumerate() {
+                buffer |= (*byte as u32) << (16 - 8 * index);
+            }
+            for index in 0..chunk.len() + 1 {
+                out.push(ALPHABET[((buffer >> (18 - 6 * index)) & 0x3f) as usize] as char);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_tokens_sub_claim_is_the_account_object_id() {
+        let token = format!("header.{}.signature", base64url_of(br#"{"sub":"689d9c2ba4875980485d25c9"}"#));
+        assert_eq!(account_object_id(&token).as_deref(), Some("689d9c2ba4875980485d25c9"));
+        assert_eq!(account_object_id("not-a-jwt"), None);
+        assert_eq!(account_object_id("header.e30.sig"), None, "no sub claim");
+    }
+
     use super::*;
     use heronite_watch_core::http::HttpStatus;
     use std::collections::HashMap;
