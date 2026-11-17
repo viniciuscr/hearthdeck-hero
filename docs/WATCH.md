@@ -126,8 +126,12 @@ the rules that apply while building it.
 > "Signed in as …", "Sign out" (which keeps the key) and "Forget TMDB" (which
 > clears both). While the approval is pending the same link is drawn as a **QR
 > code**, so a phone approves it without the host's browser; console mode opens
-> that code as an overlay drawn in half-block characters (`qr::qr_text`), which is
-> how a text-only screen can show something a camera reads. A 401 on the exchange means "not
+> that code as an overlay (the same element the desktop draws). TMDB reports the
+> approval only through step 3 (`/authentication/session/new`), and a phone is a
+> different device — a `redirect_to=127.0.0.1` would land on the *phone's*
+> loopback — so the app **asks step 3 again every five seconds** for ten minutes:
+> scan, log in, approve, and the card turns into "Signed in as …" on its own.
+> "I approved it" stays as the instant path. A 401 on the exchange means "not
 > approved yet", not a bad key: the key was accepted a moment earlier. Nothing
 > is used by the first rails of the person's own: `/account/{id}/{movie,tv}/
 > recommendations` are offered in Settings → Watch → Collections **only while a

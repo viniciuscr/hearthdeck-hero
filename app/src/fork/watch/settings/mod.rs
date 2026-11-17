@@ -611,10 +611,58 @@ fn start_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         Ok(token) => {
             d.watch.tmdb_pending = Some(token.clone());
             open_approval(d, &token);
+            // TMDB only says "approved" through step 3, and a phone approves on a
+            // different device: ask again every few seconds instead of waiting for
+            // a button. `finish` answers `Pending` until the person is done.
+            wait_for_approval(d, token, cx);
         }
         Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
     }
     cx.notify();
+}
+
+/// Polls step 3 until the token is approved, the person gives up (`finish` says
+/// so, or the page is left), or ten minutes pass. The phone approves; the app
+/// notices on its own.
+fn wait_for_approval(d: &mut SettingsPage, token: String, cx: &mut Context<SettingsPage>) {
+    let app = d.ctx.app.clone();
+    cx.spawn(async move |this, cx| {
+        for _ in 0..120 {
+            cx.background_spawn(async { std::thread::sleep(std::time::Duration::from_secs(5)) }).await;
+            let (app, asked) = (app.clone(), token.clone());
+            let step = cx.background_spawn(async move { heronite_watch::tmdb_sign_in::finish(&app, &asked) }).await;
+            match step {
+                Ok(heronite_watch::tmdb_sign_in::Step::Approved(session)) => {
+                    this.update(cx, |d, cx| {
+                        // Another press may have finished it already.
+                        if d.watch.tmdb_pending.as_deref() != Some(token.as_str()) {
+                            return;
+                        }
+                        d.watch.tmdb_pending = None;
+                        d.watch.tmdb_username = Some(SharedString::from(session.username));
+                        d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
+                        d.watch.notice = None;
+                        cx.emit(crate::pages::PageEvent::LibraryChanged);
+                        cx.notify();
+                    })
+                    .ok();
+                    return;
+                }
+                // Not approved yet: keep asking.
+                Ok(heronite_watch::tmdb_sign_in::Step::Pending) => {}
+                Err(error) => {
+                    log::debug!("TMDB sign-in: {error:#}");
+                    return;
+                }
+            }
+            // The panel was closed, or another window finished it.
+            let still_waiting = this.update(cx, |d, _| d.watch.tmdb_pending.as_deref() == Some(token.as_str())).unwrap_or(false);
+            if !still_waiting {
+                return;
+            }
+        }
+    })
+    .detach();
 }
 
 /// Exchanges the approved token for a session; pending while TMDB has not seen
