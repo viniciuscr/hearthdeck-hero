@@ -77,10 +77,13 @@ pub fn configured(app: &AppPaths) -> bool {
 /// adopted into the credential store once, and everything else reads it from
 /// there. Releases never need this — they carry the key.
 pub fn adopt_key_file(app: &AppPaths) -> bool {
-    if crate::store::read_tmdb_key(app).ok().flatten().is_some() {
+    // The file is an explicit act by whoever set the machine up, so it wins over
+    // whatever the store already held (an older build could have kept a key that
+    // TMDB refuses).
+    let Some(key) = heronite_watch_tmdb::key_file(&app.config) else { return false };
+    if crate::store::read_tmdb_key(app).ok().flatten().as_deref() == Some(key.as_str()) {
         return false;
     }
-    let Some(key) = heronite_watch_tmdb::key_file(&app.config) else { return false };
     match crate::store::write_tmdb_key(app, &key) {
         Ok(()) => true,
         Err(error) => {
@@ -127,6 +130,22 @@ mod tests {
         assert_eq!(crate::store::read_tmdb_key(&app).unwrap().as_deref(), Some("file-key"));
         assert!(!adopt_key_file(&app), "the store has it now, nothing to adopt");
         assert!(configured(&app), "the build can talk to TMDB");
+    }
+
+    #[test]
+    fn the_key_file_replaces_a_key_the_store_already_had() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_paths(dir.path());
+        std::fs::create_dir_all(&app.config).unwrap();
+        // An older build kept this, and TMDB refuses it.
+        crate::store::write_tmdb_key(&app, "0123456789abcdef0123456789abcdef").unwrap();
+        std::fs::write(app.config.join(heronite_watch_tmdb::KEY_FILE), "\"fedcba9876543210fedcba9876543210\"\n").unwrap();
+        assert!(adopt_key_file(&app), "the file is the more explicit intent");
+        assert_eq!(
+            crate::store::read_tmdb_key(&app).unwrap().as_deref(),
+            Some("fedcba9876543210fedcba9876543210"),
+            "quotes around a pasted key are not part of it"
+        );
     }
 
     #[test]

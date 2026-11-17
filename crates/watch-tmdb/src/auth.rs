@@ -64,7 +64,14 @@ pub fn approve_url(token: &str) -> String {
 pub fn start(http: &dyn Transport, key: &str) -> Result<String> {
     let mut url = Url::parse(&format!("{API}/authentication/token/new"))?;
     url.query_pairs_mut().extend_pairs([("api_key", key)]);
-    let body = http.get(&url).context("TMDB sign-in")?;
+    let body = match http.get(&url) {
+        Ok(body) => body,
+        // Nothing but the key is in this request, so a refusal is the key.
+        Err(error) if http_status(&error) == Some(401) => anyhow::bail!(
+            "TMDB refused this app's key (HTTP 401): use the v3 API key from themoviedb.org → Settings → API (32 characters); a v4 read token is not accepted."
+        ),
+        Err(error) => return Err(error).context("TMDB sign-in"),
+    };
     let answer: TokenAnswer = serde_json::from_slice(&body).context("TMDB sign-in")?;
     let token = answer.request_token.trim().to_owned();
     if token.is_empty() {

@@ -341,8 +341,18 @@ pub const KEY_FILE: &str = "tmdb-api-key";
 /// The key in `dir/` ([`KEY_FILE`]), when the file is there and holds something.
 pub fn key_file(dir: &std::path::Path) -> Option<String> {
     let text = std::fs::read_to_string(dir.join(KEY_FILE)).ok()?;
-    let key = text.lines().next().unwrap_or_default().trim().to_owned();
-    (!key.is_empty()).then_some(key)
+    let line = text.lines().next().unwrap_or_default().trim();
+    // What a person pastes carries whatever the source had around it.
+    let key = line.trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace()).to_owned();
+    if key.is_empty() {
+        return None;
+    }
+    // A v3 key is 32 hex characters; a v4 read token is a long JWT and TMDB
+    // refuses it with 401, which is worth a log line before that happens.
+    if key.len() != 32 || !key.chars().all(|c| c.is_ascii_hexdigit()) {
+        log::warn!("the TMDB key in {KEY_FILE} is not 32 hexadecimal characters; TMDB will probably refuse it");
+    }
+    Some(key)
 }
 
 /// The API key to use: the build's own, else the `[]KEY_FILE` a self-built copy
