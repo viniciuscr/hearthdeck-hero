@@ -63,6 +63,9 @@ HD_APP_USER="$HD_APP_USER_DEFAULT"
 CONTROLLER="both"
 APP_PACKAGE=""
 REPO_URL="$HD_REPO_URL_DEFAULT"
+# The folder the app keeps its state in (`~/.config/<this>`); the TMDB step
+# writes its key there.
+HD_DATA_DIR="${HD_DATA_DIR:-hearthdeck}"
 AUDIO_CARD=""
 AUDIO_PROFILE=""
 LOCKDOWN=0
@@ -1747,6 +1750,45 @@ EOF
   fi
 }
 
+step_tmdb() {
+  section "TMDB"
+  local user="$HD_APP_USER" home file key
+  home=$(home_or_default "$user")
+  file="$home/.config/$HD_DATA_DIR/tmdb-api-key"
+  if [[ -s $file ]]; then
+    info "the TMDB key is already set ($file)"
+    return 0
+  fi
+  say "  TMDB fills the film pages, its rails and the account's lists. Its API needs"
+  say "  this app's own key, free from TMDB: themoviedb.org → your account →"
+  say "  Settings → API → Request an API key → Developer. It is 32 characters,"
+  say "  and it is stored on this machine only (0600), never in the shell history."
+  if ! prompt "TMDB API key (empty to skip)" ""; then
+    warn "no terminal to ask for the key: TMDB stays off (Settings → Watch → Providers says so)"
+    return 0
+  fi
+  key=$(printf '%s' "$REPLY" | tr -d '[:space:]')
+  if [[ -z $key ]]; then
+    note "no key given: TMDB stays off; re-run with --only tmdb to set it later"
+    return 0
+  fi
+  if [[ ! $key =~ ^[0-9a-fA-F]{32}$ ]]; then
+    warn "that is not 32 hexadecimal characters; saving it anyway"
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "  [dry-run] would write $file"
+    return 0
+  fi
+  # Written with printf, not `run`: the key must never reach the log.
+  install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$(dirname "$file")"
+  if printf '%s\n' "$key" >"$file"; then
+    chown "$user" "$file" && chmod 600 "$file"
+    info "the TMDB key is set for $user"
+  else
+    warn "could not write $file"
+  fi
+}
+
 step_lockdown() {
   section "Lockdown"
   local user="$HD_APP_USER"
@@ -1833,7 +1875,7 @@ preflight() {
 build_step_list() {
   local step candidate keep
   SELECTED=()
-  for step in user packages aur ludusavi app mpv retroarch audio mounts session lockdown; do
+  for step in user packages aur ludusavi app tmdb mpv retroarch audio mounts session lockdown; do
     keep=1
     if [[ ${#ONLY[@]} -gt 0 ]]; then
       local matched=0
@@ -1866,6 +1908,7 @@ plan() {
   say "  storage     ${#MOUNTS[@]} disk(s) given on the command line, or picked interactively"
   say "  session     tty1 autologin -> cage -> $HD_APP_BIN --console"
   if [[ $LOCKDOWN -eq 1 ]]; then
+    say "  tmdb        this app's TMDB API key, asked once (free from themoviedb.org), kept 0600"
     say "  lockdown    $HD_APP_USER loses sudo at the end, if another admin exists"
   else
     say "  lockdown    asks before taking sudo away; --yes never does"

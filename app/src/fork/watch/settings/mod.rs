@@ -334,9 +334,6 @@ pub fn render_providers(d: &mut SettingsPage, _window: &mut Window, cx: &mut Con
         for provider in &sources {
             column = column.child(provider_card(d, provider, &settings, cx));
         }
-        // TMDB's terms require the credit wherever its data is shown.
-        column = column
-            .child(div().px(px(6.)).child(meta_text(tr!("This product uses the TMDB API but is not endorsed or certified by TMDB."))));
     }
     if let Some(notice) = &d.watch.notice {
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
@@ -353,6 +350,7 @@ fn provider_card(
     cx: &mut Context<SettingsPage>,
 ) -> AnyElement {
     let mut rows: Vec<AnyElement> = Vec::new();
+    let tmdb = provider.id == "tmdb";
     if provider.catalog {
         let on = settings.catalog_sources.iter().any(|id| id == &provider.id);
         let id = provider.id.clone();
@@ -398,7 +396,7 @@ fn provider_card(
     if provider.id == "tmdb" {
         rows.push(tmdb_card(d, cx));
     }
-    card_box()
+    let card = card_box()
         .py(px(12.))
         .px(px(14.))
         .gap(px(10.))
@@ -411,6 +409,18 @@ fn provider_card(
                 .child(meta_text(capabilities(provider))),
         )
         .children(rows)
+        .into_any_element();
+    if !tmdb {
+        return card;
+    }
+    // TMDB's terms require the credit wherever its data is shown. A wrapped line
+    // under its card, not a row: a row clips the sentence.
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .child(card)
+        .child(div().max_w(px(460.)).child(meta_text(tr!("This product uses the TMDB API but is not endorsed or certified by TMDB."))))
         .into_any_element()
 }
 
@@ -486,7 +496,10 @@ fn tmdb_card(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> AnyElement {
         (None, None) if d.watch.tmdb_ready => {
             (tr!("TMDB").to_string(), tr!("Connect and approve it on your phone: your watchlist and favourites then follow the account."))
         }
-        (None, None) => (tr!("TMDB").to_string(), tr!("This build carries no TMDB API key: it is compiled with HEARTHDECK_TMDB_API_KEY.")),
+        (None, None) => (
+            tr!("TMDB").to_string(),
+            tr!("TMDB needs this app's key, which the bootstrap sets (or a file in ~/.config/hearthdeck/tmdb-api-key)."),
+        ),
     };
     let mut card = div().flex().flex_col().gap(px(10.)).child(
         div()
@@ -574,7 +587,8 @@ fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
 fn connect_tmdb(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) {
     d.watch.notice = None;
     if !d.watch.tmdb_ready {
-        d.watch.notice = Some(tr!("This build carries no TMDB API key: it is compiled with HEARTHDECK_TMDB_API_KEY.").into());
+        d.watch.notice =
+            Some(tr!("TMDB needs this app's key, which the bootstrap sets (or a file in ~/.config/hearthdeck/tmdb-api-key).").into());
         cx.notify();
         return;
     }
@@ -897,8 +911,6 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
             }
         }
     }
-    // TMDB's terms require the credit wherever its data is shown.
-    rows.push(Row::info("watch-tmdb-credit", tr!("TMDB"), tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.")));
     if let Some(notice) = &d.watch.notice {
         rows.push(Row::info("watch-notice", tr!("Notice"), SharedString::from(notice.to_string())));
     }

@@ -89,9 +89,11 @@ Connect that cannot work.
 
 - Getting it: themoviedb.org → Settings → API → request a Developer key (one per
   application, free, instant).
-- Testing locally: `export HEARTHDECK_TMDB_API_KEY=...` before `cargo build`, or
-  drop the key on the first line of `~/.config/hearthdeck/tmdb-api-key` — a
-  self-built copy adopts that file into the credential store the first time
-  Settings opens.
+- Normal path: `scripts/bootstrap.sh` asks for the key and writes it to
+  `~/.config/hearthdeck/tmdb-api-key` (0600); the app adopts that file into its
+  credential store the first time Settings opens, so a machine can be re-keyed
+  without a rebuild.
+- Compiling it in stays possible: `export HEARTHDECK_TMDB_API_KEY=...` before
+  `cargo build` (that is what the release secret does).
 - Never commit the key. It is world-readable once the app ships, which is normal
   for a client application and is why the secret lives in CI, not in the tree.

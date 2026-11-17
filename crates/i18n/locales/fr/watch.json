@@ -115,7 +115,7 @@
   "The Movies and Series tabs may page through what it lists.": "Les onglets Films et Séries peuvent parcourir ce qu’il liste.",
   "The Watch space itself: its theme, and the rails that belong to nobody's provider.": "L’espace Watch lui-même : son thème et les rayons qui n’appartiennent à aucun fournisseur.",
   "They own the titles, the streams and where you stopped.": "Ils possèdent les titres, les flux et l’endroit où vous vous êtes arrêté.",
-  "This build carries no TMDB API key: it is compiled with HEARTHDECK_TMDB_API_KEY.": "Cette compilation ne contient pas de clé d’API TMDB : elle se compile avec HEARTHDECK_TMDB_API_KEY.",
+  "TMDB needs this app's key, which the bootstrap sets (or a file in ~/.config/hearthdeck/tmdb-api-key).": "TMDB a besoin de la clé de cette app : le bootstrap la place (ou un fichier dans ~/.config/hearthdeck/tmdb-api-key).",
   "This month": "Ce mois",
   "This product uses the TMDB API but is not endorsed or certified by TMDB.": "Ce produit utilise l’API TMDB mais n’est ni approuvé ni certifié par TMDB.",
   "This year": "Cette année",

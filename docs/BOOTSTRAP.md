@@ -51,6 +51,7 @@ names, comma separated (`--only app,retroarch`, `--skip audio,mounts`).
 | `retroarch` | Downloads the libretro joypad profiles for Xbox and/or PlayStation pads into the account's config, and sets fullscreen in `retroarch.cfg` | `~/.config/retroarch/autoconfig/udev`, `~/.config/retroarch/retroarch.cfg` |
 | `audio` | Adds the account to `audio` and pins a sound card profile (asked once, or `--audio-card`/`--audio-profile`) so it is re-applied at every login | `~/.config/systemd/user/hearthdeck-audio-profile.service` |
 | `mounts` | Offers the unmounted filesystems it finds (or takes `--mount UUID=<uuid>=/path`) and adds them to fstab with `nofail` and `x-systemd.automount` | `/etc/fstab`, `/mnt/…` |
+| `tmdb` | Asks for this app's TMDB API key (free from themoviedb.org → Settings → API → Developer) and stores it 0600 in `~/.config/hearthdeck/tmdb-api-key`; skipped when the file already has one | `~/.config/hearthdeck/tmdb-api-key` |
 | `session` | Disables display managers (asks first), turns `seatd` off, enables tty1 autologin and adds the kiosk block to the account's profile | `/etc/systemd/system/getty@tty1.service.d/autologin.conf`, `~/.bash_profile`, `~/.hushlogin` |
 | `lockdown` | Takes the console account out of `wheel`, but only when another account can still administer the machine | `/etc/group` |
 
@@ -342,3 +343,21 @@ points there, so publishing is a merge to `fork/main` (see
 `set_kv`, `commit_file`) as the only way to touch a file: they are what makes a
 re-run harmless, and `HD_BOOTSTRAP_LIB=1 source scripts/bootstrap.sh` exposes
 them to a test harness.
+
+## TMDB key
+
+TMDB authenticates every call with an *application* key: the app carries one, and
+a person using it only ever approves a session (by scanning a QR code from
+Settings → Watch → Providers). The key therefore belongs to the machine, and this
+step is where it is asked for:
+
+- **Where to get it**: log in to themoviedb.org → your account → **Settings →
+  API** → *Request an API key* → **Developer**. It is approved immediately and is
+  32 characters.
+- **Where it goes**: `~/.config/hearthdeck/tmdb-api-key`, mode 0600, owned by the
+  console account. Nothing else is touched, and the key is never logged.
+- **Setting it later**: `scripts/bootstrap.sh --only tmdb`. The app adopts the file
+  into its credential store the first time Settings opens, so no rebuild is
+  needed; without it, Settings → Watch → Providers says the key is missing and
+  refuses to pretend a Connect would work.
+- **Skipping it**: answer empty. TMDB stays off; everything else works.
