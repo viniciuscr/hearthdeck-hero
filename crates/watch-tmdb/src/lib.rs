@@ -166,7 +166,7 @@ impl Tmdb {
 
     /// `/4/account/{object}/{kind}/recommendations`: what the person's own TMDB
     /// account suggests. The id in the path is the **object id** inside the read
-    /// token (`sub`), not the numeric v3 id — `/4/account/22226384/...` is a 404,
+    /// token (`sub`), not the numeric v3 id — `/4/account/{numeric-id}/…` is a 404,
     /// and `?session_id=` is not wanted here at all: the token is the user.
     fn recommendations(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest, key: &str, kind: &str) -> Result<CatalogPage> {
         let secret = ctx.credentials.get("tmdb")?.context("TMDB needs its read access token")?;

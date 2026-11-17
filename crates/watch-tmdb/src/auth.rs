@@ -247,8 +247,11 @@ mod tests {
 
     #[test]
     fn the_tokens_sub_claim_is_the_account_object_id() {
-        let token = format!("header.{}.signature", base64url_of(br#"{"sub":"689d9c2ba4875980485d25c9"}"#));
-        assert_eq!(account_object_id(&token).as_deref(), Some("689d9c2ba4875980485d25c9"));
+        // A made-up id: the claim is all this reads, and nobody's account is in
+        // the repository.
+        let sub = "0123456789abcdef01234567";
+        let token = format!("header.{}.signature", base64url_of(format!(r#"{{"sub":"{sub}"}}"#).as_bytes()));
+        assert_eq!(account_object_id(&token).as_deref(), Some(sub));
         assert_eq!(account_object_id("not-a-jwt"), None);
         assert_eq!(account_object_id("header.e30.sig"), None, "no sub claim");
     }
