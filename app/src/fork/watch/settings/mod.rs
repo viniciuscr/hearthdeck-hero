@@ -51,6 +51,9 @@ pub struct State {
 impl State {
     pub fn new(ctx: &PageCtx) -> Self {
         let linked = heronite_watch::store::read_auth(&ctx.app).ok().flatten().is_some();
+        // A self-built copy may carry the application key as a file instead of
+        // compiling it in; it is taken once, here, where Settings is built.
+        heronite_watch::tmdb_sign_in::adopt_key_file(&ctx.app);
         let tmdb_ready = heronite_watch::tmdb_sign_in::configured(&ctx.app);
         let tmdb_username = heronite_watch::tmdb_sign_in::session(&ctx.app).map(|session| SharedString::from(session.username));
         let collections = heronite_watch::collections::descriptors(&ctx.app);

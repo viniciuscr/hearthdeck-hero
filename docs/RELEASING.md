@@ -76,3 +76,22 @@ sudo pacman -U --needed dist/hearthdeck-hero-*-x86_64.pkg.tar.zst
 ```
 
 `nfpm` is required; the CI uses 2.47.0.
+
+## The TMDB application key
+
+TMDB authenticates every call with an *application* key: there is no anonymous
+login, and no per-user key. The release build therefore carries the fork's own,
+compiled in through `HEARTHDECK_TMDB_API_KEY` (`option_env!` in
+`crates/watch-tmdb`); `.github/workflows/fork-release.yml` passes the repository
+secret `TMDB_API_KEY` into the build. A tag built without the secret is not
+fatal — TMDB features report that the build carries no key instead of offering a
+Connect that cannot work.
+
+- Getting it: themoviedb.org → Settings → API → request a Developer key (one per
+  application, free, instant).
+- Testing locally: `export HEARTHDECK_TMDB_API_KEY=...` before `cargo build`, or
+  drop the key on the first line of `~/.config/hearthdeck/tmdb-api-key` — a
+  self-built copy adopts that file into the credential store the first time
+  Settings opens.
+- Never commit the key. It is world-readable once the app ships, which is normal
+  for a client application and is why the secret lives in CI, not in the tree.

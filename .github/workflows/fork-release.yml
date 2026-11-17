@@ -76,6 +76,12 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$version\"/" Cargo.toml
           grep -n '^version' Cargo.toml
       - name: Build
+        # TMDB needs an application key on every call, so the release carries
+        # the fork's own (`option_env!` reads it at compile time). A missing
+        # secret is not fatal: the build then has no TMDB key, and Settings says
+        # so instead of offering a Connect that cannot work.
+        env:
+          HEARTHDECK_TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: cargo build --release -p heronite -p heronite-epic-login
       - name: Install nfpm
         run: |

@@ -333,8 +333,21 @@ pub fn built_in_key() -> Option<&'static str> {
     option_env!("HEARTHDECK_TMDB_API_KEY").map(str::trim).filter(|key| !key.is_empty())
 }
 
-/// The API key to use: the build's own, else one kept in the credential store
-/// (a build made without the variable still works when a key was stored).
+/// The file a maintainer build reads when it was compiled without the variable:
+/// `tmdb-api-key` in the config folder, the key on the first line. It is the
+/// same application key, kept out of the source tree.
+pub const KEY_FILE: &str = "tmdb-api-key";
+
+/// The key in `dir/` ([`KEY_FILE`]), when the file is there and holds something.
+pub fn key_file(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(KEY_FILE)).ok()?;
+    let key = text.lines().next().unwrap_or_default().trim().to_owned();
+    (!key.is_empty()).then_some(key)
+}
+
+/// The API key to use: the build's own, else the `[]KEY_FILE` a self-built copy
+/// may carry, else one kept in the credential store (a build made without the
+/// variable still works when a key was stored).
 pub(crate) fn api_key(credentials: &dyn Credentials) -> Result<String> {
     if let Some(key) = built_in_key() {
         return Ok(key.to_owned());

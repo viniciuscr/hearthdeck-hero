@@ -64,6 +64,24 @@ pub fn configured(app: &AppPaths) -> bool {
     key(app).is_ok()
 }
 
+/// A self-built copy may keep the application key in `tmdb-api-key` in the config
+/// folder instead of compiling it in ([`heronite_watch_tmdb::KEY_FILE`]): it is
+/// adopted into the credential store once, and everything else reads it from
+/// there. Releases never need this — they carry the key.
+pub fn adopt_key_file(app: &AppPaths) -> bool {
+    if crate::store::read_tmdb_key(app).ok().flatten().is_some() {
+        return false;
+    }
+    let Some(key) = heronite_watch_tmdb::key_file(&app.config) else { return false };
+    match crate::store::write_tmdb_key(app, &key) {
+        Ok(()) => true,
+        Err(error) => {
+            log::warn!("reading the TMDB key file: {error:#}");
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +107,18 @@ mod tests {
         sign_out(&app).unwrap();
         assert_eq!(session(&app), None);
         assert_eq!(crate::store::read_tmdb_key(&app).unwrap().as_deref(), Some("key1"), "signing out is not losing the key");
+    }
+
+    #[test]
+    fn a_key_file_is_adopted_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_paths(dir.path());
+        std::fs::create_dir_all(&app.config).unwrap();
+        std::fs::write(app.config.join(heronite_watch_tmdb::KEY_FILE), "file-key\nsecond line ignored\n").unwrap();
+        assert!(adopt_key_file(&app), "the file is taken");
+        assert_eq!(crate::store::read_tmdb_key(&app).unwrap().as_deref(), Some("file-key"));
+        assert!(!adopt_key_file(&app), "the store has it now, nothing to adopt");
+        assert!(configured(&app), "the build can talk to TMDB");
     }
 
     #[test]
