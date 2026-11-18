@@ -16,8 +16,10 @@ pub enum Section {
     ConsoleMode,
     /// The Stremio account and the service that plays torrents.
     Watch,
-    /// Every provider Watch can use: its account or key, and its one switch.
+    /// The providers Watch is signed in to: one card each, its account.
     WatchProviders,
+    /// What feeds Watch: streams, catalogs and metadata sources, in order.
+    WatchSources,
     /// What the Watch first page shows, rail by rail, with its provider.
     WatchHome,
     /// What was watched, over a week, a month, a year or everything.
@@ -71,7 +73,7 @@ impl Section {
     ];
 
     /// Same order as [`Section::GROUPS`].
-    pub const ALL: [Section; 27] = [
+    pub const ALL: [Section; 28] = [
         Section::General,
         Section::Appearance,
         Section::ConsoleMode,
@@ -79,6 +81,7 @@ impl Section {
         Section::QuickLauncher,
         crate::fork::watch::settings::watch_registration::SECTION,
         crate::fork::watch::settings::watch_registration::PROVIDERS,
+        crate::fork::watch::settings::watch_registration::SOURCES,
         crate::fork::watch::settings::watch_registration::HOME,
         crate::fork::watch::settings::watch_registration::RECAP,
         Section::GameDefaults,
@@ -116,7 +119,9 @@ impl Section {
             Section::Mods => supported(Feature::Mods),
             // Its options are mostly Wine's.
             Section::GameDefaults => supported(Feature::Wine),
-            Section::Watch | Section::WatchProviders => crate::fork::watch::settings::watch_registration::available(),
+            Section::Watch | Section::WatchProviders | Section::WatchSources => {
+                crate::fork::watch::settings::watch_registration::available()
+            }
             _ => true,
         }
     }
@@ -129,6 +134,7 @@ impl Section {
             Section::ConsoleMode => tr!("Console mode"),
             Section::Watch => crate::fork::watch::settings::watch_registration::label(),
             Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_label(),
+            Section::WatchSources => crate::fork::watch::settings::watch_registration::sources_label(),
             Section::WatchHome => crate::fork::watch::settings::watch_registration::home_label(),
             Section::WatchRecap => crate::fork::watch::settings::watch_registration::recap_label(),
             Section::Advanced => tr!("Advanced"),
@@ -161,6 +167,7 @@ impl Section {
             Section::ConsoleMode => Icon::Tv,
             Section::Watch => crate::fork::watch::settings::watch_registration::icon(),
             Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_icon(),
+            Section::WatchSources => crate::fork::watch::settings::watch_registration::sources_icon(),
             Section::WatchHome => crate::fork::watch::settings::watch_registration::home_icon(),
             Section::WatchRecap => crate::fork::watch::settings::watch_registration::recap_icon(),
             Section::Advanced => Icon::Build,
@@ -194,6 +201,7 @@ impl Section {
             Section::ConsoleMode => tr!("The controller-first TV mode: its themes, tabs and shelves, covers, background, interface and controls. Changes show at once; ☰ → Customize in console mode has the same options."),
             Section::Watch => crate::fork::watch::settings::watch_registration::blurb(),
             Section::WatchProviders => crate::fork::watch::settings::watch_registration::providers_blurb(),
+            Section::WatchSources => crate::fork::watch::settings::watch_registration::sources_blurb(),
             Section::WatchHome => crate::fork::watch::settings::watch_registration::home_blurb(),
             Section::WatchRecap => crate::fork::watch::settings::watch_registration::recap_blurb(),
             Section::Advanced => tr!("Logs, folders and cache."),
@@ -230,6 +238,7 @@ impl Section {
             Section::ConsoleMode => "console mode tv couch controller gamepad theme themes tabs shelves layout covers background font scale clock accent colours glyphs hints menu startup customize export import preset modo console televisao sofa controle tema temas abas prateleiras capas fundo fonte tamanho relogio destaque cores botoes dicas menu personalizar exportar importar perfil",
             Section::Watch => crate::fork::watch::settings::watch_registration::KEYWORDS,
             Section::WatchProviders => crate::fork::watch::settings::watch_registration::PROVIDER_KEYWORDS,
+            Section::WatchSources => crate::fork::watch::settings::watch_registration::SOURCE_KEYWORDS,
             Section::WatchHome => crate::fork::watch::settings::watch_registration::HOME_KEYWORDS,
             Section::WatchRecap => crate::fork::watch::settings::watch_registration::RECAP_KEYWORDS,
             Section::Advanced => "advanced cache folders copy settings avancado pastas copiar configuracoes",

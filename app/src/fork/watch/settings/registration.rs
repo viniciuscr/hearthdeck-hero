@@ -10,15 +10,20 @@ use crate::pages::settings::Section;
 
 /// The Watch space itself: its theme and anything that is nobody's provider.
 pub const SECTION: Section = Section::Watch;
-/// Providers: what the person configures, one card each, and nothing else.
+/// Accounts: the providers Watch is signed in to, one card each, and nothing else.
 pub const PROVIDERS: Section = Section::WatchProviders;
+/// Sources: what feeds the screens — streams, catalogs, metadata, in order.
+pub const SOURCES: Section = Section::WatchSources;
 /// Home: the rails the first page draws, each with the provider it comes from.
 pub const HOME: Section = Section::WatchHome;
 /// Recap: what was watched, over a week, a month, a year or everything.
 pub const RECAP: Section = Section::WatchRecap;
-pub const GROUP: (&str, &[Section]) = (n_!("Watch"), &[Section::Watch, Section::WatchProviders, Section::WatchHome, Section::WatchRecap]);
+pub const GROUP: (&str, &[Section]) =
+    (n_!("Watch"), &[Section::Watch, Section::WatchProviders, Section::WatchSources, Section::WatchHome, Section::WatchRecap]);
 pub const KEYWORDS: &str = "watch stremio movies series theme reset filmes series tema reiniciar";
-pub const PROVIDER_KEYWORDS: &str = "watch providers stremio tmdb simkl cinemeta account link qr api key client id pin sign in connect service torrent metadata catalogs filmes series provedores conta chave entrar conectar servico metadados catalogos";
+pub const PROVIDER_KEYWORDS: &str = "watch providers stremio tmdb simkl cinemeta account link qr api key client id pin sign in connect service torrent filmes series provedores conta chave entrar conectar servico";
+pub const SOURCE_KEYWORDS: &str =
+    "watch sources streams catalogs catalogues metadata providers priority order torrent cinemeta tmdb simkl stremio filmes series fontes transmissao catalogos metadados provedores prioridade ordem";
 pub const RECAP_KEYWORDS: &str = "watch recap stats statistics hours watched streak binge year month week filmes series resumo estatisticas horas assistido sequencia ano mes semana";
 pub const HOME_KEYWORDS: &str = "watch home rails continue watching recommended top rated popular shelf filmes series inicio prateleiras continuar assistindo recomendados destaques";
 
@@ -31,7 +36,11 @@ pub fn label() -> &'static str {
 }
 
 pub fn providers_label() -> &'static str {
-    tr!("Providers")
+    tr!("Accounts")
+}
+
+pub fn sources_label() -> &'static str {
+    tr!("Sources")
 }
 
 pub fn home_label() -> &'static str {
@@ -47,7 +56,11 @@ pub fn icon() -> Icon {
 }
 
 pub fn providers_icon() -> Icon {
-    Icon::Storefront
+    Icon::AccountCircle
+}
+
+pub fn sources_icon() -> Icon {
+    Icon::TravelExplore
 }
 
 pub fn home_icon() -> Icon {
@@ -63,7 +76,11 @@ pub fn blurb() -> &'static str {
 }
 
 pub fn providers_blurb() -> &'static str {
-    tr!("Every provider Watch can use, one card each: its account or key, whether it is set up, and the one switch that turns it on.")
+    tr!("Who Watch is signed in to, and what that account does. What each provider feeds the screens is on Sources.")
+}
+
+pub fn sources_blurb() -> &'static str {
+    tr!("What feeds Watch: the provider that may stream a title, the catalogues the Movies and Series tabs page, and the sources that describe a title — in the order they are asked.")
 }
 
 pub fn recap_blurb() -> &'static str {
@@ -77,7 +94,9 @@ pub fn home_blurb() -> &'static str {
 pub fn parse(value: &str) -> Option<Section> {
     match value {
         "watch" | "movies" | "theme" => Some(Section::Watch),
-        "providers" | "catalogs" | "catalog" | "metadata" | "details" | "accounts" => Some(Section::WatchProviders),
+        "providers" | "accounts" | "sign in" | "details" => Some(Section::WatchProviders),
+        // Not "metadata": that is the games' own sources section.
+        "sources" | "streams" | "catalogs" | "catalog" | "feeds" => Some(Section::WatchSources),
         "home" | "rails" | "shelves" => Some(Section::WatchHome),
         "recap" | "stats" | "statistics" => Some(Section::WatchRecap),
         _ => None,
@@ -90,13 +109,16 @@ mod tests {
 
     #[test]
     fn watch_registers_its_three_sections_and_parses_each() {
-        for section in [Section::Watch, Section::WatchProviders, Section::WatchHome, Section::WatchRecap] {
+        for section in [Section::Watch, Section::WatchProviders, Section::WatchSources, Section::WatchHome, Section::WatchRecap] {
             assert_eq!(Section::ALL.iter().filter(|candidate| **candidate == section).count(), 1);
             assert!(Section::GROUPS.iter().any(|(_, sections)| sections.contains(&section)), "{section:?} is in the Watch group");
         }
         assert_eq!(parse("watch"), Some(Section::Watch));
         assert_eq!(parse("providers"), Some(Section::WatchProviders));
-        assert_eq!(parse("catalogs"), Some(Section::WatchProviders), "the old name still opens the page");
+        assert_eq!(parse("accounts"), Some(Section::WatchProviders), "the new name opens the page");
+        assert_eq!(parse("sources"), Some(Section::WatchSources));
+        assert_eq!(parse("catalogs"), Some(Section::WatchSources), "the old name still lands where catalogs live");
+        assert_eq!(parse("metadata"), None, "the games' metadata section owns that name");
         assert_eq!(parse("home"), Some(Section::WatchHome));
         assert_eq!(parse("settings"), None);
     }

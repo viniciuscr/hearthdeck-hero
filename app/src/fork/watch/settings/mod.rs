@@ -16,7 +16,7 @@ use crate::pages::settings::SettingsPage;
 use crate::pages::PageCtx;
 use crate::theme;
 use crate::ui::controls::{action_button, caption, card, card_box, toggle_row, ButtonKind};
-use crate::ui::fields::meta_text;
+use crate::ui::fields::{meta_text, select_field};
 
 pub mod qr;
 mod qr_overlay;
@@ -48,6 +48,19 @@ pub struct State {
     pub simkl_signed_in: bool,
     /// The device code waiting for the person to approve it on their phone.
     pub simkl_pending: Option<heronite_watch::simkl_sign_in::DeviceCode>,
+    /// The trackers the person turned on, and what the outbox still owes: what
+    /// the Simkl card shows under its account.
+    pub trackers: Vec<String>,
+    pub tracker_pending: usize,
+    pub tracker_error: Option<SharedString>,
+    /// Titles a tracker refused for good: shown beside the sync state, never as
+    /// it (they do not go away when a drain succeeds).
+    pub tracker_unmatched: Vec<String>,
+    /// Whether this visit already asked the trackers to catch up: the page
+    /// renders many times, and a drain per frame would be a drain per frame.
+    pub trackers_drained: bool,
+    /// The open place menu of a metadata source (desktop), so only one is open.
+    pub metadata_open: Option<SharedString>,
     /// The window the recap is showing.
     pub recap: recap::Recency,
     /// The collection rails the build declares, with their source: read once for
@@ -69,6 +82,7 @@ impl State {
         heronite_watch::simkl_sign_in::adopt_client_id_file(&ctx.app);
         let simkl_ready = heronite_watch::simkl_sign_in::configured(&ctx.app);
         let simkl_signed_in = heronite_watch::simkl_sign_in::session(&ctx.app).is_some();
+        let pending = heronite_watch::trackers::pending(&ctx.app);
         let collections = heronite_watch::collections::descriptors(&ctx.app);
         Self {
             linked,
@@ -81,6 +95,12 @@ impl State {
             simkl_ready,
             simkl_signed_in,
             simkl_pending: None,
+            trackers: heronite_watch::trackers::enabled(&ctx.app),
+            tracker_pending: pending.count,
+            tracker_error: pending.last_error.map(SharedString::from),
+            tracker_unmatched: pending.unmatched,
+            trackers_drained: false,
+            metadata_open: None,
             recap: recap::Recency::default(),
             collections,
         }
@@ -244,19 +264,26 @@ fn set_home_rail(d: &mut SettingsPage, id: &str, on: Option<bool>, cx: &mut Cont
     cx.notify();
 }
 
-fn set_metadata_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Context<SettingsPage>) {
+/// Puts a metadata source in `place` (0 is asked first) or takes it out
+/// (`None`): the list is the priority, so one value says both.
+fn set_metadata_place(d: &mut SettingsPage, source: &str, place: Option<usize>, cx: &mut Context<SettingsPage>) {
     let mut settings = heronite_watch::settings::read(&d.ctx.app);
-    if on {
-        if !settings.metadata_sources.iter().any(|id| id == source) {
-            settings.metadata_sources.push(source.to_owned());
-        }
-    } else {
-        settings.metadata_sources.retain(|id| id != source);
-    }
+    placed(&mut settings.metadata_sources, source, place);
     if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
         log::warn!("saving the Watch settings: {error:#}");
     }
     cx.notify();
+}
+
+/// The priority list after `source` is put in `place`: it leaves its old place,
+/// the others close the gap, and it lands where asked (the end when the place is
+/// past it). `None` takes it out. Out of the page so it can be tested.
+fn placed(list: &mut Vec<String>, source: &str, place: Option<usize>) {
+    list.retain(|id| id != source);
+    if let Some(place) = place {
+        let place = place.min(list.len());
+        list.insert(place, source.to_owned());
+    }
 }
 
 /// One provider as Settings shows it: what it is, and what it can do. Generated
@@ -324,19 +351,14 @@ fn providers() -> Vec<Provider> {
     out
 }
 
-/// The cards that are not streaming services: the sources, and the accounts
-/// only. [`split`] returns the streaming services beside this.
-struct Groups {
-    sources: Vec<Provider>,
-    accounts: Vec<Provider>,
-}
-
-/// The cards split the way the page draws them: the streaming services first,
-/// then the source and account groups.
-fn split(all: Vec<Provider>) -> (Vec<Provider>, Groups) {
-    let (media, rest): (Vec<Provider>, Vec<Provider>) = all.into_iter().partition(|provider| provider.media);
-    let (accounts, sources): (Vec<Provider>, Vec<Provider>) = rest.into_iter().partition(|provider| provider.account);
-    (media, Groups { sources, accounts })
+/// Whether this provider's card is an **account**: the streaming services (they
+/// hold the person's library), the ones the accounts registry lists, and TMDB
+/// (its catalogs work with the app's key, but the person can sign in).
+///
+/// What a provider *feeds* the screens is not here: that is Settings → Watch →
+/// Sources, so this page is only ever "who am I signed in as".
+fn has_account(provider: &Provider) -> bool {
+    provider.media || provider.account || provider.id == "tmdb"
 }
 
 /// What a provider gives, in one line under its name.
@@ -360,38 +382,20 @@ fn capabilities(provider: &Provider) -> String {
     parts.join(" \u{b7} ")
 }
 
-/// Settings → Watch → Providers: one card per provider and nothing else. What
-/// each provider offers the screens is set on the Home page.
-pub fn render_providers(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
-    let settings = heronite_watch::settings::read(&d.ctx.app);
-    let (media, groups) = split(providers());
+/// Settings → Watch → **Accounts**: one card per provider Watch is signed in to,
+/// and nothing else. What each provider feeds the screens lives on Sources.
+pub fn render_accounts(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let accounts: Vec<Provider> = providers().into_iter().filter(has_account).collect();
 
-    let mut column = div().flex().flex_col().gap(px(14.));
-    if !media.is_empty() {
+    let mut column = div().flex().flex_col().gap(px(14.)).child(caption(tr!("Accounts"))).child(div().px(px(6.)).child(meta_text(tr!(
+        "Who Watch is signed in to, and what that account does. What each provider feeds the screens is on Sources."
+    ))));
+    for provider in &accounts {
+        column = column.child(provider_card(d, provider, cx));
+    }
+    if accounts.is_empty() {
         column = column
-            .child(caption(tr!("Streaming services")))
-            .child(div().px(px(6.)).child(meta_text(tr!("They own the titles, the streams and where you stopped."))));
-        for provider in &media {
-            column = column.child(provider_card(d, provider, &settings, cx));
-        }
-    }
-    if !groups.sources.is_empty() {
-        column = column.child(caption(tr!("Sources"))).child(div().px(px(6.)).child(meta_text(tr!(
-            "What the tabs browse and what describes a title. Metadata sources are asked in this order: the first answer for a field wins."
-        ))));
-        for provider in &groups.sources {
-            column = column.child(provider_card(d, provider, &settings, cx));
-        }
-    }
-    if !groups.accounts.is_empty() {
-        column = column.child(caption(tr!("Accounts"))).child(
-            div()
-                .px(px(6.))
-                .child(meta_text(tr!("Where your watch history is kept: signing in keeps the account in step across your devices."))),
-        );
-        for provider in &groups.accounts {
-            column = column.child(provider_card(d, provider, &settings, cx));
-        }
+            .child(div().px(px(6.)).child(meta_text(tr!("Nothing to sign in here yet: this build ships no provider with an account."))));
     }
     if let Some(notice) = &d.watch.notice {
         column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
@@ -399,57 +403,189 @@ pub fn render_providers(d: &mut SettingsPage, _window: &mut Window, cx: &mut Con
     column.into_any_element()
 }
 
-/// One provider's card: its name and what it gives, then its account or key and
-/// the one switch that turns it on.
-fn provider_card(
-    d: &mut SettingsPage,
-    provider: &Provider,
-    settings: &heronite_watch::settings::Settings,
-    cx: &mut Context<SettingsPage>,
-) -> AnyElement {
-    let mut rows: Vec<AnyElement> = Vec::new();
-    let tmdb = provider.id == "tmdb";
-    if provider.catalog {
-        let on = settings.catalog_sources.iter().any(|id| id == &provider.id);
-        let id = provider.id.clone();
-        rows.push(
-            toggle_row(
-                format!("watch-catalog-{}", provider.id),
-                SharedString::from(tr!("Browse its catalogs")),
-                Some(tr!("The Movies and Series tabs may page through what it lists.")),
-                on,
-            )
-            .on_click(cx.listener(move |d, _, _, cx| set_catalog_source(d, &id, !on, cx)))
-            .into_any_element(),
-        );
+/// Settings → Watch → **Sources**: what feeds the screens, by capability.
+/// Streams decide who may play, catalogs what the tabs page, and metadata what
+/// describes a title — in the order the sources are asked, because the first
+/// answer for a field wins.
+/// Settings → Watch → **Sources**: one switch per thing that feeds the screens,
+/// grouped by what it feeds. Metadata is ordered — the place decides which source
+/// answers a field first — and the trackers are switched on here too.
+pub fn render_sources(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
+    // The outbox catches up here, where the trackers live: what a session left
+    // waiting is sent once, not on every frame the page draws.
+    if !d.watch.trackers_drained {
+        d.watch.trackers_drained = true;
+        if !d.watch.trackers.is_empty() {
+            drain_trackers(d, cx);
+        }
     }
-    if provider.metadata {
-        let on = settings.metadata_sources.iter().any(|id| id == &provider.id);
-        let id = provider.id.clone();
-        rows.push(
-            toggle_row(
-                format!("watch-metadata-{}", provider.id),
-                SharedString::from(tr!("Describe titles")),
-                Some(tr!("Its answer fills the film page; what another source already said stays.")),
-                on,
-            )
-            .on_click(cx.listener(move |d, _, _, cx| set_metadata_source(d, &id, !on, cx)))
-            .into_any_element(),
-        );
-    }
-    if provider.media && provider.id == "stremio" {
-        rows.push(stremio_account(d, cx));
-        let settings = heronite_watch::settings::read(&d.ctx.app);
-        rows.push(
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let mut column = div().flex().flex_col().gap(px(14.));
+
+    let streams = heronite_watch::registry::providers();
+    if !streams.is_empty() {
+        let mut card = card_box().py(px(12.)).px(px(14.)).gap(px(6.));
+        for provider in streams {
+            let on = settings.stream_providers.iter().any(|id| id == provider.id());
+            let id = provider.id().to_owned();
+            card = card.child(
+                toggle_row(format!("watch-stream-{id}"), SharedString::from(provider.name()), None, on)
+                    .on_click(cx.listener(move |d, _, _, cx| set_stream_source(d, &id, !on, cx))),
+            );
+        }
+        card = card.child(
             toggle_row(
                 "watch-service-stop",
                 SharedString::from(tr!("Stop the service after watching")),
                 Some(tr!("Frees its memory; it is started again when you play a torrent.")),
                 settings.stop_service_when_done,
             )
-            .on_click(cx.listener(|d, _, _, cx| toggle_service(d, cx)))
-            .into_any_element(),
+            .on_click(cx.listener(|d, _, _, cx| toggle_service(d, cx))),
         );
+        column = column
+            .child(caption(tr!("Streams")))
+            .child(sources_help(tr!(
+                "Who may play a title. A provider switched off here keeps its account and its rails; only asking it for a stream is refused."
+            )))
+            .child(card);
+    }
+
+    let catalogs = heronite_watch::catalog::sources();
+    if !catalogs.is_empty() {
+        let mut card = card_box().py(px(12.)).px(px(14.)).gap(px(6.));
+        for source in catalogs {
+            let descriptor = source.descriptor();
+            let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
+            let id = descriptor.id.to_owned();
+            card = card.child(
+                toggle_row(format!("watch-catalog-{id}"), SharedString::from(descriptor.name), None, on)
+                    .on_click(cx.listener(move |d, _, _, cx| set_catalog_source(d, &id, !on, cx))),
+            );
+        }
+        column = column
+            .child(caption(tr!("Catalogs")))
+            .child(sources_help(tr!("What the Movies and Series tabs may page through.")))
+            .child(card);
+    }
+
+    let metadata = heronite_watch::metadata::sources();
+    if !metadata.is_empty() {
+        let mut card = card_box().py(px(12.)).px(px(14.)).gap(px(6.));
+        for source in metadata {
+            let descriptor = source.descriptor();
+            let place = settings.metadata_sources.iter().position(|id| id == descriptor.id);
+            card = card.child(metadata_place_row(d, descriptor.id, descriptor.name, place, metadata.len(), cx));
+        }
+        column = column
+            .child(caption(tr!("Metadata")))
+            .child(sources_help(tr!(
+                "What describes a title. The place decides whether a source is asked and in which order; the first answer for a field wins."
+            )))
+            .child(card);
+    }
+
+    let trackers = heronite_watch::trackers::available(&d.ctx.app);
+    if !trackers.is_empty() {
+        let mut card = card_box().py(px(12.)).px(px(14.)).gap(px(6.));
+        for id in trackers {
+            let on = d.watch.trackers.iter().any(|known| known == &id);
+            let desc = tracker_state(d);
+            let id = id.clone();
+            card = card.child(
+                toggle_row(format!("watch-tracker-{id}"), SharedString::from(tracker_name(&id)), Some(desc.as_str()), on)
+                    .on_click(cx.listener(move |d, _, _, cx| set_tracker(d, &id, !on, cx))),
+            );
+        }
+        column = column
+            .child(caption(tr!("Trackers")))
+            .child(sources_help(tr!(
+                "Where what you watch is mirrored. Switching one on sends the history already on this machine, then only what happens from then on."
+            )))
+            .child(card);
+    }
+
+    if let Some(notice) = &d.watch.notice {
+        column = column.child(div().text_size(px(12.5)).text_color(theme::warning()).child(notice.clone()));
+    }
+    column.into_any_element()
+}
+
+/// One line under a sources group.
+fn sources_help(text: &str) -> Div {
+    div().px(px(6.)).child(meta_text(text))
+}
+
+/// A metadata source's place in the priority list: `Off`, or `1`..`n`. One
+/// control per source — the list is the order, so there are no move buttons.
+fn metadata_place_row(
+    d: &mut SettingsPage,
+    id: &'static str,
+    name: &str,
+    place: Option<usize>,
+    total: usize,
+    cx: &mut Context<SettingsPage>,
+) -> Div {
+    let key = SharedString::from(format!("watch-metadata-place-{id}"));
+    let open = d.watch.metadata_open.as_ref() == Some(&key);
+    let shown: SharedString = match place {
+        Some(index) => SharedString::from(format!("{}", index + 1)),
+        None => SharedString::from(tr!("Off")),
+    };
+    let mut options: Vec<(SharedString, bool)> = vec![(SharedString::from(tr!("Off")), place.is_none())];
+    for index in 0..total {
+        options.push((SharedString::from(format!("{}", index + 1)), place == Some(index)));
+    }
+    let (toggle_key, source) = (key, id.to_owned());
+    select_field(
+        &format!("watch-metadata-{id}"),
+        Some(name),
+        shown,
+        false,
+        open,
+        options,
+        cx,
+        move |d: &mut SettingsPage, _, cx| {
+            let open = d.watch.metadata_open.as_ref() == Some(&toggle_key);
+            d.watch.metadata_open = (!open).then(|| toggle_key.clone());
+            cx.notify();
+        },
+        move |d: &mut SettingsPage, index, _, cx| {
+            d.watch.metadata_open = None;
+            set_metadata_place(d, &source, index.checked_sub(1), cx);
+        },
+    )
+}
+
+/// The state line under a tracker: what is waiting or the last fault, and — in
+/// the same line, never a row of its own — the titles it could not match.
+fn tracker_state(d: &SettingsPage) -> String {
+    let state = match (&d.watch.tracker_error, d.watch.tracker_pending) {
+        (Some(error), _) => error.to_string(),
+        (None, 0) => tr!("Everything watched here is in Simkl.").to_string(),
+        (None, 1) => tr!("1 watch event waiting for Simkl.").to_string(),
+        (None, pending) => tr!("{n} watch events waiting for Simkl.", n = pending).to_string(),
+    };
+    match unmatched_line(d) {
+        Some(unmatched) => format!("{state} {unmatched}"),
+        None => state,
+    }
+}
+
+/// How a tracker is called on a screen.
+fn tracker_name(id: &str) -> &'static str {
+    match id {
+        "simkl" => "Simkl",
+        _ => "Tracker",
+    }
+}
+
+/// One account's card: its name and what it gives, then its sign-in and the
+/// switches that belong to that account. What it feeds the screens is on Sources.
+fn provider_card(d: &mut SettingsPage, provider: &Provider, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let mut rows: Vec<AnyElement> = Vec::new();
+    let tmdb = provider.id == "tmdb";
+    if provider.media && provider.id == "stremio" {
+        rows.push(stremio_account(d, cx));
     }
     if provider.id == "tmdb" {
         rows.push(tmdb_card(d, cx));
@@ -606,15 +742,6 @@ fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
             tr!("Connect TMDB"),
             d.watch.tmdb_ready,
             cx.listener(|d, _, _, cx| connect_tmdb(d, cx)),
-        ));
-    }
-    if d.watch.tmdb_username.is_some() {
-        buttons = buttons.child(action_button(
-            "watch-tmdb-forget",
-            ButtonKind::Ghost,
-            tr!("Forget TMDB"),
-            true,
-            cx.listener(|d, _, _, cx| clear_tmdb_key(d, cx)),
         ));
     }
     buttons
@@ -840,13 +967,6 @@ fn simkl_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
             true,
             cx.listener(|d, _, _, cx| sign_out_simkl(d, cx)),
         ));
-        buttons = buttons.child(action_button(
-            "watch-simkl-forget",
-            ButtonKind::Ghost,
-            tr!("Forget Simkl"),
-            true,
-            cx.listener(|d, _, _, cx| clear_simkl(d, cx)),
-        ));
     } else {
         buttons = buttons.child(action_button(
             "watch-simkl-connect",
@@ -857,6 +977,89 @@ fn simkl_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
         ));
     }
     buttons
+}
+
+/// Turns a tracker on or off. On is also the first sync: the finished history
+/// already on this machine goes over once, then only what happens afterwards.
+fn set_tracker(d: &mut SettingsPage, id: &str, on: bool, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    settings.trackers.retain(|tracker| tracker != id);
+    if on {
+        settings.trackers.push(id.to_owned());
+    }
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    d.watch.trackers = heronite_watch::trackers::enabled(&d.ctx.app);
+    if on {
+        // Switching it on *is* the first sync: the history already on this
+        // machine goes over once (with its own timestamps), and only what happens
+        // from then on is sent afterwards.
+        let app = d.ctx.app.clone();
+        cx.spawn(async move |this, cx| {
+            let sent = cx.background_spawn(async move { heronite_watch::trackers::backfill(&app) }).await;
+            this.update(cx, |d, cx| {
+                match sent {
+                    Ok(count) if count > 0 => d.watch.notice = Some(tr!("Sent {n} watch sessions.", n = count).into()),
+                    Ok(_) => {}
+                    Err(error) => {
+                        log::warn!("trackers: {error:#}");
+                        d.watch.notice = Some(format!("{error:#}").into());
+                    }
+                }
+                refresh_trackers(d);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+    cx.notify();
+}
+
+/// Hands the outbox to the trackers, off the UI thread, then shows what is left.
+fn drain_trackers(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    d.watch.notice = None;
+    let app = d.ctx.app.clone();
+    cx.spawn(async move |this, cx| {
+        let drained = cx.background_spawn(async move { heronite_watch::trackers::drain(&app) }).await;
+        this.update(cx, |d, cx| {
+            match drained {
+                Ok(report) if report.delivered > 0 => {
+                    d.watch.notice = Some(tr!("Sent {n} watch events.", n = report.delivered).into());
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    log::warn!("trackers: {error:#}");
+                    d.watch.notice = Some(format!("{error:#}").into());
+                }
+            }
+            refresh_trackers(d);
+            cx.notify();
+        })
+        .ok();
+    })
+    .detach();
+}
+
+/// Re-reads what the outbox owes, for the card.
+fn refresh_trackers(d: &mut SettingsPage) {
+    let pending = heronite_watch::trackers::pending(&d.ctx.app);
+    d.watch.trackers = heronite_watch::trackers::enabled(&d.ctx.app);
+    d.watch.tracker_pending = pending.count;
+    d.watch.tracker_error = pending.last_error.map(SharedString::from);
+    d.watch.tracker_unmatched = pending.unmatched;
+}
+
+/// The titles a tracker could not match, in one sentence for the card.
+fn unmatched_line(d: &SettingsPage) -> Option<String> {
+    match d.watch.tracker_unmatched.as_slice() {
+        [] => None,
+        [one] => Some(tr!("Could not match: {title}", title = one.clone())),
+        [first, ..] => {
+            Some(tr!("Could not match {n} titles, such as {title}.", n = d.watch.tracker_unmatched.len(), title = first.clone()))
+        }
+    }
 }
 
 /// The one way in: the app's client id must be there (the bootstrap sets it),
@@ -947,6 +1150,9 @@ fn wait_for_simkl(
                         d.watch.simkl_signed_in = true;
                         d.watch.notice = None;
                         close_pairing(d, overlay.as_ref(), cx);
+                        // A signed-in tracker gets the outbox at once.
+                        refresh_trackers(d);
+                        drain_trackers(d, cx);
                         cx.notify();
                     })
                     .ok();
@@ -983,20 +1189,14 @@ fn sign_out_simkl(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         Ok(()) => {
             d.watch.simkl_signed_in = false;
             d.watch.simkl_pending = None;
+            // The refusals belonged to the account that was signed in.
+            if let Err(error) = heronite_watch::trackers::clear_notices(&d.ctx.app) {
+                log::warn!("clearing the tracker notices: {error:#}");
+            }
+            refresh_trackers(d);
         }
         Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
     }
-    cx.notify();
-}
-
-/// Forgets the app's client id and the session with it.
-fn clear_simkl(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
-    if let Err(error) = heronite_watch::store::clear_simkl_client_id(&d.ctx.app) {
-        log::warn!("clearing the Simkl client id: {error:#}");
-    }
-    d.watch.simkl_ready = heronite_watch::simkl_sign_in::configured(&d.ctx.app);
-    d.watch.simkl_signed_in = false;
-    d.watch.simkl_pending = None;
     cx.notify();
 }
 
@@ -1031,17 +1231,17 @@ fn set_catalog_source(d: &mut SettingsPage, source: &str, on: bool, cx: &mut Con
     cx.notify();
 }
 
-fn clear_tmdb_key(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
-    if let Err(error) = heronite_watch::store::clear_tmdb_key(&d.ctx.app) {
-        log::warn!("clearing the TMDB key: {error:#}");
+/// Turns a media provider's streams on or off. Its account and rails stay either
+/// way: only asking it for a stream is refused (`playback::enabled`).
+fn set_stream_source(d: &mut SettingsPage, provider: &str, on: bool, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    settings.stream_providers.retain(|id| id != provider);
+    if on {
+        settings.stream_providers.push(provider.to_owned());
     }
-    d.watch.tmdb_username = None;
-    d.watch.tmdb_pending = None;
-    d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
-    crate::collection::watch_catalog::catalogs_changed();
-    // What that key was resolving (the collection rails, TMDB's catalogs) is no
-    // longer there to draw.
-    cx.emit(crate::pages::PageEvent::LibraryChanged);
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
     cx.notify();
 }
 
@@ -1154,27 +1354,20 @@ pub(crate) fn console_rows(_d: &SettingsPage) -> Vec<Row> {
     ]
 }
 
-/// Settings → Watch → Providers, as rows: a header per provider, its account or
-/// key, and the switches that turn it on.
-pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
-    let settings = heronite_watch::settings::read(&d.ctx.app);
-    let (media, groups) = split(providers());
+/// Settings → Watch → **Accounts**, as rows: a header per provider Watch is
+/// signed in to, then its sign-in and the switches that belong to that account.
+pub(crate) fn account_rows(d: &SettingsPage) -> Vec<Row> {
+    let accounts: Vec<Provider> = providers().into_iter().filter(has_account).collect();
     let mut rows = Vec::new();
-    for (group, providers) in [(tr!("Streaming services"), media), (tr!("Sources"), groups.sources), (tr!("Accounts"), groups.accounts)] {
-        if providers.is_empty() {
-            continue;
-        }
-        rows.push(Row::header(group));
-        for provider in providers {
+    if accounts.is_empty() {
+        rows.push(Row::header(tr!("Accounts")));
+        rows.push(Row::info("watch-accounts-empty", tr!("Accounts"), tr!("This build ships no provider with an account.")));
+        return rows;
+    }
+    rows.push(Row::header(tr!("Accounts")));
+    {
+        for provider in accounts {
             rows.push(Row::header(provider.name.clone()));
-            if provider.catalog {
-                let on = settings.catalog_sources.iter().any(|id| id == &provider.id);
-                rows.push(Row::toggle(SharedString::from(format!("watch-catalog:{}", provider.id)), tr!("Browse its catalogs"), on));
-            }
-            if provider.metadata {
-                let on = settings.metadata_sources.iter().any(|id| id == &provider.id);
-                rows.push(Row::toggle(SharedString::from(format!("watch-metadata:{}", provider.id)), tr!("Describe titles"), on));
-            }
             if provider.media && provider.id == "stremio" {
                 rows.push(Row::info("watch-account", tr!("Account"), if d.watch.linked { tr!("Linked") } else { tr!("Not linked") }));
                 if d.watch.linked {
@@ -1182,7 +1375,6 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                 } else {
                     rows.push(Row::action("watch-link", tr!("Link with a code")));
                 }
-                rows.push(Row::toggle("watch-service-stop", tr!("Stop the service after watching"), settings.stop_service_when_done));
             }
             if provider.id == "tmdb" {
                 if let Some(name) = &d.watch.tmdb_username {
@@ -1210,9 +1402,6 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                     };
                     rows.push(Row::action("watch-tmdb-connect", tr!("Connect TMDB")).desc(hint));
                 }
-                if d.watch.tmdb_username.is_some() {
-                    rows.push(Row::action("watch-tmdb-forget", tr!("Forget TMDB")));
-                }
             }
             if provider.id == "simkl" {
                 if d.watch.simkl_signed_in {
@@ -1221,7 +1410,6 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                             .desc(tr!("What you watch follows the account across your devices.")),
                     );
                     rows.push(Row::action("watch-simkl-sign-out", tr!("Sign out")));
-                    rows.push(Row::action("watch-simkl-forget", tr!("Forget Simkl")));
                 } else {
                     // One row, like TMDB's: the panel carries the code and the
                     // wait, so the menu needs no rows of its own for them.
@@ -1244,35 +1432,101 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
     rows
 }
 
-/// The Providers page's rows: the switches, the account and the TMDB flow.
-pub(crate) fn provider_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
-    match outcome {
-        Outcome::Activate(id) => match id.as_ref() {
+/// The Accounts page's rows: sign-ins and sign-outs, and nothing else.
+pub(crate) fn account_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
+    if let Outcome::Activate(id) = outcome {
+        match id.as_ref() {
             "watch-link" => start_link(d, cx),
             "watch-unlink" => unlink(d, cx),
             "watch-tmdb-connect" => connect_tmdb(d, cx),
-            "watch-tmdb-forget" => clear_tmdb_key(d, cx),
             "watch-tmdb-sign-out" => sign_out_tmdb(d, cx),
             "watch-simkl-connect" => connect_simkl(d, cx),
-            "watch-simkl-forget" => clear_simkl(d, cx),
             "watch-simkl-sign-out" => sign_out_simkl(d, cx),
             _ => {}
-        },
+        }
+    }
+}
+
+/// Settings → Watch → **Sources**, as rows: one switch per stream, catalog and
+/// tracker, and a metadata source's place.
+pub(crate) fn source_rows(d: &SettingsPage) -> Vec<Row> {
+    let settings = heronite_watch::settings::read(&d.ctx.app);
+    let mut rows = Vec::new();
+
+    let streams = heronite_watch::registry::providers();
+    if !streams.is_empty() {
+        rows.push(Row::header(tr!("Streams")));
+        for provider in streams {
+            let on = settings.stream_providers.iter().any(|id| id == provider.id());
+            rows.push(Row::toggle(SharedString::from(format!("watch-stream:{}", provider.id())), SharedString::from(provider.name()), on));
+        }
+        rows.push(Row::toggle("watch-service-stop", tr!("Stop the service after watching"), settings.stop_service_when_done));
+    }
+
+    let catalogs = heronite_watch::catalog::sources();
+    if !catalogs.is_empty() {
+        rows.push(Row::header(tr!("Catalogs")));
+        for source in catalogs {
+            let descriptor = source.descriptor();
+            let on = settings.catalog_sources.iter().any(|id| id == descriptor.id);
+            rows.push(Row::toggle(SharedString::from(format!("watch-catalog:{}", descriptor.id)), SharedString::from(descriptor.name), on));
+        }
+    }
+
+    // The place is the order: Off, or 1..n among the metadata sources.
+    let metadata = heronite_watch::metadata::sources();
+    if !metadata.is_empty() {
+        rows.push(Row::header(tr!("Metadata")));
+        for source in metadata {
+            let descriptor = source.descriptor();
+            let place = settings.metadata_sources.iter().position(|id| id == descriptor.id);
+            let mut options: Vec<SharedString> = vec![SharedString::from(tr!("Off"))];
+            for index in 0..metadata.len() {
+                options.push(SharedString::from(format!("{}", index + 1)));
+            }
+            let selected = place.map_or(0, |index| index + 1);
+            rows.push(Row::choice(
+                SharedString::from(format!("watch-metadata-place:{}", descriptor.id)),
+                SharedString::from(descriptor.name),
+                options,
+                selected,
+            ));
+        }
+    }
+
+    let trackers = heronite_watch::trackers::available(&d.ctx.app);
+    if !trackers.is_empty() {
+        rows.push(Row::header(tr!("Trackers")));
+        for id in trackers {
+            let on = d.watch.trackers.iter().any(|known| known == &id);
+            rows.push(
+                Row::toggle(SharedString::from(format!("watch-tracker:{id}")), SharedString::from(tracker_name(&id)), on)
+                    .desc(tracker_state(d)),
+            );
+        }
+    }
+    rows
+}
+
+/// A press on the Sources page: the switches, and a source's place.
+pub(crate) fn source_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
+    match outcome {
+        Outcome::Changed(id, Value::Choice { index, .. }) if id.starts_with("watch-metadata-place:") => {
+            let source = id.trim_start_matches("watch-metadata-place:").to_owned();
+            set_metadata_place(d, &source, index.checked_sub(1), cx);
+        }
+        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-stream:") => {
+            let source = id.trim_start_matches("watch-stream:").to_owned();
+            set_stream_source(d, &source, on, cx);
+        }
+        Outcome::Changed(id, Value::Toggle(_)) if id.as_ref() == "watch-service-stop" => toggle_service(d, cx),
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-catalog:") => {
             let source = id.trim_start_matches("watch-catalog:").to_owned();
             set_catalog_source(d, &source, on, cx);
         }
-        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-metadata:") => {
-            let source = id.trim_start_matches("watch-metadata:").to_owned();
-            set_metadata_source(d, &source, on, cx);
-        }
-        Outcome::Changed(id, Value::Toggle(on)) if id.as_ref() == "watch-service-stop" => {
-            let mut settings = heronite_watch::settings::read(&d.ctx.app);
-            settings.stop_service_when_done = on;
-            if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
-                log::warn!("saving the Watch settings: {error:#}");
-            }
-            cx.notify();
+        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-tracker:") => {
+            let tracker = id.trim_start_matches("watch-tracker:").to_owned();
+            set_tracker(d, &tracker, on, cx);
         }
         _ => {}
     }
@@ -1311,17 +1565,44 @@ mod tests {
         let cinemeta = find("cinemeta");
         assert!(cinemeta.catalog && cinemeta.metadata, "a source that is no account at all");
         let simkl = find("simkl");
-        assert!(simkl.account && !simkl.media && !simkl.catalog, "a tracker: its card is the sign-in");
-        assert_eq!(capabilities(simkl), tr!("Account"));
+        assert!(simkl.account && simkl.metadata && !simkl.media && !simkl.catalog, "a tracker that can also describe a title");
+        assert_eq!(
+            capabilities(simkl),
+            format!("{} \u{b7} {}", tr!("Metadata"), tr!("Account")),
+            "it describes titles and holds an account"
+        );
         let ids: Vec<&str> = all.iter().map(|provider| provider.id.as_str()).collect();
-        let (_, groups) = split(providers());
-        assert_eq!(groups.accounts.len(), 1, "the accounts come last, one card each");
-        assert_eq!(groups.accounts[0].id, "simkl");
-        assert!(groups.sources.iter().all(|provider| !provider.account), "an account card is not a source card");
+        // The Accounts page: the streaming service, TMDB's session and Simkl's
+        // account. Cinemeta has none, so it never shows a card there.
+        let accounts: Vec<&str> = all.iter().filter(|provider| has_account(provider)).map(|provider| provider.id.as_str()).collect();
+        assert_eq!(accounts, ["stremio", "tmdb", "simkl"], "the media service leads, and a source without an account is absent");
+        // The Sources page takes its lists straight from the registries.
+        let streams: Vec<&str> = heronite_watch::registry::providers().iter().map(|provider| provider.id()).collect();
+        assert_eq!(streams, ["stremio"], "one streaming service to switch");
+        assert!(heronite_watch::catalog::sources().iter().any(|source| source.descriptor().id == "cinemeta"));
+        assert!(
+            heronite_watch::metadata::sources().iter().any(|source| source.descriptor().id == "simkl"),
+            "Simkl describes titles, opt-in"
+        );
         let mut unique = ids.clone();
         unique.dedup();
         assert_eq!(unique.len(), ids.len(), "a provider that is several kinds is one card: {ids:?}");
         assert!(capabilities(tmdb).contains(tr!("Catalogs")), "the card says what it gives");
+    }
+
+    #[test]
+    fn a_metadata_source_takes_the_place_it_is_given() {
+        let mut list = vec!["tmdb".to_owned(), "cinemeta".to_owned()];
+        placed(&mut list, "simkl", Some(0));
+        assert_eq!(list, ["simkl", "tmdb", "cinemeta"], "a new source lands where it was put");
+        placed(&mut list, "cinemeta", Some(1));
+        assert_eq!(list, ["simkl", "cinemeta", "tmdb"], "moving up closes the gap it left");
+        placed(&mut list, "simkl", Some(9));
+        assert_eq!(list, ["cinemeta", "tmdb", "simkl"], "a place past the end is the end");
+        placed(&mut list, "tmdb", None);
+        assert_eq!(list, ["cinemeta", "simkl"], "off is off");
+        placed(&mut list, "unknown", Some(0));
+        assert_eq!(list, ["unknown", "cinemeta", "simkl"], "a source this build has not is still placed");
     }
 
     #[test]

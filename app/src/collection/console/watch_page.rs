@@ -20,9 +20,10 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use heronite_data::text::DateLocale;
 use heronite_data::CollectionGame;
-use heronite_i18n::tr;
+use heronite_i18n::{tr, trn};
 use heronite_images::{ImageRef, Variant};
-use heronite_watch::metadata::{Episode, Fact, TitleDetails};
+use heronite_watch::metadata::{Episode, Fact, TitleDetails, Trailer};
+use heronite_watch::progress::WatchedState;
 
 use super::super::watch_personal::Flag;
 use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection};
@@ -57,29 +58,44 @@ fn facts_line(provider: &str, details: Option<&TitleDetails>, library_year: Opti
     facts.join(" \u{b7} ")
 }
 
-/// "Watched · 23m watched · Last watched Nov 12, 2026", `None` when never watched.
-/// A film says **Watched** only once its own record reached the threshold: the
-/// position alone (opened and abandoned) is not watching it.
-fn watched_line(playtime_minutes: u64, last_played: Option<&str>, finished: bool, locale: DateLocale) -> Option<String> {
-    let mut parts = Vec::new();
-    if finished {
-        parts.push(tr!("Watched").to_string());
+/// The title's standing in one line, before how long and when: "Watched", or
+/// "In progress · 40 %" for a film left part-way, or "3 of 8 episodes watched"
+/// for a series. `None` when nothing of it was played — or, for a series, when
+/// the page does not know the episode list and there is nothing to count against.
+fn title_status(progress: Option<&heronite_watch::progress::MovieProgress>, kind: &str, details: Option<&TitleDetails>) -> Option<String> {
+    use heronite_watch::progress::WatchedState;
+    let progress = progress?;
+    if kind == "series" {
+        let standing = progress.series_standing();
+        if standing.watched == 0 {
+            return None;
+        }
+        let total = details.filter(|details| !details.episodes.is_empty()).map(|details| details.episode_count());
+        return Some(match total {
+            Some(1) => tr!("{watched} of 1 episode watched", watched = standing.watched).to_string(),
+            Some(total) => tr!("{watched} of {total} episodes watched", watched = standing.watched, total = total).to_string(),
+            None => trn!(standing.watched, "{n} episode watched", "{n} episodes watched"),
+        });
     }
+    match progress.state() {
+        WatchedState::Watched => Some(tr!("Watched").to_string()),
+        WatchedState::InProgress { .. } => progress.state().percent().map(|percent| tr!("In progress · {percent}%", percent = percent)),
+        WatchedState::Unwatched => None,
+    }
+}
+
+/// "Watched · 23m watched · Last watched Nov 12, 2026", `None` when nothing says
+/// anything. A film says **Watched** only once its own record reached the
+/// threshold; the position alone (opened and abandoned) is not watching it.
+fn watched_line(playtime_minutes: u64, last_played: Option<&str>, status: Option<String>, locale: DateLocale) -> Option<String> {
+    let mut parts = Vec::new();
+    parts.extend(status);
     if playtime_minutes > 0 {
         parts.push(tr!("{time} watched", time = heronite_data::collection::format_playtime_minutes(playtime_minutes)).to_string());
     }
     let watched = last_played.map(|at| heronite_data::text::format_timestamp(at, locale)).filter(|at| !at.trim().is_empty());
     parts.extend(watched.map(|at| tr!("Last watched {at}", at = at).to_string()));
     (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
-}
-
-/// Whether a title is watched: a film by its own record, a series when every
-/// episode it has a record for is finished (and it has at least one).
-fn finished_of(progress: &heronite_watch::progress::MovieProgress, kind: &str) -> bool {
-    if kind != "series" {
-        return progress.finished;
-    }
-    !progress.episodes.is_empty() && progress.episodes.values().all(|episode| episode.finished)
 }
 
 /// The names as one line, `None` when the source listed none.
@@ -132,9 +148,20 @@ fn fact_label(fact: &Fact) -> SharedString {
         "tagline" => tr!("Tagline").into(),
         "budget" => tr!("Budget").into(),
         "network" => tr!("Network").into(),
+        "certification" => tr!("Certification").into(),
         "original_language" => tr!("Original language").into(),
         _ if fact.label.trim().is_empty() => SharedString::from(fact.id.clone()),
         _ => SharedString::from(fact.label.clone()),
+    }
+}
+
+/// The trailer's own name, or what it is when the source did not name it.
+fn trailer_title(trailer: &Trailer) -> String {
+    let name = trailer.name.trim();
+    if name.is_empty() {
+        tr!("Trailer").to_string()
+    } else {
+        name.to_owned()
     }
 }
 
@@ -159,11 +186,39 @@ fn episode_desc(episode: &Episode, locale: DateLocale) -> String {
     parts.join(" \u{b7} ")
 }
 
-/// One row of a season's episodes ("episode:{index}" in the list); the episode
-/// the stored progress points at wears a tick.
-fn episode_row(episode: &Episode, index: usize, watched: bool, locale: DateLocale) -> Row {
-    let row = Row::action(SharedString::from(format!("episode:{index}")), episode_label(episode)).desc(episode_desc(episode, locale));
-    row.icon(if watched { Icon::Check } else { Icon::PlayArrow })
+/// One row of a season's episodes ("episode:{index}" in the list). A tick means
+/// finished, the half mark means it was started and left, and a play mark means
+/// nothing was played yet; the row says how far in when it knows.
+fn episode_row(episode: &Episode, index: usize, state: WatchedState, resuming: bool, locale: DateLocale) -> Row {
+    let mut parts = vec![episode_desc(episode, locale)];
+    match state {
+        WatchedState::InProgress { .. } => {
+            let percent = state.percent().unwrap_or_default();
+            parts.push(if resuming {
+                tr!("Resume from here · {percent}%", percent = percent).to_string()
+            } else {
+                tr!("In progress · {percent}%", percent = percent).to_string()
+            });
+        }
+        WatchedState::Unwatched if resuming => parts.push(tr!("Resume from here").to_string()),
+        WatchedState::Watched | WatchedState::Unwatched => {}
+    }
+    let icon = match state {
+        WatchedState::Watched => Icon::Check,
+        // A clock for "started, not finished" — the set already has one.
+        WatchedState::InProgress { .. } => Icon::AccessTime,
+        WatchedState::Unwatched => Icon::PlayArrow,
+    };
+    Row::action(SharedString::from(format!("episode:{index}")), episode_label(episode)).desc(parts.join(" \u{b7} ")).icon(icon)
+}
+
+/// The mark row: the label says what a press does, the mark says where it stands.
+fn watched_toggle_row(watch: String, unwatch: String, watched: bool) -> Row {
+    Row::action("watched-toggle", SharedString::from(if watched { unwatch } else { watch })).icon(if watched {
+        Icon::Check
+    } else {
+        Icon::PlayArrow
+    })
 }
 
 /// The episode of the row the list is on, when that row is an episode: the
@@ -223,9 +278,9 @@ impl CollectionView {
             details.as_deref().filter(|details| !details.episodes.is_empty()).map(|details| self.watch_ensure_selection(key, details));
         let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
         let facts = facts_line(g.source_label, details.as_deref(), crate::fork::watch::sources::year(&g));
-        let finished = heronite_watch::progress::local(&self.app_paths, &g.runner, crate::fork::watch::sources::id(&g))
-            .is_some_and(|progress| finished_of(&progress, crate::fork::watch::sources::kind(&g)));
-        let watched = watched_line(g.playtime_minutes, g.last_played.as_deref(), finished, locale);
+        let progress = heronite_watch::progress::local(&self.app_paths, &g.runner, crate::fork::watch::sources::id(&g));
+        let status = title_status(progress.as_ref(), crate::fork::watch::sources::kind(&g), details.as_deref());
+        let watched = watched_line(g.playtime_minutes, g.last_played.as_deref(), status, locale);
         let lines = detail_lines(details.as_deref(), &g.details.genres, locale);
         let overview = details
             .as_deref()
@@ -291,10 +346,17 @@ impl CollectionView {
                 10.,
             ));
 
-        // The card's two sides: what the title or the picked episode is, and the
-        // streams it can be played from. One structure for films and series.
-        let tabs: Vec<SharedString> = [tr!("Details"), tr!("Streams")].into_iter().map(SharedString::from).collect();
-        let (active, body) = match self.watch_tab() {
+        // The card's sides: what the title or the picked episode is, the streams
+        // it can be played from, and — only when a metadata source brought one —
+        // its trailer. One structure for films and series.
+        let has_trailer = details.as_ref().is_some_and(|details| !details.trailers.is_empty());
+        let tab = self.watch_tab_shown(has_trailer);
+        let mut labels = vec![tr!("Details"), tr!("Streams")];
+        if has_trailer {
+            labels.push(tr!("Trailer"));
+        }
+        let tabs: Vec<SharedString> = labels.into_iter().map(SharedString::from).collect();
+        let (active, body) = match tab {
             DetailTab::Details => {
                 let mut about = div()
                     .id("console-watch-about")
@@ -327,6 +389,48 @@ impl CollectionView {
                 let focused = self.watch_pane() == Pane::Card;
                 let list = self.watch_streams_nav().render("console-watch-streams", &rows, focused);
                 (1, list.flex_1().min_h_0().into_any_element())
+            }
+            DetailTab::Trailer => {
+                let trailers = details.as_ref().map(|details| details.trailers.as_slice()).unwrap_or(&[]);
+                let mut card = div().id("console-watch-trailer").size_full().min_h_0().flex().flex_col().gap(u(18.)).overflow_hidden();
+                if let Some(trailer) = trailers.first() {
+                    // The still takes the room the card has left and is cropped to
+                    // it. A fixed size multiplied by the UI scale is what pushed
+                    // it out of the card on a big screen.
+                    let still = trailer.thumbnail.as_deref().and_then(|url| self.episode_still(url, 960., 540., s));
+                    if let Some(still) = still {
+                        card = card.child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .w_full()
+                                .rounded(u(14.))
+                                .overflow_hidden()
+                                .bg(kit::ink(0.08))
+                                .children(Some(img(still).size_full().object_fit(ObjectFit::Cover))),
+                        );
+                    }
+                    card = card.child(kit::title(SharedString::from(trailer_title(trailer)), 30.).line_clamp(2));
+                    card = card.child(div().flex_none().child(kit::body_text(tr!("X plays it here, in the player."))));
+                    if trailers.len() > 1 {
+                        card = card.child(
+                            div()
+                                .flex_none()
+                                .text_size(u(14.))
+                                .text_color(theme::text_muted())
+                                .child(tr!("{n} more from the same source.", n = trailers.len() - 1)),
+                        );
+                    }
+                    card = card.child(
+                        div()
+                            .flex_none()
+                            .text_size(u(12.))
+                            .text_color(theme::text_muted())
+                            .line_clamp(1)
+                            .child(SharedString::from(trailer.url.clone())),
+                    );
+                }
+                (2, card.into_any_element())
             }
         };
 
@@ -374,29 +478,45 @@ impl CollectionView {
         for (flag, on) in self.watch_personal_states(&item) {
             rows.push(Row::toggle(flag.row(), flag.label(on), on));
         }
+        // The local record: a film's own mark, and a series' per-episode states.
+        let progress = heronite_watch::progress::local(&self.app_paths, &game.runner, crate::fork::watch::sources::id(game));
         // A film's streams are the card's second tab, not rows of the list.
-        let Some(details) = details.filter(|details| !details.episodes.is_empty()) else { return rows };
+        let Some(details) = details.filter(|details| !details.episodes.is_empty()) else {
+            // A film's mark, by hand: local first, the trackers get it from the
+            // outbox afterwards. The tick and the half mark say which way it goes.
+            // A series whose episode list is not here yet has nothing to mark:
+            // a film's mark on a show is not something a tracker can record.
+            if crate::fork::watch::sources::kind(game) != "series" {
+                let watched = progress.as_ref().is_some_and(|progress| progress.finished);
+                rows.push(watched_toggle_row(tr!("Mark as watched").to_string(), tr!("Mark as not watched").to_string(), watched));
+            }
+            return rows;
+        };
         let selection = self.watch_ensure_selection(&game.key, details);
         let seasons = details.seasons();
         let season = seasons.get(selection.season).copied().unwrap_or(1);
         let options: Vec<SharedString> = seasons.iter().map(|number| SharedString::from(tr!("Season {n}", n = number))).collect();
         rows.push(Row::choice("season", tr!("Season"), options, selection.season));
+        // The picked episode's own mark, for a person who watched it elsewhere.
+        if let Some(episode) = picked_episode(details, selection) {
+            let watched = progress.as_ref().and_then(|progress| progress.episodes.get(&episode.id)).is_some_and(|record| record.finished);
+            let code = episode.code();
+            rows.push(watched_toggle_row(
+                tr!("Mark {episode} as watched", episode = code.clone()).to_string(),
+                tr!("Mark {episode} as not watched", episode = code).to_string(),
+                watched,
+            ));
+        }
         // A tick means this episode was finished, taken from the per-episode
         // records: the resume pointer only says where playback starts, so it
         // cannot stand for "watched" (it moves to the next episode the moment
         // that one is opened).
-        let episodes = heronite_watch::progress::local(&self.app_paths, &game.runner, crate::fork::watch::sources::id(game))
-            .map(|progress| progress.episodes)
-            .unwrap_or_default();
+        let episodes = progress.map(|progress| progress.episodes).unwrap_or_default();
         let resuming = self.watch_resume().map(str::to_owned);
         for (index, episode) in details.episodes_of(season).enumerate() {
-            let watched = episodes.get(episode.id.as_str()).is_some_and(|episode| episode.finished);
-            let mut row = episode_row(episode, index, watched, locale);
-            if !watched && resuming.as_deref() == Some(episode.id.as_str()) {
-                // Where they stopped: marked differently from a finished one.
-                row = row.desc(tr!("Resume from here"));
-            }
-            rows.push(row);
+            let state = episodes.get(episode.id.as_str()).map_or(WatchedState::Unwatched, |record| record.state());
+            let resuming = resuming.as_deref() == Some(episode.id.as_str());
+            rows.push(episode_row(episode, index, state, resuming, locale));
         }
         rows
     }
@@ -411,6 +531,9 @@ impl CollectionView {
         }
         if let Some(index) = id.strip_prefix("episode:").and_then(|index| index.parse::<usize>().ok()) {
             self.watch_press_episode(game, index, cx);
+        }
+        if id == "watched-toggle" {
+            self.watch_toggle_watched(game, cx);
         }
     }
 
@@ -435,9 +558,14 @@ impl CollectionView {
 
     pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(game) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else { return false };
-        // LB / RB: the other card, with the pad where that card expects it.
+        let details = self.watch_details(key);
+        // The trailer tab exists only while a metadata source brought one.
+        let has_trailer = details.as_ref().is_some_and(|details| !details.trailers.is_empty());
+        let tab = self.watch_tab_shown(has_trailer);
+        // LB / RB: the previous or the next card, with the pad where that card
+        // expects it. LB goes back, so no tab is ever a one-way door.
         if matches!(pad, Pad::LB | Pad::RB) {
-            self.watch_switch_tab();
+            self.watch_switch_tab(has_trailer, pad == Pad::LB);
             if self.watch_tab() == DetailTab::Streams {
                 let video = self.watch_picked_video(&game);
                 self.watch_ensure_streams(&game, video.as_deref(), cx);
@@ -445,12 +573,11 @@ impl CollectionView {
             cx.notify();
             return true;
         }
-        let details = self.watch_details(key);
         let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
         let picked_video = self.watch_picked_video(&game);
         // The details card scrolls with the right stick whichever side has the
         // focus, and with ↑ ↓ while it holds the focus.
-        if self.watch_tab() == DetailTab::Details {
+        if tab == DetailTab::Details {
             let step = f32::from(u(120.));
             let on_card = self.watch_pane() == Pane::Card;
             if matches!(pad, Pad::ScrollUp | Pad::ScrollDown) || (on_card && matches!(pad, Pad::Up | Pad::Down)) {
@@ -460,7 +587,7 @@ impl CollectionView {
             }
         }
         if self.watch_pane() == Pane::Card {
-            return match self.watch_tab() {
+            return match tab {
                 DetailTab::Details => match pad {
                     Pad::Left => {
                         self.watch_focus_pane(Pane::List);
@@ -469,6 +596,20 @@ impl CollectionView {
                     }
                     Pad::X => {
                         self.watch_play_picked(&game, picked_video.as_deref(), cx);
+                        true
+                    }
+                    _ => false,
+                },
+                DetailTab::Trailer => match pad {
+                    // ◀ goes back to the list; X (or A) opens the trailer in the
+                    // person's browser, as every external link here does.
+                    Pad::Left => {
+                        self.watch_focus_pane(Pane::List);
+                        cx.notify();
+                        true
+                    }
+                    Pad::X | Pad::A => {
+                        self.watch_play_trailer(&game, cx);
                         true
                     }
                     _ => false,
@@ -650,8 +791,13 @@ mod tests {
         assert_eq!(episode_label(picked), "2 \u{b7} The Kingsroad");
         assert_eq!(episode_desc(picked, DateLocale::En), "S1E2 \u{b7} 1/12/2011");
         // The row's id says which episode of the season the list means.
-        assert_eq!(episode_row(picked, 1, false, DateLocale::En).id.as_ref(), "episode:1");
-        assert!(episode_row(picked, 1, true, DateLocale::En).icon.is_some(), "a watched episode wears a tick");
+        assert_eq!(episode_row(picked, 1, WatchedState::Unwatched, false, DateLocale::En).id.as_ref(), "episode:1");
+        assert!(episode_row(picked, 1, WatchedState::Watched, false, DateLocale::En).icon.is_some(), "a watched episode wears a tick");
+        let started =
+            episode_row(picked, 1, WatchedState::InProgress { position_ms: 1_200_000, duration_ms: 2_400_000 }, true, DateLocale::En);
+        assert!(started.icon.is_some(), "a half-watched episode wears the other mark");
+        let desc = started.desc.clone().unwrap_or_default();
+        assert!(desc.contains("50%") && desc.contains("Resume"), "{desc}");
 
         let other = Selection { season: 1, episode: 0 };
         assert_eq!(picked_episode(&details, other).map(|episode| episode.name.as_str()), Some("The North Remembers"));
@@ -663,8 +809,8 @@ mod tests {
         let rows = vec![
             Row::action("primary", "Play"),
             Row::choice("season", "Season", vec!["Season 1".into()], 0),
-            episode_row(&episode(1, 1, "A"), 0, false, DateLocale::En),
-            episode_row(&episode(1, 2, "B"), 1, false, DateLocale::En),
+            episode_row(&episode(1, 1, "A"), 0, WatchedState::Unwatched, false, DateLocale::En),
+            episode_row(&episode(1, 2, "B"), 1, WatchedState::Unwatched, false, DateLocale::En),
         ];
         assert_eq!(focused_episode(&rows, 0), None, "Play is not an episode");
         assert_eq!(focused_episode(&rows, 1), None, "a season is not an episode");
@@ -689,10 +835,61 @@ mod tests {
 
     #[test]
     fn a_watched_film_says_how_much_and_when() {
-        assert_eq!(watched_line(23, None, false, DateLocale::En).as_deref(), Some("23m watched"));
-        assert_eq!(watched_line(0, None, false, DateLocale::En), None);
-        assert_eq!(watched_line(0, None, true, DateLocale::En).as_deref(), Some("Watched"), "finished is the mark");
-        let line = watched_line(0, Some("2026-11-12"), false, DateLocale::En).expect("a date is a fact");
+        assert_eq!(watched_line(23, None, None, DateLocale::En).as_deref(), Some("23m watched"));
+        assert_eq!(watched_line(0, None, None, DateLocale::En), None);
+        assert_eq!(
+            watched_line(0, None, Some(tr!("Watched").to_string()), DateLocale::En).as_deref(),
+            Some("Watched"),
+            "finished is the mark"
+        );
+        let line = watched_line(0, Some("2026-11-12"), None, DateLocale::En).expect("a date is a fact");
         assert!(line.starts_with("Last watched "), "{line}");
+    }
+
+    #[test]
+    fn a_trailer_is_named_or_called_a_trailer() {
+        let mut trailer = Trailer { url: "https://www.youtube.com/watch?v=x".into(), ..Trailer::default() };
+        assert_eq!(trailer_title(&trailer), "Trailer", "a source that did not name it");
+        trailer.name = "Official Trailer".into();
+        assert_eq!(trailer_title(&trailer), "Official Trailer");
+        trailer.name = "   ".into();
+        assert_eq!(trailer_title(&trailer), "Trailer", "blank is not a name");
+    }
+
+    #[test]
+    fn a_title_left_part_way_says_how_far_and_a_series_counts_its_episodes() {
+        use chrono::Utc;
+        let mut progress = heronite_watch::progress::MovieProgress {
+            provider: "stremio".into(),
+            id: "tt1".into(),
+            position_ms: 2_400_000,
+            duration_ms: 6_000_000,
+            updated_at: Utc::now(),
+            finished: false,
+            video_id: None,
+            imdb: Some("tt1".into()),
+            episodes: Default::default(),
+        };
+        assert_eq!(title_status(Some(&progress), "movie", None).as_deref(), Some("In progress · 40%"));
+
+        let mut details = TitleDetails { id: "tt1".into(), kind: "series".into(), name: "A Show".into(), ..Default::default() };
+        details.episodes =
+            (1..=8).map(|number| Episode { id: format!("tt1:1:{number}"), season: 1, number, ..Default::default() }).collect();
+        for number in 1..=3 {
+            progress.episodes.insert(
+                format!("tt1:1:{number}"),
+                heronite_watch::progress::EpisodeProgress {
+                    position_ms: 2_400_000,
+                    duration_ms: 2_400_000,
+                    updated_at: Utc::now(),
+                    finished: true,
+                    season: Some(1),
+                    number: Some(number),
+                },
+            );
+        }
+        assert_eq!(title_status(Some(&progress), "series", Some(&details)).as_deref(), Some("3 of 8 episodes watched"));
+        assert_eq!(title_status(Some(&progress), "series", None), Some(trn!(3, "{n} episode watched", "{n} episodes watched")));
+        assert_eq!(title_status(None, "movie", None), None, "no record, no line");
     }
 }

@@ -58,12 +58,14 @@ pub(super) struct Selection {
     pub episode: usize,
 }
 
-/// The two cards the film page shows beside the list.
+/// The cards the film page shows beside the list. The Trailer is only in the
+/// cycle while a metadata source brought one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum DetailTab {
     #[default]
     Details,
     Streams,
+    Trailer,
 }
 
 /// Which side of the film page the pad drives: the title's list (Play, season,
@@ -305,14 +307,78 @@ impl CollectionView {
         self.watch.tab
     }
 
-    /// LB / RB: the other card, with the pad where that card expects it.
-    pub(super) fn watch_switch_tab(&mut self) -> DetailTab {
-        self.watch.tab = match self.watch.tab {
-            DetailTab::Details => DetailTab::Streams,
-            DetailTab::Streams => DetailTab::Details,
-        };
+    /// LB / RB: the previous or the next card, with the pad where that card
+    /// expects it.
+    pub(super) fn watch_switch_tab(&mut self, has_trailer: bool, back: bool) -> DetailTab {
+        self.watch.tab = if back { previous_tab(self.watch.tab, has_trailer) } else { next_tab(self.watch.tab, has_trailer) };
         self.watch.pane = tab_pane(self.watch.tab);
         self.watch.tab
+    }
+
+    /// The tab the page shows: a Trailer left over from another title falls back
+    /// to the details, because that tab is not there any more.
+    pub(super) fn watch_tab_shown(&mut self, has_trailer: bool) -> DetailTab {
+        if self.watch.tab == DetailTab::Trailer && !has_trailer {
+            self.watch.tab = DetailTab::Details;
+            self.watch.pane = tab_pane(DetailTab::Details);
+        }
+        self.watch.tab
+    }
+
+    /// X on the Trailer card: the trailer plays in **mpv**, like a title does,
+    /// and leaves nothing behind — no progress, no session, no tracker event.
+    /// Pressing it again while it plays stops it, and one player at a time still
+    /// holds: a stream playing has to stop first.
+    pub(super) fn watch_play_trailer(&mut self, game: &CollectionGame, cx: &mut Context<Self>) {
+        if let Some(running) = &self.watch.running {
+            if running.key == game.key {
+                running.stop.store(true, Ordering::Relaxed);
+            } else {
+                self.show_toast(tr!("Another title is playing. Stop it first."), true, cx);
+            }
+            cx.notify();
+            return;
+        }
+        let Some(url) = self.watch_details(&game.key).and_then(|details| details.trailers.first().map(|trailer| trailer.url.clone()))
+        else {
+            return;
+        };
+        let title = format!("{} \u{2014} {}", game.title, self.watch_title(game));
+        let stop = Arc::new(AtomicBool::new(false));
+        self.watch.running = Some(Running { key: game.key.clone(), stop: stop.clone() });
+        cx.notify();
+        let (tx, rx) = futures::channel::oneshot::channel();
+        std::thread::Builder::new()
+            .name("watch-trailer".into())
+            .spawn(move || {
+                let _ = tx.send(heronite_watch::playback::play_trailer(&url, Some(&title), &stop));
+            })
+            .ok();
+        let key = game.key.clone();
+        cx.spawn(async move |this, cx| {
+            let result = rx.await;
+            this.update(cx, |this, cx| this.watch_trailer_finished(&key, result, cx)).ok();
+        })
+        .detach();
+    }
+
+    /// The trailer's mpv exited (or never started): the player is free again,
+    /// and a failure is said out loud — `mpv` resolves a YouTube page through
+    /// yt-dlp, which the bootstrap installs.
+    fn watch_trailer_finished(
+        &mut self,
+        key: &str,
+        result: Result<Result<(), anyhow::Error>, futures::channel::oneshot::Canceled>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.watch.running.as_ref().is_some_and(|running| running.key == key) {
+            self.watch.running = None;
+        }
+        if let Ok(Err(error)) = result {
+            log::warn!("watch trailer: {error:#}");
+            self.show_toast(tr!("Could not play the trailer: {error}", error = format!("{error:#}")), true, cx);
+        }
+        cx.notify();
     }
 
     /// Which side the pad drives (◀ ▶ move between them).
@@ -337,6 +403,83 @@ impl CollectionView {
         }
         let selection = self.watch_ensure_selection(&game.key, &details);
         picked_episode(&details, selection).map(|episode| episode.id.clone())
+    }
+
+    /// The picked episode's season and number, for the record and the trackers.
+    /// `None` for a film, or when the page never had the episode list.
+    pub(super) fn watch_picked_episode(&mut self, game: &CollectionGame) -> Option<(u32, u32)> {
+        let details = self.watch_details(&game.key)?;
+        if details.episodes.is_empty() {
+            return None;
+        }
+        let selection = self.watch_ensure_selection(&game.key, &details);
+        picked_episode(&details, selection).map(|episode| (episode.season, episode.number))
+    }
+
+    /// The picked episode's id, season and number: what a mark and a tracker
+    /// event name, without parsing the provider's own id.
+    pub(super) fn watch_picked_episode_ref(&mut self, game: &CollectionGame) -> Option<(String, u32, u32)> {
+        let details = self.watch_details(&game.key)?;
+        if details.episodes.is_empty() {
+            return None;
+        }
+        let selection = self.watch_ensure_selection(&game.key, &details);
+        picked_episode(&details, selection).map(|episode| (episode.id.clone(), episode.season, episode.number))
+    }
+
+    /// A on the watched mark: the film, or the picked episode, flips between
+    /// watched and not. The local record is written first; the trackers get it
+    /// from the outbox, on their own thread.
+    pub(super) fn watch_toggle_watched(&mut self, game: &CollectionGame, cx: &mut Context<Self>) {
+        use heronite_watch::progress::{Mark, MarkTarget};
+        let provider = game.runner.clone();
+        let id = crate::fork::watch::sources::id(game).to_owned();
+        let kind = crate::fork::watch::sources::kind(game).to_owned();
+        let name = game.title.clone();
+        let year = crate::fork::watch::sources::year(game).map(str::to_owned);
+        let imdb = id.starts_with("tt").then(|| id.clone());
+        let episode = self.watch_picked_episode_ref(game);
+        let progress = heronite_watch::progress::local(&self.app_paths, &provider, &id);
+        let (target, watched) = match &episode {
+            Some((video_id, season, number)) => {
+                let watched = progress.as_ref().and_then(|progress| progress.episodes.get(video_id)).is_some_and(|record| record.finished);
+                (MarkTarget::Episode { video_id, season: *season, number: *number }, !watched)
+            }
+            None => {
+                let watched = progress.as_ref().is_some_and(|progress| progress.finished);
+                (MarkTarget::Movie, !watched)
+            }
+        };
+        let mark = Mark { provider: &provider, id: &id, imdb: imdb.as_deref(), kind: &kind, name: &name, year: year.as_deref(), target };
+        match heronite_watch::progress::set_watched(&self.app_paths, &mark, watched) {
+            Ok(()) => {
+                // Say it happened: the row's label flips, but a mark a person is
+                // only "pretty sure" about gets pressed again.
+                let message = if watched { tr!("Marked as watched") } else { tr!("Marked as not watched") };
+                self.show_toast(message, false, cx);
+                self.watch_drain_trackers(cx);
+            }
+            Err(error) => {
+                log::warn!("marking {id} watched={watched}: {error:#}");
+                self.show_toast(format!("{error:#}"), true, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Hands the tracker outbox to the trackers, off the UI thread: the mark is
+    /// saved here and sent when the network lets it.
+    pub(super) fn watch_drain_trackers(&self, cx: &mut Context<Self>) {
+        let app = self.app_paths.clone();
+        cx.spawn(async move |_, cx| {
+            let drained = cx.background_spawn(async move { heronite_watch::trackers::drain(&app) }).await;
+            match drained {
+                Ok(report) if report.pending > 0 => log::info!("trackers: {} still waiting for {}", report.pending, "the outbox"),
+                Ok(_) => {}
+                Err(error) => log::warn!("trackers: {error:#}"),
+            }
+        })
+        .detach();
     }
 
     /// The picker's selection for `key`: the episode the stored progress points
@@ -416,6 +559,7 @@ impl CollectionView {
         cx.notify();
 
         let app = self.app_paths.clone();
+        let episode = self.watch_picked_episode(game);
         let request = heronite_watch::playback::PlaybackRequest {
             provider: game.runner.clone(),
             // The id Watch resolves titles by is an IMDb id (`tt…`): kept with
@@ -424,9 +568,14 @@ impl CollectionView {
             id: crate::fork::watch::sources::id(game).to_owned(),
             kind: crate::fork::watch::sources::kind(game).to_owned(),
             video_id: self.watch.video.clone(),
+            season: episode.map(|(season, _)| season),
+            number: episode.map(|(_, number)| number),
             // What mpv's window and the desktop panels call it: the episode,
             // when the page picked one.
             title: self.watch_title(game),
+            // What a tracker records: the film or the show, not the episode label.
+            name: game.title.clone(),
+            year: crate::fork::watch::sources::year(game).map(str::to_owned),
             stream,
         };
         let (key, app_name) = (game.key.clone(), game.app_name.clone());
@@ -467,9 +616,14 @@ impl CollectionView {
         // The service we started was for this session.
         self.watch_service_finished(cx);
         self.refresh_focus();
-        if let Ok(Err(error)) = result {
-            log::warn!("watch playback: {error:#}");
-            self.show_toast(tr!("Could not play: {error}", error = format!("{error:#}")), true, cx);
+        match result {
+            // What the session left in the tracker outbox goes out now.
+            Ok(Ok(_)) => self.watch_drain_trackers(cx),
+            Ok(Err(error)) => {
+                log::warn!("watch playback: {error:#}");
+                self.show_toast(tr!("Could not play: {error}", error = format!("{error:#}")), true, cx);
+            }
+            Err(_) => {}
         }
         cx.notify();
     }
@@ -614,7 +768,27 @@ fn default_selection(details: &TitleDetails, resume: Option<&str>) -> Selection 
 fn tab_pane(tab: DetailTab) -> Pane {
     match tab {
         DetailTab::Details => Pane::List,
-        DetailTab::Streams => Pane::Card,
+        DetailTab::Streams | DetailTab::Trailer => Pane::Card,
+    }
+}
+
+/// RB: the next card. Details, Streams, and the Trailer when the title has one.
+fn next_tab(tab: DetailTab, has_trailer: bool) -> DetailTab {
+    match tab {
+        DetailTab::Details => DetailTab::Streams,
+        DetailTab::Streams if has_trailer => DetailTab::Trailer,
+        DetailTab::Streams | DetailTab::Trailer => DetailTab::Details,
+    }
+}
+
+/// LB: the previous card, so a step forward is always a step back. With two
+/// tabs this was the same toggle either way; with three it is not.
+fn previous_tab(tab: DetailTab, has_trailer: bool) -> DetailTab {
+    match tab {
+        DetailTab::Details if has_trailer => DetailTab::Trailer,
+        DetailTab::Details => DetailTab::Streams,
+        DetailTab::Streams => DetailTab::Details,
+        DetailTab::Trailer => DetailTab::Streams,
     }
 }
 
@@ -756,7 +930,32 @@ mod tests {
     fn the_card_takes_the_pad_for_the_streams_and_the_list_for_the_details() {
         assert_eq!(tab_pane(DetailTab::Details), Pane::List);
         assert_eq!(tab_pane(DetailTab::Streams), Pane::Card);
+        assert_eq!(tab_pane(DetailTab::Trailer), Pane::Card, "the trailer is a card too");
         assert_eq!(Pane::default(), Pane::List);
+    }
+
+    #[test]
+    fn the_trailer_is_in_the_cycle_only_while_the_title_has_one() {
+        assert_eq!(next_tab(DetailTab::Details, true), DetailTab::Streams);
+        assert_eq!(next_tab(DetailTab::Streams, true), DetailTab::Trailer);
+        assert_eq!(next_tab(DetailTab::Trailer, true), DetailTab::Details);
+        assert_eq!(next_tab(DetailTab::Streams, false), DetailTab::Details, "no trailer: two tabs only");
+        assert_eq!(next_tab(DetailTab::Trailer, false), DetailTab::Details, "and a stale one falls back");
+    }
+
+    #[test]
+    fn a_step_back_undoes_a_step_forward() {
+        for (has_trailer, tabs) in [
+            (true, vec![DetailTab::Details, DetailTab::Streams, DetailTab::Trailer]),
+            (false, vec![DetailTab::Details, DetailTab::Streams]),
+        ] {
+            for tab in tabs {
+                let there = next_tab(tab, has_trailer);
+                assert_eq!(previous_tab(there, has_trailer), tab, "{tab:?} forward then back, trailer={has_trailer}");
+            }
+        }
+        assert_eq!(previous_tab(DetailTab::Details, false), DetailTab::Streams, "two tabs turn either way");
+        assert_eq!(previous_tab(DetailTab::Details, true), DetailTab::Trailer, "and three wrap the other way");
     }
 
     #[test]

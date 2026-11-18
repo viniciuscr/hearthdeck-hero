@@ -357,7 +357,7 @@ impl CollectionView {
             return crate::console::kit::empty(
                 icon,
                 tr!("No catalog providers are on"),
-                tr!("Turn one on in Settings → Watch → Catalog providers."),
+                tr!("Turn one on in Settings → Watch → Sources (Catalogs)."),
             )
             .into_any_element();
         }
