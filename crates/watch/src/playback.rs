@@ -58,6 +58,11 @@ pub struct PlaybackRequest {
     pub stream: StreamChoice,
 }
 
+/// The tallest picture a trailer is resolved at: full HD, which is what a
+/// thirty-second clip deserves. Its source offers more; nothing here needs it.
+#[cfg(unix)]
+const TRAILER_MAX_HEIGHT: u32 = 1080;
+
 /// Plays a trailer in mpv, and keeps nothing: no progress record, no session,
 /// no tracker event — a trailer is not something a person is watching.
 ///
@@ -69,8 +74,15 @@ pub fn play_trailer(url: &str, title: Option<&str>, stop: &AtomicBool) -> Result
     let url = Url::parse(url.trim()).map_err(|error| anyhow!("the trailer's address: {error}"))?;
     let mpv = heronite_watch_player::player::find_mpv().ok_or_else(|| anyhow!("mpv is not installed."))?;
     let gamepad = heronite_watch_player::player::gamepad_supported(&mpv);
-    let play =
-        PlayRequest { url, origin: heronite_watch_core::provider::StreamOrigin::Remote, start_ms: None, title: title.map(str::to_owned) };
+    // Full HD is plenty for a trailer: the page (YouTube today) would otherwise
+    // hand over its 4K, and decoding it costs more than the thirty seconds are worth.
+    let play = PlayRequest {
+        url,
+        origin: heronite_watch_core::provider::StreamOrigin::Remote,
+        start_ms: None,
+        title: title.map(str::to_owned),
+        quality: heronite_watch_player::player::Quality::AtMost(TRAILER_MAX_HEIGHT),
+    };
     let mut session = MpvSession::start(&mpv, &play, gamepad)?;
     session.wait_until(stop)?;
     Ok(())
@@ -131,7 +143,13 @@ pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Res
 fn play_url(request: &PlaybackRequest, resolved: ResolvedStream, start_ms: Option<u64>, stop: &AtomicBool) -> Result<PlaybackOutcome> {
     let mpv = heronite_watch_player::player::find_mpv().ok_or_else(|| anyhow!("mpv is not installed."))?;
     let gamepad = heronite_watch_player::player::gamepad_supported(&mpv);
-    let play = PlayRequest { url: resolved.url, origin: resolved.origin, start_ms, title: Some(request.title.clone()) };
+    let play = PlayRequest {
+        url: resolved.url,
+        origin: resolved.origin,
+        start_ms,
+        title: Some(request.title.clone()),
+        quality: heronite_watch_player::player::Quality::Best,
+    };
     let mut session = MpvSession::start(&mpv, &play, gamepad)?;
     session.wait_until(stop)
 }

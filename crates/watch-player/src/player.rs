@@ -17,6 +17,35 @@ pub struct PlayRequest {
     pub origin: StreamOrigin,
     pub start_ms: Option<u64>,
     pub title: Option<String>,
+    /// How much picture to resolve: the title's best, or a trailer's ceiling.
+    pub quality: Quality,
+}
+
+/// The picture a resolved stream may have. A film is worth the best the
+/// provider offers; a trailer is not — its page (YouTube today) will happily
+/// hand over 4K for thirty seconds, and the player would decode it at a cost
+/// nobody asked for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Quality {
+    /// Whatever the source offers, best first: the player's own choice.
+    #[default]
+    Best,
+    /// The best picture no taller than this many lines, with its best audio;
+    /// a source with nothing that fits gets its best anyway.
+    AtMost(u32),
+}
+
+/// The `--ytdl-format` that caps a yt-dlp-resolved page at `lines`. A page mpv
+/// opens directly (a debrid file) never reads it.
+///
+/// H.264 first: it is the one 1080p codec nearly every GPU decodes in hardware,
+/// while the page's default pick for that height is VP9 or AV1, which a machine
+/// without those decoders plays in software and stutters on. A page without an
+/// H.264 rendition falls back to its best at that height, then to anything.
+fn ytdl_format(lines: u32) -> String {
+    format!(
+        "--ytdl-format=bestvideo[height<={lines}][vcodec^=avc1]+bestaudio/bestvideo[height<={lines}]+bestaudio/best[height<={lines}]/best"
+    )
 }
 
 /// Where a session ended, in milliseconds. Target-independent, so a build
@@ -40,7 +69,19 @@ pub fn mpv_arguments(request: &PlayRequest, ipc_socket: &Path) -> Result<Vec<Str
     if request.url.as_str().starts_with('-') {
         bail!("refusing a stream URL that looks like an option");
     }
-    let mut args = vec!["--fullscreen".to_owned(), "--force-window=yes".to_owned(), format!("--input-ipc-server={}", ipc_socket.display())];
+    // mpv's own default is `--hwdec=no`, so every stream was decoded on the CPU.
+    // `auto-safe` asks for a hardware decoder where the machine has one and
+    // falls back to software where it has none; on mpv 0.38+ it is mpv's plain
+    // `auto`, and on older builds it leaves out the decoders known to be broken.
+    let mut args = vec![
+        "--fullscreen".to_owned(),
+        "--force-window=yes".to_owned(),
+        "--hwdec=auto-safe".to_owned(),
+        format!("--input-ipc-server={}", ipc_socket.display()),
+    ];
+    if let Quality::AtMost(lines) = request.quality {
+        args.push(ytdl_format(lines));
+    }
     if let Some(ms) = request.start_ms {
         args.push(format!("--start={:.3}", ms as f64 / 1000.0));
     }
@@ -240,6 +281,7 @@ mod tests {
             origin: StreamOrigin::LocalService,
             start_ms: Some(65_500),
             title: Some("A Film".into()),
+            quality: Quality::Best,
         };
         let args = mpv_arguments(&request, Path::new("/tmp/ipc")).unwrap();
         let dash = args.iter().position(|arg| arg == "--").unwrap();
@@ -249,16 +291,61 @@ mod tests {
     }
 
     #[test]
+    fn a_trailers_picture_is_capped_and_a_films_is_not() {
+        let request = |quality| PlayRequest {
+            url: Url::parse("https://www.youtube.com/watch?v=x").unwrap(),
+            origin: StreamOrigin::Remote,
+            start_ms: None,
+            title: None,
+            quality,
+        };
+        let capped = mpv_arguments(&request(Quality::AtMost(1080)), Path::new("/tmp/ipc")).unwrap();
+        let format = capped.iter().find(|arg| arg.starts_with("--ytdl-format=")).expect("a capped stream asks yt-dlp for a format");
+        assert!(format.contains("[height<=1080]"), "full HD at most: {format}");
+        assert!(
+            format.contains("bestvideo[height<=1080][vcodec^=avc1]"),
+            "H.264 first, which nearly every GPU decodes in hardware: {format}"
+        );
+        let best = mpv_arguments(&request(Quality::Best), Path::new("/tmp/ipc")).unwrap();
+        assert!(best.iter().all(|arg| !arg.starts_with("--ytdl-format")), "a film is not capped: {best:?}");
+    }
+
+    #[test]
+    fn every_stream_asks_for_hardware_decoding() {
+        let request = PlayRequest {
+            url: Url::parse("https://debrid.example/film").unwrap(),
+            origin: StreamOrigin::Remote,
+            start_ms: None,
+            title: None,
+            quality: Quality::Best,
+        };
+        let args = mpv_arguments(&request, Path::new("/tmp/ipc")).unwrap();
+        assert!(args.contains(&"--hwdec=auto-safe".to_owned()), "software decoding is what stutters: {args:?}");
+        assert!(args.contains(&"--fullscreen".to_owned()));
+    }
+
+    #[test]
     fn a_non_http_stream_is_refused() {
-        let request =
-            PlayRequest { url: Url::parse("file:///etc/passwd").unwrap(), origin: StreamOrigin::Remote, start_ms: None, title: None };
+        let request = PlayRequest {
+            url: Url::parse("file:///etc/passwd").unwrap(),
+            origin: StreamOrigin::Remote,
+            start_ms: None,
+            title: None,
+            quality: Quality::Best,
+        };
         assert!(mpv_arguments(&request, Path::new("/tmp/ipc")).is_err());
     }
 
     #[test]
     fn a_remote_stream_must_be_https() {
         let args = |url: &str| {
-            let request = PlayRequest { url: Url::parse(url).unwrap(), origin: StreamOrigin::Remote, start_ms: None, title: None };
+            let request = PlayRequest {
+                url: Url::parse(url).unwrap(),
+                origin: StreamOrigin::Remote,
+                start_ms: None,
+                title: None,
+                quality: Quality::Best,
+            };
             mpv_arguments(&request, Path::new("/tmp/ipc"))
         };
         assert!(args("https://debrid.example/film").is_ok());
@@ -268,7 +355,13 @@ mod tests {
     #[test]
     fn the_local_service_must_stay_on_loopback() {
         let args = |url: &str| {
-            let request = PlayRequest { url: Url::parse(url).unwrap(), origin: StreamOrigin::LocalService, start_ms: None, title: None };
+            let request = PlayRequest {
+                url: Url::parse(url).unwrap(),
+                origin: StreamOrigin::LocalService,
+                start_ms: None,
+                title: None,
+                quality: Quality::Best,
+            };
             mpv_arguments(&request, Path::new("/tmp/ipc"))
         };
         assert!(args("http://127.0.0.1:11470/hash/0").is_ok());

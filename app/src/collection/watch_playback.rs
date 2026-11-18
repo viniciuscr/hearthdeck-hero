@@ -315,10 +315,10 @@ impl CollectionView {
         self.watch.tab
     }
 
-    /// X, when the title has a trailer: it plays in **mpv**, like a title does,
-    /// and leaves nothing behind — no progress, no session, no tracker event.
-    /// Pressing it again while it plays stops it, and one player at a time still
-    /// holds: a stream playing has to stop first.
+    /// Y (the triangle), when the title has a trailer: it plays in **mpv**, like
+    /// a title does, and leaves nothing behind — no progress, no session, no
+    /// tracker event. Pressing it again while it plays stops it, and one player
+    /// at a time still holds: a stream playing has to stop first.
     pub(super) fn watch_play_trailer(&mut self, game: &CollectionGame, cx: &mut Context<Self>) {
         if let Some(running) = &self.watch.running {
             if running.key == game.key {
@@ -336,7 +336,9 @@ impl CollectionView {
         let title = format!("{} \u{2014} {}", game.title, self.watch_title(game));
         let stop = Arc::new(AtomicBool::new(false));
         self.watch.running = Some(Running { key: game.key.clone(), stop: stop.clone() });
-        cx.notify();
+        // mpv resolves the page through yt-dlp before it shows a frame, which
+        // takes a moment: say it is opening, or the press looks like it missed.
+        self.show_toast(tr!("Opening the trailer…"), false, cx);
         let (tx, rx) = futures::channel::oneshot::channel();
         std::thread::Builder::new()
             .name("watch-trailer".into())
