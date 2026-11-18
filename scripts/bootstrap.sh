@@ -2200,21 +2200,16 @@ start_log() {
   LOGGING=1
 }
 
+# Runs one step by name. The list in `build_step_list` is the only list: a step
+# is known exactly when its `step_<name>` function exists, so adding one there
+# cannot leave this dispatch behind (which is how `tmdb` — and then `simkl` —
+# reached a run as "unknown step").
 run_step() {
-  case "$1" in
-    user) step_user ;;
-    packages) step_packages ;;
-    aur) step_aur ;;
-    ludusavi) step_ludusavi ;;
-    app) step_app ;;
-    mpv) step_mpv ;;
-    retroarch) step_retroarch ;;
-    audio) step_audio ;;
-    mounts) step_mounts ;;
-    session) step_session ;;
-    lockdown) step_lockdown ;;
-    *) die "unknown step '$1'" ;;
-  esac
+  local step="$1" function="step_$1"
+  if ! declare -F "$function" >/dev/null 2>&1; then
+    die "unknown step '$step'"
+  fi
+  "$function"
 }
 
 main() {
