@@ -22,9 +22,19 @@ pub const ROOT: &str = "watch-details";
 /// sources cannot be asked, so a flight or an outage never empties the page.
 pub const FRESH_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-/// One cached answer: the details and when they were fetched.
+/// The shape of what is cached. Bumped when `TitleDetails` gains something a
+/// screen shows (the trailers, in 2): an answer written by an older build lacks
+/// it, and a week of freshness must not hide it. An answer of another shape is
+/// only ever served when no source can be asked.
+pub const SCHEMA: u32 = 2;
+
+/// One cached answer: the details, when they were fetched, and which shape of
+/// them they are.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CachedDetails {
+    /// The [`SCHEMA`] that wrote it; `0` for a file from a build that had none.
+    #[serde(default)]
+    pub schema: u32,
     pub fetched_at: DateTime<Utc>,
     pub details: TitleDetails,
 }
@@ -33,6 +43,12 @@ impl CachedDetails {
     /// Whether the answer is young enough to use without asking again.
     pub fn is_fresh(&self, now: DateTime<Utc>) -> bool {
         now.signed_duration_since(self.fetched_at).num_seconds() < FRESH_FOR.as_secs() as i64
+    }
+
+    /// Whether a screen can trust it as it stands: the right shape and young
+    /// enough. The facade asks the sources again when it is not.
+    pub fn is_current(&self) -> bool {
+        self.schema == SCHEMA
     }
 }
 
@@ -60,7 +76,8 @@ pub fn read(root: &Path, title: &TitleRef, sources: &str) -> Option<CachedDetail
 /// Keeps `details` as the answer for `title`.
 pub fn write(root: &Path, title: &TitleRef, sources: &str, details: &TitleDetails, fetched_at: DateTime<Utc>) -> Result<()> {
     let file = path(root, title, sources);
-    json_store::write(&file, &CachedDetails { fetched_at, details: details.clone() }).with_context(|| format!("writing {}", file.display()))
+    json_store::write(&file, &CachedDetails { schema: SCHEMA, fetched_at, details: details.clone() })
+        .with_context(|| format!("writing {}", file.display()))
 }
 
 /// A path component that cannot leave the cache folder: an id comes from a
@@ -97,6 +114,22 @@ mod tests {
 
     fn details(id: &str) -> TitleDetails {
         TitleDetails { id: id.into(), kind: "movie".into(), name: "The Matrix".into(), ..TitleDetails::default() }
+    }
+
+    #[test]
+    fn an_answer_written_by_an_older_shape_is_not_current() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        write(dir.path(), &title("tt0133093"), "cinemeta", &details("tt0133093"), now).unwrap();
+        assert!(read(dir.path(), &title("tt0133093"), "cinemeta").expect("written").is_current());
+
+        // A file from before the field existed: no `schema` key at all.
+        let file = path(dir.path(), &title("tt0133093"), "cinemeta");
+        let mut value = serde_json::to_value(read(dir.path(), &title("tt0133093"), "cinemeta").expect("written")).unwrap();
+        value.as_object_mut().expect("an object").remove("schema");
+        std::fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
+        let cached = read(dir.path(), &title("tt0133093"), "cinemeta").expect("still readable");
+        assert!(!cached.is_current(), "same details, older shape: the page asks again");
     }
 
     #[test]

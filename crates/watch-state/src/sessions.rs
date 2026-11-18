@@ -41,10 +41,23 @@ pub struct WatchSession {
     /// The episode, for a series; `None` for a film.
     #[serde(default)]
     pub video_id: Option<String>,
+    /// The episode's season and number, when the page knew them: what a tracker
+    /// sends instead of guessing from `video_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u32>,
     /// The name as it was when it played: a title renamed at its source keeps
     /// the old one in the recap, which is the honest record.
     #[serde(default)]
     pub title: String,
+    /// The title the episode belongs to — the film's or the show's name — and the
+    /// year: what a tracker records, where `title` may name the episode. Empty on
+    /// a record written before they were kept.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: DateTime<Utc>,
     /// Time this session covered, which is not the position: resuming at 40 min
@@ -136,6 +149,10 @@ mod tests {
             kind: "movie".into(),
             id: id.into(),
             video_id: None,
+            season: None,
+            number: None,
+            name: format!("Film {id}"),
+            year: None,
             title: format!("Film {id}"),
             started_at: at,
             ended_at: at,

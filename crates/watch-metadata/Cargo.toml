@@ -8,8 +8,10 @@ description = "What describes a Watch title: the metadata sources (Cinemeta firs
 [dependencies]
 heronite-watch-core = { path = "../watch-core" }
 heronite-watch-addon = { path = "../watch-addon" }
+heronite-watch-simkl = { path = "../watch-simkl" }
 heronite-watch-tmdb = { path = "../watch-tmdb" }
 anyhow.workspace = true
+log.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

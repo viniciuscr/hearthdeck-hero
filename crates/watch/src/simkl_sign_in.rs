@@ -42,6 +42,13 @@ pub fn session(app: &AppPaths) -> Option<Session> {
     auth::session_of(&secret)
 }
 
+/// The tokens a tracker delivers with, when the person is signed in: the access
+/// token and the refresh token that replaces it. `None` after signing out.
+pub fn tokens(app: &AppPaths) -> Option<heronite_watch_simkl::Tokens> {
+    let secret = StoreCredentials::new(app).get(PROVIDER).ok().flatten()?;
+    auth::tokens_of(&secret)
+}
+
 /// Forgets the session and keeps the client id, so signing in again needs
 /// nothing typed.
 pub fn sign_out(app: &AppPaths) -> Result<()> {
@@ -80,7 +87,7 @@ pub fn adopt_client_id_file(app: &AppPaths) -> bool {
 }
 
 /// The client id to sign in with: the store's, else the build's own.
-fn client_id(app: &AppPaths) -> Result<String> {
+pub(crate) fn client_id(app: &AppPaths) -> Result<String> {
     if let Some(client_id) = crate::store::read_simkl_client_id(app)? {
         if !client_id.trim().is_empty() {
             return Ok(client_id.trim().to_owned());

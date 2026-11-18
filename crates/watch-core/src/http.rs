@@ -22,6 +22,25 @@ pub trait Transport: Send + Sync {
         Ok((200, self.post_json(url, body)?))
     }
 
+    /// A POST carrying `Authorization: Bearer <token>`, again with the status
+    /// returned: a tracker reads what a non-2xx answer says ("already watched",
+    /// "rate limited") instead of treating every one as a fault. A transport
+    /// that cannot send headers says so rather than sending the request
+    /// unauthenticated.
+    fn post_json_bearer(&self, url: &Url, token: &str, body: &Value) -> Result<(u16, Vec<u8>)> {
+        let _ = (url, token, body);
+        anyhow::bail!("this transport cannot carry an Authorization header")
+    }
+
+    /// A GET whose redirect is **not** followed: the `Location` header of a 3xx,
+    /// which is what an id resolver reads (Simkl's `/redirect` turns an IMDb id
+    /// into `https://simkl.com/tv/17465/…` without a JSON body). A transport that
+    /// follows redirects or cannot show headers says so.
+    fn get_location(&self, url: &Url) -> Result<Option<String>> {
+        let _ = url;
+        anyhow::bail!("this transport cannot read a redirect's Location")
+    }
+
     /// A GET carrying `Authorization: Bearer <token>`: what TMDB's v4 endpoints
     /// take instead of a key in the query. A transport that cannot send headers
     /// says so rather than sending an unauthenticated request that would come
@@ -82,8 +101,14 @@ impl UreqTransport {
         // A 4xx is an answer, not a transport failure: `post_json_answer` has to
         // keep the body (an OAuth token endpoint says "not yet" with a 400), and
         // the other methods turn the status into an `HttpStatus` themselves.
-        let agent: ureq::Agent =
-            ureq::Agent::config_builder().http_status_as_error(false).timeout_connect(Some(Duration::from_secs(10))).build().into();
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            // A full request carries a real user agent: Simkl requires one, and
+            // an anonymous client is the first thing a WAF turns away.
+            .user_agent(concat!("hearthdeck-hero/", env!("CARGO_PKG_VERSION"), " (+https://github.com/viniciuscr/hearthdeck-hero)"))
+            .timeout_connect(Some(Duration::from_secs(10)))
+            .build()
+            .into();
         Self { agent, timeout, max_bytes }
     }
 }
@@ -99,6 +124,24 @@ impl Transport for UreqTransport {
         let mut response =
             self.agent.get(url.as_str()).config().timeout_global(Some(self.timeout)).build().call().map_err(|e| transport_error(url, e))?;
         read(url, &mut response, self.max_bytes)
+    }
+
+    fn get_location(&self, url: &Url) -> Result<Option<String>> {
+        // `max_redirects(0)`: the response is the 301 itself, never an error.
+        let response = self
+            .agent
+            .get(url.as_str())
+            .config()
+            .timeout_global(Some(self.timeout))
+            .max_redirects(0)
+            .build()
+            .call()
+            .map_err(|e| transport_error(url, e))?;
+        let status = response.status().as_u16();
+        if !(300..400).contains(&status) {
+            return Err(HttpStatus::new(url, status).into());
+        }
+        Ok(response.headers().get("location").and_then(|value| value.to_str().ok()).map(str::to_owned))
     }
 
     fn get_bearer(&self, url: &Url, token: &str) -> Result<Vec<u8>> {
@@ -120,16 +163,25 @@ impl Transport for UreqTransport {
     }
 
     fn post_json_answer(&self, url: &Url, body: &Value) -> Result<(u16, Vec<u8>)> {
+        self.post_json_with(url, None, body)
+    }
+
+    fn post_json_bearer(&self, url: &Url, token: &str, body: &Value) -> Result<(u16, Vec<u8>)> {
+        self.post_json_with(url, Some(token), body)
+    }
+}
+
+impl UreqTransport {
+    /// The one POST: JSON in, status and body out, an optional bearer token on
+    /// the way. The status is kept whether or not it is a success.
+    fn post_json_with(&self, url: &Url, token: Option<&str>, body: &Value) -> Result<(u16, Vec<u8>)> {
         let text = serde_json::to_string(body)?;
-        let mut response = self
-            .agent
-            .post(url.as_str())
-            .config()
-            .timeout_global(Some(self.timeout))
-            .build()
-            .header("content-type", "application/json")
-            .send(text.as_str())
-            .map_err(|e| transport_error(url, e))?;
+        let mut request =
+            self.agent.post(url.as_str()).config().timeout_global(Some(self.timeout)).build().header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("authorization", format!("Bearer {token}"));
+        }
+        let mut response = request.send(text.as_str()).map_err(|e| transport_error(url, e))?;
         let status = response.status().as_u16();
         let bytes = response.body_mut().with_config().limit(self.max_bytes).read_to_vec().map_err(|e| anyhow!("{}", failure(url, e)))?;
         Ok((status, bytes))

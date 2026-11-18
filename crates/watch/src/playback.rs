@@ -13,6 +13,7 @@ use chrono::Utc;
 use heronite_data::paths::AppPaths;
 
 use heronite_watch_core::http::{Transport, UreqTransport};
+use heronite_watch_core::progress::finished;
 use heronite_watch_core::provider::{Ctx, ResolvedStream, WatchProvider};
 use heronite_watch_core::types::{MovieProgress, StreamChoice};
 use heronite_watch_player::player::PlaybackOutcome;
@@ -20,6 +21,7 @@ use heronite_watch_player::player::PlaybackOutcome;
 use heronite_watch_player::player::{MpvSession, PlayRequest};
 use heronite_watch_state::store;
 use heronite_watch_state::store::StoreCredentials;
+use url::Url;
 
 mod session;
 
@@ -41,14 +43,60 @@ pub struct PlaybackRequest {
     /// record stays keyed by `id`; this is what resumes, and what the provider
     /// stores as the record's `video_id`.
     pub video_id: Option<String>,
+    /// The episode's season and number, when the page knew them: kept with the
+    /// record and the session, so a tracker asks for what Simkl wants instead of
+    /// parsing the provider's id.
+    pub season: Option<u32>,
+    pub number: Option<u32>,
+    /// What mpv's window and the desktop panels call it: the episode, when the
+    /// page picked one.
     pub title: String,
+    /// The title as the library names it — the film, or the show — and its year:
+    /// what a tracker records, where `title` may name the episode.
+    pub name: String,
+    pub year: Option<String>,
     pub stream: StreamChoice,
+}
+
+/// Plays a trailer in mpv, and keeps nothing: no progress record, no session,
+/// no tracker event — a trailer is not something a person is watching.
+///
+/// The page goes to mpv as it is (YouTube today), and mpv resolves it through
+/// yt-dlp, which the bootstrap installs. The player's own policy still applies:
+/// a trailer must be an https page and may not look like an option.
+#[cfg(unix)]
+pub fn play_trailer(url: &str, title: Option<&str>, stop: &AtomicBool) -> Result<()> {
+    let url = Url::parse(url.trim()).map_err(|error| anyhow!("the trailer's address: {error}"))?;
+    let mpv = heronite_watch_player::player::find_mpv().ok_or_else(|| anyhow!("mpv is not installed."))?;
+    let gamepad = heronite_watch_player::player::gamepad_supported(&mpv);
+    let play =
+        PlayRequest { url, origin: heronite_watch_core::provider::StreamOrigin::Remote, start_ms: None, title: title.map(str::to_owned) };
+    let mut session = MpvSession::start(&mpv, &play, gamepad)?;
+    session.wait_until(stop)?;
+    Ok(())
+}
+
+/// Playing is Linux-only, like every session here.
+#[cfg(not(unix))]
+pub fn play_trailer(_url: &str, _title: Option<&str>, _stop: &AtomicBool) -> Result<()> {
+    anyhow::bail!("Playback is only available on Linux.")
 }
 
 /// The playable streams of a title, best first.
 pub fn streams(app: &AppPaths, provider: &str, kind: &str, id: &str) -> Result<Vec<StreamChoice>> {
+    enabled(app, provider)?;
     let http = UreqTransport::new();
     streams_with(&http, app, provider, kind, id)
+}
+
+/// Whether Settings → Watch → Sources lets `provider` be asked for streams. Its
+/// account and rails stay either way: only playback is gated.
+pub fn enabled(app: &AppPaths, provider: &str) -> Result<()> {
+    let settings = heronite_watch_state::settings::read(app);
+    if settings.stream_providers.iter().any(|id| id == provider) {
+        return Ok(());
+    }
+    anyhow::bail!("{provider} is turned off in Settings → Watch → Sources (Streams).")
 }
 
 /// [`streams`] with an injected transport, for tests.
@@ -61,6 +109,7 @@ pub fn streams_with(http: &dyn Transport, app: &AppPaths, provider: &str, kind: 
 /// Plays `request` to the end (or until `stop`), then records the position.
 /// Blocking: the caller owns a thread.
 pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Result<PlaybackOutcome> {
+    enabled(app, &request.provider)?;
     let http = UreqTransport::new();
     let credentials = StoreCredentials::new(app);
     let ctx = Ctx { http: &http, credentials: &credentials };
@@ -69,9 +118,12 @@ pub fn play(app: &AppPaths, request: &PlaybackRequest, stop: &AtomicBool) -> Res
     let previous = progress_record(app, provider, &ctx, &request.id);
     let start_ms = previous.as_ref().filter(|progress| resumes_this(progress, request)).and_then(resume_at);
     let outcome = play_url(request, resolved, start_ms, stop)?;
-    record(app, provider, &ctx, &request.id, request.video_id.as_deref(), request.imdb.as_deref(), previous.as_ref(), &outcome);
+    record(app, provider, &ctx, request, previous.as_ref(), &outcome);
     // What the recap is built from: this playback, its start and its end.
     session::record(app, request, previous.as_ref(), &outcome);
+    // And what a tracker is told, later and elsewhere: the local files above are
+    // already the truth, so this only appends to their outbox.
+    crate::trackers::record_playback(app, request, previous.as_ref(), &outcome);
     Ok(outcome)
 }
 
@@ -126,24 +178,17 @@ fn resume_at(progress: &MovieProgress) -> Option<u64> {
     Some(progress.position_ms)
 }
 
-/// Stremio's finished threshold (`WATCHED_THRESHOLD_COEF`).
-fn finished(position_ms: u64, duration_ms: u64) -> bool {
-    duration_ms > 0 && u128::from(position_ms) * 100 >= u128::from(duration_ms) * 70
-}
-
 /// Local progress first, then the provider's. A failed remote write keeps the
 /// local record for the next attempt; it never deletes anything.
-#[allow(clippy::too_many_arguments)]
 fn record(
     app: &AppPaths,
     provider: &dyn WatchProvider,
     ctx: &Ctx<'_>,
-    id: &str,
-    video_id: Option<&str>,
-    imdb: Option<&str>,
+    request: &PlaybackRequest,
     previous: Option<&MovieProgress>,
     outcome: &PlaybackOutcome,
 ) {
+    let (id, video_id, imdb) = (request.id.as_str(), request.video_id.as_deref(), request.imdb.as_deref());
     // mpv exited before reporting anything: keep the position we had instead
     // of resetting it.
     if outcome.position_ms == 0 && outcome.duration_ms == 0 {
@@ -162,6 +207,8 @@ fn record(
                 duration_ms: outcome.duration_ms,
                 updated_at: at,
                 finished,
+                season: request.season,
+                number: request.number,
             },
         );
     }
@@ -314,7 +361,7 @@ mod tests {
             imdb: Some("tt1".into()),
             episodes: Default::default(),
         };
-        record(&app, &NoopProvider, &ctx, "tt1", None, None, Some(&previous), &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        record(&app, &NoopProvider, &ctx, &request("tt1", None), Some(&previous), &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
 
         let stored = store::read_movies(&app);
         assert_eq!(store::progress_for(&stored, "stremio", "tt1").unwrap().video_id.as_deref(), Some("tt1:1:2"));
@@ -327,10 +374,10 @@ mod tests {
         let credentials = StoreCredentials::new(&app);
         let http = UreqTransport::new();
         let ctx = Ctx { http: &http, credentials: &credentials };
-        record(&app, &NoopProvider, &ctx, "tt1", Some("tt1:1:3"), None, None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        record(&app, &NoopProvider, &ctx, &request("tt1", Some("tt1:1:3")), None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
         assert_eq!(store::progress_for(&store::read_movies(&app), "stremio", "tt1").unwrap().video_id.as_deref(), Some("tt1:1:3"));
 
-        record(&app, &NoopProvider, &ctx, "tt2", None, None, None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
+        record(&app, &NoopProvider, &ctx, &request("tt2", None), None, &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
         assert_eq!(store::progress_for(&store::read_movies(&app), "stremio", "tt2").unwrap().video_id.as_deref(), Some("tt2"));
     }
 
@@ -346,9 +393,7 @@ mod tests {
             &app,
             &NoopProvider,
             &ctx,
-            "tt1",
-            Some("tt1:1:1"),
-            Some("tt1"),
+            &request("tt1", Some("tt1:1:1")),
             None,
             &PlaybackOutcome { position_ms: 1_800_000, duration_ms: 2_400_000 },
         );
@@ -356,9 +401,7 @@ mod tests {
             &app,
             &NoopProvider,
             &ctx,
-            "tt1",
-            Some("tt1:1:2"),
-            Some("tt1"),
+            &request("tt1", Some("tt1:1:2")),
             Some(&store::read_movies(&app).progress[0].clone()),
             &PlaybackOutcome { position_ms: 60_000, duration_ms: 2_400_000 },
         );
@@ -378,7 +421,11 @@ mod tests {
             id: id.into(),
             kind: if video_id.is_some() { "series".into() } else { "movie".into() },
             video_id: video_id.map(str::to_owned),
+            season: video_id.map(|_| 1),
+            number: video_id.map(|_| 1),
             title: id.into(),
+            name: "A Title".into(),
+            year: Some("2011".into()),
             stream: StreamChoice::default(),
         }
     }
@@ -394,6 +441,26 @@ mod tests {
         assert!(resumes_this(&film, &request("tt1", None)));
         let legacy = MovieProgress { video_id: Some("tt1".into()), ..progress(60_000, 600_000, false) };
         assert!(resumes_this(&legacy, &request("tt1", None)), "a film stores its own id as the pointer");
+    }
+
+    #[test]
+    fn a_provider_turned_off_in_sources_is_not_asked_for_a_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        assert!(enabled(&app, "stremio").is_ok(), "the streaming service is on by default");
+
+        let mut settings = heronite_watch_state::settings::read(&app);
+        settings.stream_providers.clear();
+        heronite_watch_state::settings::write(&app, &settings).unwrap();
+        let error = enabled(&app, "stremio").unwrap_err();
+        assert!(format!("{error:#}").contains("turned off"), "{error:#}");
+        // Its account and rails are untouched: only asking for a stream is refused.
+        assert!(heronite_watch_state::settings::read(&app).stream_providers.is_empty());
+
+        let mut settings = heronite_watch_state::settings::read(&app);
+        settings.stream_providers.push("stremio".into());
+        heronite_watch_state::settings::write(&app, &settings).unwrap();
+        assert!(enabled(&app, "stremio").is_ok());
     }
 
     #[test]

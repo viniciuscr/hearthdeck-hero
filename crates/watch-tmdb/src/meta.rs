@@ -38,7 +38,7 @@ impl WatchMetadataSource for TmdbMeta {
         let Some(credentials) = ctx.credentials else {
             // Without a key it cannot answer; saying where the key goes is more
             // useful than a bare "not found".
-            return Err(anyhow::anyhow!("TMDB needs an API key: Settings → Watch → Catalog providers."));
+            return Err(anyhow::anyhow!("TMDB needs an API key: the bootstrap sets it (or a file in ~/.config/hearthdeck/tmdb-api-key)."));
         };
         let key = api_key(credentials)?;
         let Some(found) = find(ctx, &key, &title.id)? else {

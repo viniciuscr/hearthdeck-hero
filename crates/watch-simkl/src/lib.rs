@@ -12,8 +12,12 @@
 //! later, in their own slice.
 
 pub mod auth;
+pub mod meta;
+pub mod sync;
 
 pub use auth::{DeviceCode, Session, Step, Tokens};
+pub use meta::SimklMeta;
+pub use sync::SimklTracker;
 
 /// The name the credentials of this provider are kept under.
 pub const PROVIDER: &str = "simkl";

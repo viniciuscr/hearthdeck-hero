@@ -23,7 +23,7 @@ pub struct Settings {
     #[serde(default = "stop_service_by_default")]
     pub stop_service_when_done: bool,
     /// The catalog sources the Movies and Series tabs may browse, in the order
-    /// they are listed (Settings → Watch → Catalogs). A source this build does
+    /// they are listed (Settings → Watch → Sources → Catalogs). A source this build does
     /// not have is skipped by the registry, so a file from another version is
     /// not a fault.
     #[serde(default = "catalogs_by_default")]
@@ -45,6 +45,18 @@ pub struct Settings {
     /// Shelf: a file written then still reads.
     #[serde(default, alias = "collections")]
     pub home_rails: Vec<String>,
+    /// The **media providers** whose streams the Watch space may use
+    /// (Settings → Watch → Sources → Streams). A provider left out keeps its
+    /// account and its rails; only asking it for a stream is refused, so a
+    /// person can keep Stremio's history without its torrents.
+    #[serde(default = "streams_by_default")]
+    pub stream_providers: Vec<String>,
+    /// The **trackers** the person turned on (`simkl`): services the watch
+    /// history is sent to, after the local write and never instead of it. A
+    /// tracker this build does not have, or one nobody is signed in to, is
+    /// skipped — the file is hand-editable and survives a version change.
+    #[serde(default = "trackers_by_default")]
+    pub trackers: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -53,15 +65,30 @@ fn stop_service_by_default() -> bool {
     true
 }
 
-/// Cinemeta is the catalogue Watch ships with, so it is on to begin with.
+/// **Nothing is on until the person turns it on.** A catalogue is a choice about
+/// what the tabs browse, so a fresh machine browses none; the Sources page is
+/// where they are switched, in any combination — some, all or none.
 fn catalogs_by_default() -> Vec<String> {
-    vec!["cinemeta".to_owned()]
+    Vec::new()
 }
 
-/// TMDB first, Cinemeta as the fallback: the richer source decides the card, and
-/// nothing is built around Cinemeta being the one that answers.
+/// Same for what describes a title: no source is asked until one is chosen, and
+/// then in the order the person put them.
 fn metadata_by_default() -> Vec<String> {
-    vec!["tmdb".to_owned(), "cinemeta".to_owned()]
+    Vec::new()
+}
+
+/// Same for trackers: switching one on is also its first sync, so it is a
+/// decision, not a default.
+fn trackers_by_default() -> Vec<String> {
+    Vec::new()
+}
+
+/// The exception, and the space's own: the media provider is what makes Watch a
+/// Watch space (its account, its rails and its streams). It is on until the
+/// person turns it off in Sources → Streams.
+fn streams_by_default() -> Vec<String> {
+    vec!["stremio".to_owned()]
 }
 
 impl Default for Settings {
@@ -71,6 +98,8 @@ impl Default for Settings {
             catalog_sources: catalogs_by_default(),
             metadata_sources: metadata_by_default(),
             home_rails: Vec::new(),
+            trackers: trackers_by_default(),
+            stream_providers: streams_by_default(),
             extra: Map::new(),
         }
     }
@@ -111,17 +140,14 @@ mod tests {
     }
 
     #[test]
-    fn cinemeta_is_the_catalog_source_to_begin_with() {
+    fn nothing_is_on_until_the_person_turns_it_on() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(read(&app(dir.path())).catalog_sources, ["cinemeta"], "no file: the catalogue we ship with");
-        assert_eq!(Settings::default().catalog_sources, ["cinemeta"]);
-    }
-
-    #[test]
-    fn tmdb_leads_the_metadata_sources_and_cinemeta_follows() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(read(&app(dir.path())).metadata_sources, ["tmdb", "cinemeta"], "no file: TMDB first, Cinemeta as the fallback");
-        assert_eq!(Settings::default().metadata_sources, ["tmdb", "cinemeta"]);
+        let fresh = read(&app(dir.path()));
+        assert!(fresh.catalog_sources.is_empty(), "no catalogue is browsed by default");
+        assert!(fresh.metadata_sources.is_empty(), "no source describes a title by default");
+        assert!(fresh.trackers.is_empty(), "no tracker is sent to by default");
+        assert_eq!(fresh.stream_providers, ["stremio"], "the media provider is the space itself, and stays on");
+        assert!(Settings::default().catalog_sources.is_empty());
     }
 
     #[test]

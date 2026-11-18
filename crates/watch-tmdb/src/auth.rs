@@ -1,7 +1,7 @@
 //! Signing a person in to TMDB — the token flow, never a password.
 //!
 //! An API **key** belongs to an application: it is what the catalogs and the
-//! metadata use, and it is asked for first (Settings → Watch → Catalogs). A
+//! metadata use, and it is asked for first (Settings → Watch → Sources). A
 //! **session** belongs to a person: TMDB hands out a request token, the person
 //! approves it on its own site, and the token becomes a session id that names
 //! their account (watchlist, favourites, rated lists). Nothing here replaces the

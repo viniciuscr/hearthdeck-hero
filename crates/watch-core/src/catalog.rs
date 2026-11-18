@@ -5,7 +5,7 @@
 //! a search and whether it pages — and answers one page at a time. It is not a
 //! media provider: it plays nothing, owns no library and is never asked for a
 //! stream. Stremio's Cinemeta, TMDB's discover and any other browsable catalogue
-//! live here, each one switchable in Settings → Watch → Catalogs.
+//! live here, each one switchable in Settings → Watch → Sources (Catalogs).
 //!
 //! [`WatchProvider`]: crate::provider::WatchProvider
 

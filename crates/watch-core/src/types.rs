@@ -124,4 +124,11 @@ pub struct EpisodeProgress {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub finished: bool,
+    /// The season and number the page knew when it played: what a tracker asks
+    /// for, without parsing the provider's own `video_id` shape. `None` for a
+    /// record written before they were kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u32>,
 }

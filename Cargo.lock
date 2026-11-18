@@ -4151,7 +4151,9 @@ dependencies = [
  "anyhow",
  "heronite-watch-addon",
  "heronite-watch-core",
+ "heronite-watch-simkl",
  "heronite-watch-tmdb",
+ "log",
  "serde_json",
  "url",
 ]

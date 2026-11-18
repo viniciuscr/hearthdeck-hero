@@ -14,7 +14,7 @@ use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::metadata::MetaCtx;
 use heronite_watch_state::details as cache;
 
-pub use heronite_watch_core::metadata::{Episode, Fact, MetaDescriptor, TitleDetails, TitleRef, WatchMetadataSource};
+pub use heronite_watch_core::metadata::{Episode, Fact, MetaDescriptor, TitleDetails, TitleRef, Trailer, WatchMetadataSource};
 
 /// The metadata sources Watch ships with, in registry order.
 pub fn sources() -> &'static [&'static dyn WatchMetadataSource] {
@@ -41,8 +41,19 @@ pub fn details_with(http: &dyn Transport, app: &AppPaths, title: &TitleRef) -> R
     let sources = enabled.iter().map(|source| source.descriptor().id).collect::<Vec<_>>().join("+");
     let root = app.cache.join(cache::ROOT);
     let cached = cache::read(&root, title, &sources);
-    if cached.as_ref().is_some_and(|cached| cached.is_fresh(Utc::now())) {
+    // Fresh **and** of the shape this build draws: an answer from before a
+    // screen gained a field (the trailers) must not hide it for a week.
+    if cached.as_ref().is_some_and(|cached| cached.is_fresh(Utc::now()) && cached.is_current()) {
         return Ok(cached.map(|cached| cached.details));
+    }
+    // The machine's own credentials are adopted here too, not only when Settings
+    // opens: a page must not go without a source because nobody visited it — the
+    // bootstrap's key and client id are files waiting for a reader.
+    // Both, always: `||` would skip Simkl's file whenever TMDB's was taken.
+    let tmdb_adopted = crate::tmdb_sign_in::adopt_key_file(app);
+    let simkl_adopted = crate::simkl_sign_in::adopt_client_id_file(app);
+    if tmdb_adopted || simkl_adopted {
+        log::debug!("watch details: adopted the machine's own credentials");
     }
     // A source that needs a key (TMDB) reads its own entry; Cinemeta ignores it.
     let credentials = heronite_watch_state::store::StoreCredentials::new(app);

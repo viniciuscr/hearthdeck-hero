@@ -8,3 +8,4 @@ pub mod personal;
 pub mod sessions;
 pub mod settings;
 pub mod store;
+pub mod tracking;

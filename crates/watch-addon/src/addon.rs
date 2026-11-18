@@ -213,8 +213,10 @@ impl MetaDetails {
             poster: self.poster,
             background: self.background,
             logo: self.logo,
-            // The addon protocol's meta carries none of the open facts: they are
-            // a source's own (TMDB's tagline, budget, networks).
+            // The addon protocol's meta carries none of the open facts (a
+            // source's own tagline, budget, networks) and its `trailers` are not
+            // read here yet.
+            trailers: Vec::new(),
             extras: Vec::new(),
         })
     }

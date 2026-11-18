@@ -120,6 +120,26 @@ fn an_answer_without_a_cache_is_refreshed_and_written() {
 }
 
 #[test]
+fn an_answer_of_an_older_shape_is_asked_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app(dir.path());
+    let root = app.cache.join(details::ROOT);
+    let old = TitleDetails { id: "tt0133093".into(), kind: "movie".into(), name: "Old shape".into(), ..TitleDetails::default() };
+    details::write(&root, &movie(), "cinemeta", &old, chrono::Utc::now()).unwrap();
+    // The file a build before the trailers wrote: fresh, but with no `schema`.
+    let file = details::path(&root, &movie(), "cinemeta");
+    let mut value = serde_json::to_value(details::read(&root, &movie(), "cinemeta").expect("written")).unwrap();
+    value.as_object_mut().expect("an object").remove("schema");
+    std::fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
+
+    let http = Fake::new(vec![Answer::Body(META)]);
+    let answer = details_with(&http, &app, &movie()).unwrap().expect("the source is asked again");
+    assert_eq!(answer.name, "The Matrix", "a fresh answer of the old shape is not served");
+    assert_eq!(http.asked(), 1, "the old shape costs one ask");
+    assert!(details::read(&root, &movie(), "cinemeta").expect("rewritten").is_current(), "and the file is this build's shape now");
+}
+
+#[test]
 fn a_title_no_source_knows_is_no_details_and_is_not_cached() {
     let dir = tempfile::tempdir().unwrap();
     let app = app(dir.path());
@@ -140,5 +160,5 @@ fn a_source_that_could_not_be_asked_is_an_error_without_a_cache() {
 #[test]
 fn the_facade_publishes_the_metadata_sources_in_order() {
     let ids: Vec<&str> = sources().iter().map(|source| source.descriptor().id).collect();
-    assert_eq!(ids, ["tmdb", "cinemeta"], "TMDB leads, Cinemeta is the fallback");
+    assert_eq!(ids, ["tmdb", "cinemeta", "simkl"], "TMDB leads, Cinemeta is the fallback, Simkl is the opt-in last");
 }

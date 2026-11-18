@@ -6,9 +6,9 @@
 //! or a player. The two have their own registries, and later their own
 //! settings, so a new description source never touches the provider story.
 //!
-//! The sources answer through the addon protocol (`heronite-watch-addon`):
-//! Cinemeta is Stremio's own `meta` addon, and a second source can point at
-//! another addon's manifest the same way.
+//! Three sources so far: TMDB (its own key), Cinemeta (Stremio's `meta` addon)
+//! and Simkl (its client id; off until the person turns it on in Settings → Watch
+//! → Providers, because a tracker is asked for its catalog only deliberately).
 //!
 //! [`WatchProvider`]: heronite_watch_core::provider::WatchProvider
 
@@ -19,9 +19,12 @@ pub mod cinemeta;
 
 static CINEMETA: cinemeta::Cinemeta = cinemeta::Cinemeta::builtin();
 static TMDB: heronite_watch_tmdb::TmdbMeta = heronite_watch_tmdb::TmdbMeta;
+static SIMKL: heronite_watch_simkl::SimklMeta = heronite_watch_simkl::SimklMeta;
 /// Registry order. It is not the priority — `metadataSources` is — but TMDB
-/// leads here too, so a reader sees the intended default.
-static SOURCES: [&dyn WatchMetadataSource; 2] = [&TMDB, &CINEMETA];
+/// leads here too, so a reader sees the intended default. Simkl is listed last
+/// and off by default: a tracker that can also describe a title, turned on in
+/// Settings → Watch → Sources (Metadata) when the person wants its answer.
+static SOURCES: [&dyn WatchMetadataSource; 3] = [&TMDB, &CINEMETA, &SIMKL];
 
 /// Every metadata source, in the order their answers are asked.
 pub fn sources() -> &'static [&'static dyn WatchMetadataSource] {
@@ -69,6 +72,9 @@ pub fn details(sources: &[&'static dyn WatchMetadataSource], ctx: &MetaCtx<'_>, 
             }
             Ok(None) => {}
             Err(error) => {
+                // Silently dropping it leaves a page that just lacks what that
+                // source knows, with nothing to look at in the log.
+                log::warn!("metadata source {}: {error:#}", source.descriptor().id);
                 failure.get_or_insert(error);
             }
         }
@@ -176,9 +182,9 @@ mod tests {
     #[test]
     fn the_registry_names_its_sources_and_what_they_cover() {
         let ids: Vec<&str> = sources().iter().map(|source| source.descriptor().id).collect();
-        assert_eq!(ids, ["tmdb", "cinemeta"], "TMDB leads; Cinemeta is the fallback");
-        assert_eq!(sources_for(sources(), "stremio").len(), 2, "TMDB and Cinemeta both cover a media provider");
-        assert_eq!(sources_for(sources(), "youtube").len(), 2, "an empty applies_to covers every media provider");
+        assert_eq!(ids, ["tmdb", "cinemeta", "simkl"], "TMDB leads, Cinemeta is the fallback, Simkl is last (and off until chosen)");
+        assert_eq!(sources_for(sources(), "stremio").len(), 3, "TMDB, Cinemeta and Simkl all cover a media provider");
+        assert_eq!(sources_for(sources(), "youtube").len(), 3, "an empty applies_to covers every media provider");
         let descriptor = MetaDescriptor { id: "x", name: "X", applies_to: &["stremio"] };
         assert!(descriptor.covers("stremio"));
         assert!(!descriptor.covers("youtube"));
@@ -188,7 +194,7 @@ mod tests {
 #[cfg(test)]
 mod merge_tests {
     use super::*;
-    use heronite_watch_core::metadata::{Episode, Fact};
+    use heronite_watch_core::metadata::{Episode, Fact, Trailer};
 
     struct Fixed(&'static str, TitleDetails);
 
@@ -213,6 +219,12 @@ mod merge_tests {
                 name: "A Series".into(),
                 runtime: Some("50m".into()),
                 episodes: vec![Episode { id: "tt1:1:1".into(), season: 1, number: 1, ..Episode::default() }],
+                trailers: vec![Trailer {
+                    name: "Official Trailer".into(),
+                    kind: "trailer".into(),
+                    url: "https://www.youtube.com/watch?v=abc".into(),
+                    thumbnail: Some("https://i.ytimg.com/vi/abc/hqdefault.jpg".into()),
+                }],
                 extras: vec![Fact { id: "network".into(), label: "Network".into(), value: "HBO".into(), source: "rich".into() }],
                 ..TitleDetails::default()
             },
@@ -236,6 +248,7 @@ mod merge_tests {
         assert_eq!(merged.runtime.as_deref(), Some("50m"), "the first answer keeps its field");
         assert_eq!(merged.cast, ["Someone"], "and the second fills what was empty");
         assert_eq!(merged.episodes.len(), 1, "one source's episode list, not two halves");
+        assert_eq!(merged.trailers.len(), 1, "one source's trailer list, which is what puts the tab on the page");
         assert_eq!(merged.extras.len(), 2, "both extras, the first of each id winning");
     }
 

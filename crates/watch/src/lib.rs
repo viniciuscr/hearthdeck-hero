@@ -17,6 +17,7 @@ pub mod service;
 pub mod simkl_sign_in;
 pub mod stats;
 pub mod tmdb_sign_in;
+pub mod trackers;
 
 pub use heronite_watch_core::auth::AuthKey;
 pub use heronite_watch_core::http::{Transport, UreqTransport};

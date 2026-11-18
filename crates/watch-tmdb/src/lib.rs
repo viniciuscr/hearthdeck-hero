@@ -171,7 +171,7 @@ impl Tmdb {
     fn recommendations(&self, ctx: &CatalogCtx<'_>, request: &CatalogRequest, key: &str, kind: &str) -> Result<CatalogPage> {
         let secret = ctx.credentials.get("tmdb")?.context("TMDB needs its read access token")?;
         let token = auth::access_token_of(&secret)
-            .context("TMDB's v4 read access token is not set: it is what recommendations need (Settings → Watch → Providers).")?;
+            .context("TMDB's v4 read access token is not set: it is what recommendations need (Settings → Watch → Sources).")?;
         let object = auth::account_object_id(&token).context("TMDB's read token names no account")?;
         let page = request.skip / PAGE + 1;
         let mut url = Url::parse(&format!("{API_V4}/account/{object}/{kind}/recommendations"))?;

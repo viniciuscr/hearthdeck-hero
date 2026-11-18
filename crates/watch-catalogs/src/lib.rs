@@ -2,7 +2,7 @@
 //!
 //! A catalog source says what there is to browse (see
 //! [`WatchCatalogSource`]): it plays nothing, has no account and is never asked
-//! for a stream. Settings → Watch → Catalogs turns them on and off by id, which
+//! for a stream. Settings → Watch → Sources (Catalogs) turns them on and off by id, which
 //! is why a source's id is all the settings file stores.
 //!
 //! [`WatchCatalogSource`]: heronite_watch_core::catalog::WatchCatalogSource

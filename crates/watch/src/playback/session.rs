@@ -31,7 +31,11 @@ pub(super) fn record(app: &AppPaths, request: &PlaybackRequest, previous: Option
         kind: request.kind.clone(),
         id: request.id.clone(),
         video_id: request.video_id.clone(),
+        season: request.season,
+        number: request.number,
         title: request.title.clone(),
+        name: request.name.clone(),
+        year: request.year.clone(),
         started_at: ended_at - Duration::milliseconds((elapsed * 1000.).round() as i64),
         elapsed_seconds: elapsed,
         position_from_ms: from,
@@ -81,7 +85,11 @@ mod tests {
             id: "tt1".into(),
             kind: if video.is_some() { "series".into() } else { "movie".into() },
             video_id: video.map(str::to_owned),
+            season: video.map(|_| 1),
+            number: video.map(|_| 2),
             title: "A Film".into(),
+            name: "A Film".into(),
+            year: Some("1999".into()),
             stream: StreamChoice::default(),
         }
     }

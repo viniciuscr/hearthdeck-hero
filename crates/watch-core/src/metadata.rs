@@ -148,6 +148,11 @@ pub struct TitleDetails {
     /// number. Season 0 (the specials) is not here.
     #[serde(default)]
     pub episodes: Vec<Episode>,
+    /// The trailers the sources know, best first. One source's list wins as a
+    /// whole: two half-lists stitched together is nobody's order, and an empty
+    /// list is what keeps the Trailer tab off the page.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trailers: Vec<Trailer>,
     /// Art the source knows, when the library record lacks it.
     #[serde(default)]
     pub poster: Option<String>,
@@ -208,6 +213,27 @@ impl Episode {
     }
 }
 
+/// A trailer, teaser or clip a metadata source knows: the page a person opens,
+/// a still for the card when the source has one, and what it calls it.
+///
+/// Neutral on purpose: the film page does not care which source answered, only
+/// that *a* source did — an empty list is what hides the Trailer tab.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trailer {
+    /// The source's name for it (`Official Trailer`); empty when it has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// `trailer`, `teaser`, `clip`… empty when the source does not say.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
+    /// The page to open: a full URL, whatever site the source uses.
+    pub url: String,
+    /// A 16:9 still for the card, when the source has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
+}
+
 impl TitleDetails {
     /// Fills what this answer has not got from `other`: the first source to fill
     /// a field keeps it, a later one fills only what is still empty, and extras
@@ -245,6 +271,10 @@ impl TitleDetails {
         // half-lists stitched together.
         if self.episodes.is_empty() {
             self.episodes = other.episodes;
+        }
+        // The same for trailers, and what the page's Trailer tab hangs on.
+        if self.trailers.is_empty() {
+            self.trailers = other.trailers;
         }
         for fact in other.extras {
             if !self.extras.iter().any(|kept| kept.id == fact.id) {
