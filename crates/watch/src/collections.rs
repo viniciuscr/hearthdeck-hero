@@ -123,7 +123,19 @@ mod tests {
         let fake = Fake::new();
         let rails = descriptors_with(&fake, &app(dir.path()));
         let ids: Vec<&str> = rails.iter().map(|(_, rail)| rail.id.as_str()).collect();
-        assert_eq!(ids, ["tmdb:top-rated:movie", "tmdb:popular:movie", "tmdb:top-rated:series", "tmdb:popular:series"]);
+        assert_eq!(
+            ids,
+            [
+                // The two the account answers, declared even signed out: the
+                // switch is the person's, and the resolver says what it needs.
+                "tmdb:recommended:movie",
+                "tmdb:recommended:series",
+                "tmdb:top-rated:movie",
+                "tmdb:popular:movie",
+                "tmdb:top-rated:series",
+                "tmdb:popular:series",
+            ]
+        );
         assert_eq!(rails[0].0, "tmdb", "the source that answers it");
         assert!(fake.seen.lock().unwrap().is_empty(), "declaring costs nothing");
     }
