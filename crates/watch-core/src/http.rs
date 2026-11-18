@@ -13,6 +13,15 @@ pub trait Transport: Send + Sync {
     fn get(&self, url: &Url) -> Result<Vec<u8>>;
     fn post_json(&self, url: &Url, body: &Value) -> Result<Vec<u8>>;
 
+    /// A POST whose answer is read whatever the status is: an OAuth token
+    /// endpoint answers "not yet" with a 400 and a body (`authorization_pending`,
+    /// `slow_down`), which is part of the protocol rather than a failure. A
+    /// transport that cannot keep the body of a non-2xx answer reports a
+    /// successful one, and the caller reads it as it can.
+    fn post_json_answer(&self, url: &Url, body: &Value) -> Result<(u16, Vec<u8>)> {
+        Ok((200, self.post_json(url, body)?))
+    }
+
     /// A GET carrying `Authorization: Bearer <token>`: what TMDB's v4 endpoints
     /// take instead of a key in the query. A transport that cannot send headers
     /// says so rather than sending an unauthenticated request that would come
@@ -70,7 +79,11 @@ impl UreqTransport {
     }
 
     pub fn with_limits(timeout: Duration, max_bytes: u64) -> Self {
-        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_connect(Some(Duration::from_secs(10))).build().into();
+        // A 4xx is an answer, not a transport failure: `post_json_answer` has to
+        // keep the body (an OAuth token endpoint says "not yet" with a 400), and
+        // the other methods turn the status into an `HttpStatus` themselves.
+        let agent: ureq::Agent =
+            ureq::Agent::config_builder().http_status_as_error(false).timeout_connect(Some(Duration::from_secs(10))).build().into();
         Self { agent, timeout, max_bytes }
     }
 }
@@ -102,6 +115,11 @@ impl Transport for UreqTransport {
     }
 
     fn post_json(&self, url: &Url, body: &Value) -> Result<Vec<u8>> {
+        let (status, bytes) = self.post_json_answer(url, body)?;
+        accepted(url, status, bytes)
+    }
+
+    fn post_json_answer(&self, url: &Url, body: &Value) -> Result<(u16, Vec<u8>)> {
         let text = serde_json::to_string(body)?;
         let mut response = self
             .agent
@@ -112,7 +130,9 @@ impl Transport for UreqTransport {
             .header("content-type", "application/json")
             .send(text.as_str())
             .map_err(|e| transport_error(url, e))?;
-        read(url, &mut response, self.max_bytes)
+        let status = response.status().as_u16();
+        let bytes = response.body_mut().with_config().limit(self.max_bytes).read_to_vec().map_err(|e| anyhow!("{}", failure(url, e)))?;
+        Ok((status, bytes))
     }
 }
 
@@ -129,6 +149,11 @@ fn transport_error(url: &Url, error: ureq::Error) -> anyhow::Error {
 fn read(url: &Url, response: &mut ureq::http::Response<ureq::Body>, max_bytes: u64) -> Result<Vec<u8>> {
     let status = response.status().as_u16();
     let body = response.body_mut().with_config().limit(max_bytes).read_to_vec().map_err(|e| anyhow!("{}", failure(url, e)))?;
+    accepted(url, status, body)
+}
+
+/// The body of a 2xx answer; anything else is the status, as a type.
+fn accepted(url: &Url, status: u16, body: Vec<u8>) -> Result<Vec<u8>> {
     if !(200..300).contains(&status) {
         return Err(HttpStatus::new(url, status).into());
     }
@@ -160,6 +185,49 @@ pub fn redacted(url: &Url) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// One request answered with `status` and a JSON body, over a real socket:
+    /// the only way to prove what the client does with a non-2xx answer.
+    fn answer_once(status: u16, body: &'static str) -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a free port");
+        let address = listener.local_addr().expect("the bound address");
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("one request");
+            let mut request = [0u8; 2048];
+            let _ = socket.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes());
+        });
+        Url::parse(&format!("http://{address}/oauth2/token")).expect("a local url")
+    }
+
+    #[test]
+    fn a_four_hundred_keeps_its_body_for_the_caller_that_wants_it() {
+        let url = answer_once(400, r#"{"error":"authorization_pending"}"#);
+        let (status, body) = UreqTransport::new().post_json_answer(&url, &serde_json::json!({})).expect("the answer is read");
+        assert_eq!(status, 400);
+        assert_eq!(String::from_utf8_lossy(&body), r#"{"error":"authorization_pending"}"#, "the OAuth error code is the protocol");
+    }
+
+    #[test]
+    fn a_four_hundred_is_still_an_error_for_a_plain_post() {
+        let url = answer_once(400, r#"{"error":"authorization_pending"}"#);
+        let error = UreqTransport::new().post_json(&url, &serde_json::json!({})).expect_err("a plain POST fails on the status");
+        assert_eq!(http_status(&error), Some(400));
+        assert!(!error.to_string().contains("authorization_pending"), "the body is not the error's text");
+    }
+
+    #[test]
+    fn a_not_found_from_a_get_is_the_status_and_nothing_more() {
+        let url = answer_once(404, r#"{"detail":"gone"}"#);
+        let error = UreqTransport::new().get(&url).expect_err("a 404 is a status");
+        assert_eq!(http_status(&error), Some(404));
+    }
 
     #[test]
     fn a_transport_error_cannot_quote_the_path_or_query() {

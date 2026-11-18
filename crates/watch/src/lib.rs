@@ -14,6 +14,7 @@ pub mod playback;
 pub mod progress;
 pub mod registry;
 pub mod service;
+pub mod simkl_sign_in;
 pub mod stats;
 pub mod tmdb_sign_in;
 
@@ -35,7 +36,10 @@ pub mod player {
 
 /// The local watch state the settings screen reads and writes.
 pub mod store {
-    pub use heronite_watch_state::store::{clear_auth, clear_tmdb_key, read_auth, read_tmdb_key, write_auth, write_tmdb_key};
+    pub use heronite_watch_state::store::{
+        clear_auth, clear_simkl_client_id, clear_tmdb_key, read_auth, read_simkl_client_id, read_tmdb_key, write_auth,
+        write_simkl_client_id, write_tmdb_key,
+    };
 }
 
 /// Settings → Watch: what the person chose beyond account, theme and rails.

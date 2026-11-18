@@ -11,6 +11,11 @@ static PROVIDERS: [&dyn WatchProvider; 1] = [&STREMIO];
 #[cfg(not(feature = "stremio"))]
 static PROVIDERS: [&dyn WatchProvider; 0] = [];
 
+/// The providers that are an **account and nothing else** so far: they keep
+/// what the person watched in step across devices, and Settings draws their
+/// sign-in. They join [`providers`] the day they serve titles of their own.
+pub const ACCOUNTS: &[(&str, &str)] = &[("simkl", "Simkl")];
+
 /// Every provider, in display order. A build without `stremio` ships none.
 pub fn providers() -> &'static [&'static dyn WatchProvider] {
     &PROVIDERS

@@ -4097,6 +4097,7 @@ dependencies = [
  "heronite-watch-core",
  "heronite-watch-metadata",
  "heronite-watch-player",
+ "heronite-watch-simkl",
  "heronite-watch-state",
  "heronite-watch-stats",
  "heronite-watch-stremio",
@@ -4162,6 +4163,19 @@ dependencies = [
  "anyhow",
  "heronite-data",
  "heronite-watch-core",
+ "serde_json",
+ "tempfile",
+ "url",
+]
+
+[[package]]
+name = "heronite-watch-simkl"
+version = "1.7.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "heronite-watch-core",
+ "serde",
  "serde_json",
  "tempfile",
  "url",

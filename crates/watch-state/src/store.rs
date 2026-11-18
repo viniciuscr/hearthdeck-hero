@@ -170,6 +170,35 @@ pub fn clear_tmdb_key(app: &AppPaths) -> Result<()> {
     StoreCredentials::new(app).clear("tmdb")
 }
 
+/// The Simkl client id (the application's credential for that API), written
+/// where the Simkl sign-in reads it. Kept beside any session the credential
+/// already holds, so re-keying the app does not sign the person out.
+pub fn write_simkl_client_id(app: &AppPaths, client_id: &str) -> Result<()> {
+    let store = StoreCredentials::new(app);
+    let mut value = store.get("simkl")?.map(|secret| secret.value().clone()).unwrap_or_else(|| serde_json::json!({}));
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["clientId"] = serde_json::json!(client_id.trim());
+    store.set("simkl", &Secret::new(value))
+}
+
+/// The stored Simkl client id, when there is one. Whitespace is not an id.
+pub fn read_simkl_client_id(app: &AppPaths) -> Result<Option<String>> {
+    let Some(secret) = StoreCredentials::new(app).get("simkl")? else {
+        return Ok(None);
+    };
+    let value = secret.value();
+    let client_id = value.get("clientId").and_then(Value::as_str).or_else(|| value.as_str()).unwrap_or_default().trim().to_owned();
+    Ok((!client_id.is_empty()).then_some(client_id))
+}
+
+/// Forgets the Simkl client id and the session with it: without the app's
+/// credential nothing of that provider works here.
+pub fn clear_simkl_client_id(app: &AppPaths) -> Result<()> {
+    StoreCredentials::new(app).clear("simkl")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +331,47 @@ mod tmdb_key_tests {
         let app = paths(dir.path());
         write_tmdb_key(&app, "   ").unwrap();
         assert_eq!(read_tmdb_key(&app).unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod simkl_client_id_tests {
+    use super::*;
+    use std::path::Path;
+
+    fn paths(root: &Path) -> AppPaths {
+        AppPaths { config: root.join("config"), cache: root.join("cache") }
+    }
+
+    #[test]
+    fn the_client_id_round_trips_and_is_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = paths(dir.path());
+        assert_eq!(read_simkl_client_id(&app).unwrap(), None, "no client id before one is written");
+        write_simkl_client_id(&app, "  abc123  ").unwrap();
+        assert_eq!(read_simkl_client_id(&app).unwrap().as_deref(), Some("abc123"), "typed spaces are not part of it");
+        clear_simkl_client_id(&app).unwrap();
+        assert_eq!(read_simkl_client_id(&app).unwrap(), None);
+    }
+
+    #[test]
+    fn a_blank_client_id_is_no_client_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = paths(dir.path());
+        write_simkl_client_id(&app, "   ").unwrap();
+        assert_eq!(read_simkl_client_id(&app).unwrap(), None);
+    }
+
+    #[test]
+    fn a_new_client_id_keeps_the_session_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = paths(dir.path());
+        StoreCredentials::new(&app)
+            .set("simkl", &Secret::new(serde_json::json!({"clientId": "old", "accessToken": "simkl_at_x"})))
+            .unwrap();
+        write_simkl_client_id(&app, "new").unwrap();
+        let secret = StoreCredentials::new(&app).get("simkl").unwrap().unwrap();
+        assert_eq!(read_simkl_client_id(&app).unwrap().as_deref(), Some("new"));
+        assert_eq!(secret.value().get("accessToken").and_then(Value::as_str), Some("simkl_at_x"), "re-keying does not sign out");
     }
 }
