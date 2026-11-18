@@ -4,6 +4,37 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-18 — Simkl is the second account, and the phone approves the
+> TV.** Simkl is a **tracker**: it keeps what a person watched in step across
+> devices, and it plays nothing. It therefore joins Settings → Watch → Providers
+> as an **account** card (a third group, after the sources; its registry entry is
+> `heronite_watch::registry::ACCOUNTS`, and it gains a proper one the day it
+> serves titles). The credential is the application's — a **client id**, asked
+> for once by `scripts/bootstrap.sh` into `~/.config/hearthdeck/simkl-client-id`
+> (0600) and adopted into the credential store when Settings opens, or compiled
+> in through `HEARTHDECK_SIMKL_CLIENT_ID` — and the person's part is the
+> **device/PIN flow** of AUTH V2, the flow a TV can actually do: **Connect
+> Simkl** asks `POST /oauth2/device` for a code, draws
+> `https://simkl.com/pin?user_code=…` as a QR with the eight-character code
+> underneath, and polls `POST /oauth2/token` every interval Simkl returned (five
+> seconds), adding five seconds when it answers `slow_down`, until the approval
+> lands or the code's fifteen minutes are gone. Simkl records no refusal, so
+> that deadline is the only way out. The tokens (`accessToken`, `refreshToken`,
+> `scope`, `expiresAt`) are kept in `simkl-auth.json` (0600) beside the client
+> id; **sign out** drops them and keeps the id, **forget** drops both from the
+> credential store (a `simkl-client-id` file the bootstrap wrote is adopted again
+> on the next start, exactly like TMDB's key file). Nothing
+> consumes the tokens yet — the calls they unlock are the next slice — so a
+> failed sign-in degrades to "not signed in" exactly like TMDB's. The same
+> revision finishes what the TMDB card started: **Stremio's link code is polled
+> every five seconds too**, so scanning the code and walking away is the whole
+> flow; the Check button stays as the retry for a poll that gave up.
+>
+> The TMDB step of `scripts/bootstrap.sh` was half-implemented and is now whole:
+> the plan lists it outside `--lockdown`, and the key and the optional v4 read
+> token are asked for independently — an existing `tmdb-api-key` no longer
+> skipped a missing `tmdb-access-token`.
+>
 > **Revision 2026-11-16 — themes are presented per space, and Watch edits its
 > own.** The Watch theme is no longer a frozen copy of a game preset, and a
 > theme's structure is no longer rewritten on every load. Two steps, named in

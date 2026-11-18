@@ -97,3 +97,21 @@ Connect that cannot work.
   `cargo build` (that is what the release secret does).
 - Never commit the key. It is world-readable once the app ships, which is normal
   for a client application and is why the secret lives in CI, not in the tree.
+
+## The Simkl client id
+
+Simkl works the same way, with a **client id** instead of a key: it identifies
+the application, and the person only ever approves a code from the TV (the
+device / PIN flow of AUTH V2). The release carries the fork's own through
+`HEARTHDECK_SIMKL_CLIENT_ID` (`option_env!` in `crates/watch-simkl`), fed by the
+repository secret `SIMKL_CLIENT_ID`.
+
+- Getting it: simkl.com → your account → Apps → Developers → create an app of
+  type **TV, devices & command line** (AUTH V2 — a V1 app is refused by the
+  device endpoint). `client_id` is public and safe to ship; only the user tokens
+  are secrets.
+- Normal path: `scripts/bootstrap.sh` asks for it and writes it to
+  `~/.config/hearthdeck/simkl-client-id` (0600); the app adopts that file into
+  its credential store the first time Settings opens.
+- A tag built without the secret is not fatal: Settings → Watch → Providers says
+  the client id is missing instead of offering a Connect that cannot work.

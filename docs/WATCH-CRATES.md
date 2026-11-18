@@ -31,6 +31,8 @@ app
     │   ├── heronite-watch-tmdb   TMDB discover
     │   └── heronite-watch-addon
     │       └── heronite-watch-core
+    ├── heronite-watch-simkl    Simkl: the client id and the device/PIN flow
+    │   └── heronite-watch-core
     ├── heronite-watch-state    local files + Collection projection
     ├── heronite-watch-stats    the recap's numbers (sessions in, buckets out)
     ├── heronite-watch-player   mpv
@@ -39,7 +41,7 @@ app
 
 | Crate | Responsibility | May depend on | Must not |
 |---|---|---|---|
-| `heronite-watch` | provider registry, `available()`, browse → synthetic `Library`, the single post-session progress write, TMDB's sign-in, the app's import surface | `heronite-watch-{core,state,player,stremio,tmdb,catalogs,metadata}`, `heronite-data` | GPUI, provider protocol code, file formats of its own |
+| `heronite-watch` | provider registry (and the accounts registry), `available()`, browse → synthetic `Library`, the single post-session progress write, TMDB's and Simkl's sign-in, the app's import surface | `heronite-watch-{core,state,player,stremio,tmdb,simkl,catalogs,metadata}`, `heronite-data` | GPUI, provider protocol code, file formats of its own |
 | `heronite-watch-core` | `WatchItem`, `StreamChoice`, `WatchProgress`, `PosterShape`, `AuthKey`, `WatchProvider`, `WatchCatalogSource`, `Ctx`, `CatalogCtx`, `Transport`, `Credentials`, `Throttle`, `finished` | serde, serde_json, anyhow, url, chrono, ureq | `heronite-*`, files, processes, provider names |
 | `heronite-watch-addon` | Stremio addon protocol: manifest, catalog, meta, stream, `AddonClient`, size and seeders parsing | `heronite-watch-core` | account, datastore, endpoints, Cinemeta constants |
 | `heronite-watch-player` | mpv discovery, argument construction, IPC supervision, `PlaybackOutcome`, stream-origin policy | `heronite-data` (`proc`), url, serde_json, anyhow | protocol or provider types |
@@ -49,6 +51,7 @@ app
 | `heronite-watch-catalogs` | the catalog sources' registry (`sources`, `enabled`, `find`) and Cinemeta's catalogue | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, GPUI |
 | `heronite-watch-stats` | the recap's numbers: sessions in, days/titles/totals out, over a week, month, year or everything (pure, no files, no GPUI) | `heronite-watch-state` (the session record), chrono | the app's screens, network, providers |
 | `heronite-watch-tmdb` | TMDB discover, genres and external ids as a catalog source; the key from the credential store; the sign-in (request token → session, no password) | `heronite-watch-core` | accounts, playback, files, GPUI |
+| `heronite-watch-simkl` | the client id from the build or the credential store; the AUTH V2 device/PIN flow (device code → poll → tokens); the tokens' shape | `heronite-watch-core` | titles, streams, catalogs, playback, GPUI |
 
 A provider crate takes everything it needs from `Ctx`; it never opens a file or
 spawns a process. That is what keeps a provider testable on fixtures alone.
@@ -142,7 +145,9 @@ the app uses.
 |---|---|
 | `heronite_watch` | `available`, `Endpoints`, `UreqTransport`, `AuthKey`, `Transport`, `Result` |
 | `heronite_watch::account` | `create_link`, `read_link`, `LinkOffer`, `LinkPoll` |
-| `heronite_watch::store` | `read_auth`, `write_auth`, `clear_auth`, `read_tmdb_key`, `write_tmdb_key`, `clear_tmdb_key` |
+| `heronite_watch::store` | `read_auth`, `write_auth`, `clear_auth`, `read_tmdb_key`, `write_tmdb_key`, `clear_tmdb_key`, `read_simkl_client_id`, `write_simkl_client_id`, `clear_simkl_client_id` |
+| `heronite_watch::simkl_sign_in` | `start`, `poll`, `session`, `sign_out`, `configured`, `adopt_client_id_file`, `key_rejected`, `DeviceCode`, `Step`, `Session`, `Tokens`, `SLOW_DOWN` |
+| `heronite_watch::registry` | `providers`, `find`, `ACCOUNTS` (a provider that is only an account, e.g. Simkl) |
 | `heronite_watch::collection` | `ROOT`, `library` (the providers' account rails, then one browsing rail per enabled catalogue source and kind) |
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
 | `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider) |

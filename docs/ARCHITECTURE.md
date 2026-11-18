@@ -93,7 +93,8 @@ app (bin heronite-rs) ── GPUI UI, desktop integration
  │                      Library projection and playback orchestration
  │                      (fork-owned; docs/WATCH-CRATES.md)
  │                                        → data, watch-core, watch-state,
- │                                          watch-player, watch-stremio
+ │                                          watch-player, watch-stremio,
+ │                                          watch-simkl, watch-tmdb
  ├─ heronite-watch-core Watch's domain: item and stream types, the
  │                      provider, catalog-source and metadata-source
  │                      contracts, transport, credentials, progress policy
@@ -109,6 +110,8 @@ app (bin heronite-rs) ── GPUI UI, desktop integration
  │                                                watch-tmdb
  ├─ heronite-watch-tmdb TMDB discover as a catalog source
  │                                                          → watch-core
+ ├─ heronite-watch-simkl Simkl's account: the application's client id
+ │                      and the AUTH V2 device/PIN sign-in  → watch-core
  ├─ heronite-watch-player mpv discovery, arguments, IPC supervision
  │                                                              → data
  ├─ heronite-watch-state local watch files and the Heroic-format
