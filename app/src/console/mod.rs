@@ -178,6 +178,15 @@ impl Layer {
         self.sub = None;
     }
 
+    /// Closes the layer only when it is showing `view`. A background task that
+    /// finishes a sign-in must not dismiss whatever the person opened meanwhile
+    /// (a keyboard, a picker) — only its own panel.
+    pub fn close_with<V: 'static>(&mut self, view: &Entity<V>) {
+        if self.overlay.as_ref().is_some_and(|overlay| overlay.view.entity_id() == view.entity_id()) {
+            self.close();
+        }
+    }
+
     pub fn is_open(&self) -> bool {
         self.overlay.is_some()
     }

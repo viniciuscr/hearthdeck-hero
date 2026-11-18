@@ -1,8 +1,9 @@
-//! A QR code as an overlay, for console mode: a phone scans it off the screen.
+//! A pairing code and its QR, as an overlay: a phone scans it off the screen.
 //!
-//! The same element the desktop draws (`qr::qr_code`, divs of modules) in a panel
-//! over the settings rows. Bigger modules than the card's, because a couch is
-//! further from the screen than a desk.
+//! The same element the desktop card draws (`qr::qr_code`, divs of modules) in a
+//! panel over the settings rows, because a couch is further from the screen than
+//! a desk. The code sits at the top, where it is easiest to read out; the wait
+//! for the approval sits under the code, where the eyes already are.
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -21,12 +22,17 @@ pub enum QrEvent {
 
 pub struct QrOverlay {
     title: SharedString,
+    /// What the person types on the phone, when the flow has a code: Stremio's
+    /// four letters, Simkl's eight. `None` for a flow that only has a page
+    /// (TMDB's approval).
+    code: Option<SharedString>,
     url: String,
 }
 
 impl QrOverlay {
-    pub fn new(title: &str, url: &str) -> Self {
-        Self { title: title.to_string().into(), url: url.to_owned() }
+    pub fn new(title: &str, code: Option<&str>, url: &str) -> Self {
+        let code = code.map(str::trim).filter(|code| !code.is_empty()).map(SharedString::from);
+        Self { title: title.to_string().into(), code, url: url.to_owned() }
     }
 }
 
@@ -40,6 +46,9 @@ impl Render for QrOverlay {
             Some(code) => code.into_any_element(),
             None => div().child(kit::body_text(tr!("That address is too long to be a QR code."))).into_any_element(),
         };
+        let pairing = self.code.as_ref().map(|code| {
+            div().flex().flex_col().items_center().gap(u(2.)).child(kit::kicker(tr!("Pairing code"))).child(kit::title(code.clone(), 40.))
+        });
         div().absolute().inset_0().child(kit::scrim()).child(
             div().absolute().inset_0().flex().items_center().justify_center().child(kit::panel_in(
                 "watch-qr-panel",
@@ -56,8 +65,9 @@ impl Render for QrOverlay {
                     .border_color(kit::ink(0.1))
                     .shadow(kit::shadow(0.5, 18., 48.))
                     .child(kit::title(self.title.clone(), 24.))
+                    .children(pairing)
                     .child(body)
-                    .child(kit::body_text(tr!("Scan it with a phone: the app follows when you come back.")))
+                    .child(kit::body_text(tr!("Waiting for the approval: this closes on its own once you approve it.")))
                     .child(div().text_size(u(12.)).text_color(theme::text_muted()).child(SharedString::from(self.url.clone()))),
             )),
         )

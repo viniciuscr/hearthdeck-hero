@@ -13,22 +13,30 @@ the rules that apply while building it.
 > for once by `scripts/bootstrap.sh` into `~/.config/hearthdeck/simkl-client-id`
 > (0600) and adopted into the credential store when Settings opens, or compiled
 > in through `HEARTHDECK_SIMKL_CLIENT_ID` — and the person's part is the
-> **device/PIN flow** of AUTH V2, the flow a TV can actually do: **Connect
-> Simkl** asks `POST /oauth2/device` for a code, draws
-> `https://simkl.com/pin?user_code=…` as a QR with the eight-character code
-> underneath, and polls `POST /oauth2/token` every interval Simkl returned (five
-> seconds), adding five seconds when it answers `slow_down`, until the approval
-> lands or the code's fifteen minutes are gone. Simkl records no refusal, so
-> that deadline is the only way out. The tokens (`accessToken`, `refreshToken`,
-> `scope`, `expiresAt`) are kept in `simkl-auth.json` (0600) beside the client
-> id; **sign out** drops them and keeps the id, **forget** drops both from the
-> credential store (a `simkl-client-id` file the bootstrap wrote is adopted again
-> on the next start, exactly like TMDB's key file). Nothing
-> consumes the tokens yet — the calls they unlock are the next slice — so a
-> failed sign-in degrades to "not signed in" exactly like TMDB's. The same
-> revision finishes what the TMDB card started: **Stremio's link code is polled
-> every five seconds too**, so scanning the code and walking away is the whole
-> flow; the Check button stays as the retry for a poll that gave up.
+> **device/PIN flow** of AUTH V2, the flow a TV can actually do. **One button,
+> and it does the whole flow**: **Connect Simkl** asks `POST /oauth2/device` for a
+> code and opens a **pairing panel** over the settings — the eight-character code
+> at the top, `https://simkl.com/pin?user_code=…` as a QR under it, and the wait
+> under that — so the menu carries no rows of its own for the code or the wait.
+> While the panel is up the app polls `POST /oauth2/token` every interval Simkl
+> returned (five seconds), adding five seconds when it answers `slow_down`, and
+> **the approval closes the panel by itself**; the code's fifteen minutes end the
+> wait (Simkl records no refusal, so that deadline is the only other way out).
+> A network fault does not end it — the person is mid-scan — and only a refused
+> client id does, with the sentence that says so. The tokens (`accessToken`,
+> `refreshToken`, `scope`, `expiresAt`) are kept in `simkl-auth.json` (0600)
+> beside the client id; **sign out** drops them and keeps the id, **forget**
+> drops both from the credential store (a `simkl-client-id` file the bootstrap
+> wrote is adopted again on the next start, exactly like TMDB's key file).
+> Nothing consumes the tokens yet — the calls they unlock are the next slice — so
+> a failed sign-in degrades to "not signed in" exactly like TMDB's.
+>
+> The same shape applies to the other two: **Stremio's link code** and **TMDB's
+> approval page** also open the panel from the one button, are polled every five
+> seconds, and close it when the phone approves. The old "Check" / "I approved
+> it" / "Show the code as a QR" buttons and rows are gone: the poll rides out a
+> network fault on its own. The panel closes with `Layer::close_with`, so a task
+> that finishes later never dismisses a keyboard the person opened meanwhile.
 >
 > The TMDB step of `scripts/bootstrap.sh` was half-implemented and is now whole:
 > the plan lists it outside `--lockdown`, and the key and the optional v4 read

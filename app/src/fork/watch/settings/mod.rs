@@ -497,15 +497,6 @@ fn stremio_account(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) -> AnyE
     if linked {
         actions =
             actions.child(action_button("watch-unlink", ButtonKind::Ghost, tr!("Unlink"), !busy, cx.listener(|d, _, _, cx| unlink(d, cx))));
-    } else if d.watch.offer.is_some() {
-        // The check is automatic; this is the manual retry for a poll that gave up.
-        actions = actions.child(action_button(
-            "watch-check",
-            ButtonKind::Glass,
-            tr!("Check"),
-            !busy,
-            cx.listener(|d, _, _, cx| check_link(d, cx)),
-        ));
     } else {
         actions = actions.child(action_button(
             "watch-link",
@@ -608,33 +599,13 @@ fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
             true,
             cx.listener(|d, _, _, cx| sign_out_tmdb(d, cx)),
         ));
-    } else if d.watch.tmdb_pending.is_some() {
-        buttons = buttons.child(action_button(
-            "watch-tmdb-again",
-            ButtonKind::Glass,
-            tr!("Open the page again"),
-            true,
-            cx.listener(|d, _, _, cx| {
-                if let Some(token) = d.watch.tmdb_pending.clone() {
-                    open_approval(d, &token);
-                }
-                cx.notify();
-            }),
-        ));
-        buttons = buttons.child(action_button(
-            "watch-tmdb-approved",
-            ButtonKind::Primary,
-            tr!("I approved it"),
-            true,
-            cx.listener(|d, _, _, cx| check_tmdb_sign_in(d, cx)),
-        ));
     } else {
         buttons = buttons.child(action_button(
             "watch-tmdb-connect",
             ButtonKind::Primary,
             tr!("Connect TMDB"),
             d.watch.tmdb_ready,
-            cx.listener(|d, _, window, cx| connect_tmdb(d, window, cx)),
+            cx.listener(|d, _, _, cx| connect_tmdb(d, cx)),
         ));
     }
     if d.watch.tmdb_username.is_some() {
@@ -649,9 +620,9 @@ fn tmdb_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
     buttons
 }
 
-/// The one way in: ask for the key when there is none (the keyboard, or the
-/// on-screen one in console mode), then send the person to TMDB's approval page.
-fn connect_tmdb(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) {
+/// The one way in: the app's key has to be there (the bootstrap sets it), then
+/// TMDB hands out a token and the browser and the pairing panel take over.
+fn connect_tmdb(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     d.watch.notice = None;
     if !d.watch.tmdb_ready {
         d.watch.notice =
@@ -662,18 +633,38 @@ fn connect_tmdb(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<Set
     start_tmdb_sign_in(d, cx);
 }
 
-/// Shows `url` as a QR code over the settings, for a phone to scan: console mode
-/// has no other way to draw one, and a phone approves the link without the host's
-/// browser.
-fn open_qr(d: &mut SettingsPage, title: &str, url: &str, window: &mut Window, cx: &mut Context<SettingsPage>) {
-    let overlay = cx.new(|_| qr_overlay::QrOverlay::new(title, url));
-    let sub = cx.subscribe_in(&overlay, window, |d, _, event: &qr_overlay::QrEvent, _, cx| {
+/// The pairing panel the one button opens: the code at the top, the QR under it
+/// and the wait under that. Console mode draws the layer; the desktop card has no
+/// layer to draw, so it keeps its own inline code and QR and this returns `None`.
+///
+/// The panel is returned so the poll that finishes the sign-in can take it away
+/// itself — and only it (`Layer::close_with`), never a keyboard opened meanwhile.
+fn open_pairing(
+    d: &mut SettingsPage,
+    title: &str,
+    code: Option<&str>,
+    url: &str,
+    cx: &mut Context<SettingsPage>,
+) -> Option<Entity<qr_overlay::QrOverlay>> {
+    if !crate::console::active() {
+        return None;
+    }
+    let overlay = cx.new(|_| qr_overlay::QrOverlay::new(title, code, url));
+    let sub = cx.subscribe(&overlay, |d, _, event: &qr_overlay::QrEvent, cx| {
         if *event == qr_overlay::QrEvent::Close {
             d.layer_mut().close();
             cx.notify();
         }
     });
     d.layer_mut().open(&overlay, sub);
+    cx.notify();
+    Some(overlay)
+}
+
+/// Takes the pairing panel away once the approval lands (or the code dies).
+fn close_pairing(d: &mut SettingsPage, overlay: Option<&Entity<qr_overlay::QrOverlay>>, cx: &mut Context<SettingsPage>) {
+    let Some(overlay) = overlay else { return };
+    d.layer_mut().close_with(overlay);
     cx.notify();
 }
 
@@ -702,12 +693,15 @@ fn start_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         let started = cx.background_spawn(async move { heronite_watch::tmdb_sign_in::start(&app) }).await;
         this.update(cx, |d, cx| match started {
             Ok(token) => {
+                let url = heronite_watch::tmdb_sign_in::approve_url(&token);
                 d.watch.tmdb_pending = Some(token.clone());
+                // The browser opens for a desk; the TV gets the same page as a QR.
                 open_approval(d, &token);
+                let overlay = open_pairing(d, tr!("Approve TMDB"), None, &url, cx);
                 // TMDB only says "approved" through step 3, and a phone approves on
                 // a different device: ask again every few seconds instead of waiting
                 // for a button. `finish` answers `Pending` until the person is done.
-                wait_for_approval(d, token, cx);
+                wait_for_approval(d, token, overlay, cx);
             }
             Err(error) => {
                 log::warn!("TMDB sign-in did not start: {error:#}");
@@ -720,20 +714,26 @@ fn start_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     cx.notify();
 }
 
-/// Polls step 3 until the token is approved, the person gives up (`finish` says
-/// so, or the page is left), or ten minutes pass. The phone approves; the app
-/// notices on its own.
-fn wait_for_approval(d: &mut SettingsPage, token: String, cx: &mut Context<SettingsPage>) {
+/// Polls step 3 until the token is approved or ten minutes pass. The phone
+/// approves, the app notices on its own, and the panel goes away with it.
+///
+/// A pending token is a step; a bad key is not, and neither is a network fault
+/// worth ending the wait over — the person is mid-scan, so keep asking.
+fn wait_for_approval(d: &mut SettingsPage, token: String, overlay: Option<Entity<qr_overlay::QrOverlay>>, cx: &mut Context<SettingsPage>) {
     let app = d.ctx.app.clone();
     cx.spawn(async move |this, cx| {
         for _ in 0..120 {
             cx.background_spawn(async { std::thread::sleep(std::time::Duration::from_secs(5)) }).await;
+            // Another press may have started over.
+            let still_waiting = this.update(cx, |d, _| d.watch.tmdb_pending.as_deref() == Some(token.as_str())).unwrap_or(false);
+            if !still_waiting {
+                return;
+            }
             let (app, asked) = (app.clone(), token.clone());
             let step = cx.background_spawn(async move { heronite_watch::tmdb_sign_in::finish(&app, &asked) }).await;
             match step {
                 Ok(heronite_watch::tmdb_sign_in::Step::Approved(session)) => {
                     this.update(cx, |d, cx| {
-                        // Another press may have finished it already.
                         if d.watch.tmdb_pending.as_deref() != Some(token.as_str()) {
                             return;
                         }
@@ -741,6 +741,7 @@ fn wait_for_approval(d: &mut SettingsPage, token: String, cx: &mut Context<Setti
                         d.watch.tmdb_username = Some(SharedString::from(session.username));
                         d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
                         d.watch.notice = None;
+                        close_pairing(d, overlay.as_ref(), cx);
                         cx.emit(crate::pages::PageEvent::LibraryChanged);
                         cx.notify();
                     })
@@ -749,40 +750,24 @@ fn wait_for_approval(d: &mut SettingsPage, token: String, cx: &mut Context<Setti
                 }
                 // Not approved yet: keep asking.
                 Ok(heronite_watch::tmdb_sign_in::Step::Pending) => {}
-                Err(error) => {
-                    log::debug!("TMDB sign-in: {error:#}");
+                Err(error) if heronite_watch::tmdb_sign_in::key_rejected(&error) => {
+                    // The key was reset: asking again cannot help.
+                    log::warn!("TMDB sign-in: {error:#}");
+                    this.update(cx, |d, cx| {
+                        d.watch.tmdb_pending = None;
+                        d.watch.notice = Some(format!("{error:#}").into());
+                        close_pairing(d, overlay.as_ref(), cx);
+                        cx.notify();
+                    })
+                    .ok();
                     return;
                 }
-            }
-            // The panel was closed, or another window finished it.
-            let still_waiting = this.update(cx, |d, _| d.watch.tmdb_pending.as_deref() == Some(token.as_str())).unwrap_or(false);
-            if !still_waiting {
-                return;
+                Err(error) => log::debug!("TMDB sign-in: {error:#}"),
             }
         }
+        this.update(cx, |d, cx| close_pairing(d, overlay.as_ref(), cx)).ok();
     })
     .detach();
-}
-
-/// Exchanges the approved token for a session; pending while TMDB has not seen
-/// the approval.
-fn check_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
-    d.watch.notice = None;
-    let Some(token) = d.watch.tmdb_pending.clone() else { return };
-    match heronite_watch::tmdb_sign_in::finish(&d.ctx.app, &token) {
-        Ok(heronite_watch::tmdb_sign_in::Step::Approved(session)) => {
-            d.watch.tmdb_pending = None;
-            d.watch.tmdb_username = Some(SharedString::from(session.username));
-            // The account's own rails exist only while signed in.
-            d.watch.collections = heronite_watch::collections::descriptors(&d.ctx.app);
-            cx.emit(crate::pages::PageEvent::LibraryChanged);
-        }
-        Ok(heronite_watch::tmdb_sign_in::Step::Pending) => {
-            d.watch.notice = Some(tr!("TMDB has not seen the approval yet: approve it, then press again.").into());
-        }
-        Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
-    }
-    cx.notify();
 }
 
 /// Forgets the session (the key stays).
@@ -862,7 +847,7 @@ fn simkl_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
             true,
             cx.listener(|d, _, _, cx| clear_simkl(d, cx)),
         ));
-    } else if d.watch.simkl_pending.is_none() {
+    } else {
         buttons = buttons.child(action_button(
             "watch-simkl-connect",
             ButtonKind::Primary,
@@ -898,9 +883,12 @@ fn start_simkl_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
             Ok(code) => {
                 d.watch.simkl_pending = Some(code.clone());
                 d.watch.notice = None;
+                // The pairing panel: the code to type, the QR to scan, and the
+                // wait under it. One button did all three.
+                let overlay = open_pairing(d, tr!("Connect Simkl"), Some(&code.user_code), &code.verification_url, cx);
                 // The phone approves on another device: ask again every interval
                 // instead of waiting for a button.
-                wait_for_simkl(d, code, cx);
+                wait_for_simkl(d, code, overlay, cx);
             }
             Err(error) => {
                 log::warn!("Simkl sign-in did not start: {error:#}");
@@ -915,8 +903,13 @@ fn start_simkl_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
 
 /// Polls until the code is approved, the code expires, or another attempt
 /// replaces this one. Simkl records no refusal, so the code's own lifetime is
-/// what ends the wait.
-fn wait_for_simkl(d: &mut SettingsPage, code: heronite_watch::simkl_sign_in::DeviceCode, cx: &mut Context<SettingsPage>) {
+/// what ends the wait — and the panel goes away with either end.
+fn wait_for_simkl(
+    d: &mut SettingsPage,
+    code: heronite_watch::simkl_sign_in::DeviceCode,
+    overlay: Option<Entity<qr_overlay::QrOverlay>>,
+    cx: &mut Context<SettingsPage>,
+) {
     let app = d.ctx.app.clone();
     cx.spawn(async move |this, cx| {
         let mut interval = code.interval_secs.max(1);
@@ -935,6 +928,7 @@ fn wait_for_simkl(d: &mut SettingsPage, code: heronite_watch::simkl_sign_in::Dev
                 this.update(cx, |d, cx| {
                     d.watch.simkl_pending = None;
                     d.watch.notice = Some(tr!("Simkl expired the code: connect again.").into());
+                    close_pairing(d, overlay.as_ref(), cx);
                     cx.notify();
                 })
                 .ok();
@@ -952,6 +946,7 @@ fn wait_for_simkl(d: &mut SettingsPage, code: heronite_watch::simkl_sign_in::Dev
                         d.watch.simkl_pending = None;
                         d.watch.simkl_signed_in = true;
                         d.watch.notice = None;
+                        close_pairing(d, overlay.as_ref(), cx);
                         cx.notify();
                     })
                     .ok();
@@ -961,16 +956,20 @@ fn wait_for_simkl(d: &mut SettingsPage, code: heronite_watch::simkl_sign_in::Dev
                 Ok(heronite_watch::simkl_sign_in::Step::SlowDown) => interval += heronite_watch::simkl_sign_in::SLOW_DOWN,
                 // Not approved yet: keep asking.
                 Ok(heronite_watch::simkl_sign_in::Step::Pending) => {}
-                Err(error) => {
-                    log::debug!("Simkl sign-in: {error:#}");
+                // A refused client id will not get better by asking again; a
+                // network fault might, and the person is mid-approval.
+                Err(error) if heronite_watch::simkl_sign_in::key_rejected(&error) => {
+                    log::warn!("Simkl sign-in: {error:#}");
                     this.update(cx, |d, cx| {
                         d.watch.simkl_pending = None;
                         d.watch.notice = Some(format!("{error:#}").into());
+                        close_pairing(d, overlay.as_ref(), cx);
                         cx.notify();
                     })
                     .ok();
                     return;
                 }
+                Err(error) => log::debug!("Simkl sign-in: {error:#}"),
             }
         }
     })
@@ -1071,8 +1070,10 @@ fn start_link(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
             match result {
                 Ok(offer) => {
                     d.watch.offer = Some(offer.clone());
+                    // The one button opened the code, the QR and the wait.
+                    let overlay = open_pairing(d, tr!("Link Stremio"), Some(&offer.code), &offer.link, cx);
                     // The phone scans the code: the app notices on its own.
-                    wait_for_link(offer, cx);
+                    wait_for_link(offer, overlay, cx);
                 }
                 Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
             }
@@ -1085,8 +1086,9 @@ fn start_link(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
 
 /// Polls the link code every five seconds until the account is linked, another
 /// flow replaces this one, or ten minutes pass — the person scans on a phone and
-/// dismisses the code, so asking again is the app's job, not a button's.
-fn wait_for_link(offer: LinkOffer, cx: &mut Context<SettingsPage>) {
+/// dismisses the code, so asking again is the app's job, not a button's. The
+/// pairing panel goes away the moment the account is linked.
+fn wait_for_link(offer: LinkOffer, overlay: Option<Entity<qr_overlay::QrOverlay>>, cx: &mut Context<SettingsPage>) {
     let link = Endpoints::default().link;
     let code = offer.code;
     cx.spawn(async move |this, cx| {
@@ -1111,6 +1113,7 @@ fn wait_for_link(offer: LinkOffer, cx: &mut Context<SettingsPage>) {
                                 d.watch.linked = true;
                                 d.watch.offer = None;
                                 d.watch.notice = None;
+                                close_pairing(d, overlay.as_ref(), cx);
                             }
                             Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
                         }
@@ -1119,47 +1122,14 @@ fn wait_for_link(offer: LinkOffer, cx: &mut Context<SettingsPage>) {
                     .ok();
                     return;
                 }
+                // Not scanned yet. A network fault is not the end either: the
+                // person may be mid-scan, and the code lives for ten minutes.
                 Ok(LinkPoll::Pending) => {}
-                // A network fault ends the poll: the manual check stays available.
-                Err(error) => {
-                    log::debug!("Stremio link: {error:#}");
-                    return;
-                }
+                Err(error) => log::debug!("Stremio link: {error:#}"),
             }
         }
-    })
-    .detach();
-}
-
-fn check_link(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
-    let Some(offer) = d.watch.offer.clone() else { return };
-    if d.watch.busy {
-        return;
-    }
-    d.watch.busy = true;
-    d.watch.notice = None;
-    cx.notify();
-    let link = Endpoints::default().link;
-    let code = offer.code;
-    cx.spawn(async move |this, cx| {
-        let result = cx.background_spawn(async move { read_link(&UreqTransport::new(), &link, &code) }).await;
-        this.update(cx, |d, cx| {
-            d.watch.busy = false;
-            match result {
-                Ok(LinkPoll::Linked(key)) => match heronite_watch::store::write_auth(&d.ctx.app, &key) {
-                    Ok(()) => {
-                        d.watch.linked = true;
-                        d.watch.offer = None;
-                        d.watch.notice = None;
-                    }
-                    Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
-                },
-                Ok(LinkPoll::Pending) => d.watch.notice = Some(tr!("Not linked yet").into()),
-                Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
-            }
-            cx.notify();
-        })
-        .ok();
+        // Ten minutes gone: the code died with them, so take the panel away.
+        this.update(cx, |d, cx| close_pairing(d, overlay.as_ref(), cx)).ok();
     })
     .detach();
 }
@@ -1209,11 +1179,6 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                 rows.push(Row::info("watch-account", tr!("Account"), if d.watch.linked { tr!("Linked") } else { tr!("Not linked") }));
                 if d.watch.linked {
                     rows.push(Row::action("watch-unlink", tr!("Unlink")));
-                } else if let Some(offer) = &d.watch.offer {
-                    rows.push(Row::info("watch-code", tr!("Code {code}", code = offer.code.clone()), offer.link.clone()));
-                    // A phone scans this; the console can only draw the code as text.
-                    rows.push(Row::action("watch-qr", tr!("Show the code as a QR")));
-                    rows.push(Row::action("watch-check", tr!("Check")));
                 } else {
                     rows.push(Row::action("watch-link", tr!("Link with a code")));
                 }
@@ -1231,16 +1196,13 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                             .desc(tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.")),
                     );
                     rows.push(Row::action("watch-tmdb-sign-out", tr!("Sign out")));
-                } else if d.watch.tmdb_pending.is_some() {
-                    rows.push(Row::info("watch-tmdb-account", tr!("Account"), tr!("Waiting for the approval")));
-                    rows.push(Row::action("watch-tmdb-qr", tr!("Approve with your phone (QR)")));
-                    rows.push(Row::action("watch-tmdb-again", tr!("Open the page again")));
-                    rows.push(Row::action("watch-tmdb-approved", tr!("I approved it")));
                 } else {
+                    // One row: the button opens the approval panel and follows it.
                     // The hint under a focused row is where a sentence fits — and
                     // where a failure has to show, since a console row cannot.
                     let hint: String = match &d.watch.notice {
                         Some(notice) => notice.to_string(),
+                        None if d.watch.tmdb_pending.is_some() => tr!("Waiting for the approval: the code is on screen.").to_string(),
                         None if d.watch.tmdb_ready => {
                             tr!("This product uses the TMDB API but is not endorsed or certified by TMDB.").to_string()
                         }
@@ -1260,19 +1222,12 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                     );
                     rows.push(Row::action("watch-simkl-sign-out", tr!("Sign out")));
                     rows.push(Row::action("watch-simkl-forget", tr!("Forget Simkl")));
-                } else if let Some(code) = &d.watch.simkl_pending {
-                    rows.push(Row::info(
-                        "watch-simkl-code",
-                        tr!("Code {code}", code = code.user_code.clone()),
-                        code.verification_url.clone(),
-                    ));
-                    rows.push(Row::action("watch-simkl-qr", tr!("Show the code as a QR")));
-                    rows.push(Row::info("watch-simkl-waiting", tr!("Waiting for the approval"), tr!("Checked automatically")));
                 } else {
-                    // The hint under a focused row is where a sentence fits — and
-                    // where a failure has to show, since a console row cannot.
+                    // One row, like TMDB's: the panel carries the code and the
+                    // wait, so the menu needs no rows of its own for them.
                     let hint: String = match &d.watch.notice {
                         Some(notice) => notice.to_string(),
+                        None if d.watch.simkl_pending.is_some() => tr!("Waiting for the approval: the code is on screen.").to_string(),
                         None if d.watch.simkl_ready => {
                             tr!("Simkl keeps what you watch in step across your devices.").to_string()
                         }
@@ -1290,41 +1245,17 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
 }
 
 /// The Providers page's rows: the switches, the account and the TMDB flow.
-pub(crate) fn provider_apply(d: &mut SettingsPage, outcome: Outcome, window: &mut Window, cx: &mut Context<SettingsPage>) {
+pub(crate) fn provider_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
     match outcome {
         Outcome::Activate(id) => match id.as_ref() {
             "watch-link" => start_link(d, cx),
-            "watch-check" => check_link(d, cx),
             "watch-unlink" => unlink(d, cx),
-            "watch-tmdb-connect" => connect_tmdb(d, window, cx),
-            "watch-qr" => {
-                if let Some(offer) = d.watch.offer.clone() {
-                    open_qr(d, tr!("Link Stremio"), &offer.link, window, cx);
-                }
-            }
-            "watch-tmdb-qr" => {
-                if let Some(token) = d.watch.tmdb_pending.clone() {
-                    let url = heronite_watch::tmdb_sign_in::approve_url(&token);
-                    open_qr(d, tr!("Approve TMDB"), &url, window, cx);
-                }
-            }
+            "watch-tmdb-connect" => connect_tmdb(d, cx),
             "watch-tmdb-forget" => clear_tmdb_key(d, cx),
-            "watch-tmdb-again" => {
-                if let Some(token) = d.watch.tmdb_pending.clone() {
-                    open_approval(d, &token);
-                }
-                cx.notify();
-            }
-            "watch-tmdb-approved" => check_tmdb_sign_in(d, cx),
             "watch-tmdb-sign-out" => sign_out_tmdb(d, cx),
             "watch-simkl-connect" => connect_simkl(d, cx),
             "watch-simkl-forget" => clear_simkl(d, cx),
             "watch-simkl-sign-out" => sign_out_simkl(d, cx),
-            "watch-simkl-qr" => {
-                if let Some(code) = d.watch.simkl_pending.clone() {
-                    open_qr(d, tr!("Approve Simkl"), &code.verification_url, window, cx);
-                }
-            }
             _ => {}
         },
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-catalog:") => {

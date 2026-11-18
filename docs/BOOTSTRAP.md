@@ -387,10 +387,10 @@ and the person's part is a code approved from the TV:
   Settings → Watch → Providers says the client id is missing and refuses to
   pretend a Connect would work.
 - **How the person signs in**: Settings → Watch → Providers → **Connect Simkl**
-  asks Simkl for a device code and draws `https://simkl.com/pin?user_code=…` as a
-  QR code, with the eight-character code underneath. The phone approves it and
-  the card turns into "Signed in to Simkl" on its own: the app polls every
-  interval Simkl returns (five seconds), slows down when asked to, and gives up
-  when the code's fifteen minutes are gone. The tokens are kept in
-  `~/.config/hearthdeck/simkl-auth.json` (0600).
+  is the only button, and it opens a pairing panel: the eight-character code at
+  the top, `https://simkl.com/pin?user_code=…` as a QR under it, and the wait
+  under that. The phone approves it and the panel closes on its own — the app
+  polls every interval Simkl returns (five seconds), slows down when asked to,
+  rides out a network fault, and gives up when the code's fifteen minutes are
+  gone. The tokens are kept in `~/.config/hearthdeck/simkl-auth.json` (0600).
 - **Skipping it**: answer empty. Simkl stays off; everything else works.
