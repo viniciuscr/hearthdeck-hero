@@ -392,47 +392,49 @@ impl CollectionView {
             }
             DetailTab::Trailer => {
                 let trailers = details.as_ref().map(|details| details.trailers.as_slice()).unwrap_or(&[]);
-                let mut card = div().id("console-watch-trailer").size_full().min_h_0().flex().flex_col().gap(u(18.)).overflow_hidden();
+                let mut card = div().id("console-watch-trailer").size_full().min_h_0().flex().flex_col().gap(u(16.)).overflow_hidden();
                 if let Some(trailer) = trailers.first() {
-                    // The banner takes the room the card has left, filled: the
-                    // title's backdrop (wide) before the trailer's own still, and
-                    // cropped either way, so a vertical trailer never shows as a
-                    // vertical picture.
-                    let backdrop = details.as_ref().and_then(|details| details.background.as_deref());
-                    let still = self.trailer_banner(backdrop, trailer, s);
-                    if let Some(still) = still {
-                        card = card.child(
-                            div()
-                                .flex_1()
-                                .min_h_0()
-                                .w_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(u(14.))
-                                .overflow_hidden()
-                                .bg(kit::ink(0.08))
-                                .children(Some(img(still).size_full().object_fit(ObjectFit::Cover))),
-                        );
-                    }
-                    card = card.child(kit::title(SharedString::from(trailer_title(trailer)), 30.).line_clamp(2));
-                    card = card.child(div().flex_none().child(kit::body_text(tr!("X plays it here, in the player."))));
-                    if trailers.len() > 1 {
-                        card = card.child(
-                            div()
-                                .flex_none()
-                                .text_size(u(14.))
-                                .text_color(theme::text_muted())
-                                .child(tr!("{n} more from the same source.", n = trailers.len() - 1)),
-                        );
-                    }
+                    // The frame a player would give it: black, the trailer's own
+                    // picture inside (whole, so a vertical Short sits pillarboxed),
+                    // and the play badge where a player puts it. X on the card
+                    // plays it in mpv — the hint below says so, and nothing else
+                    // does.
+                    let still = self.trailer_still(trailer, s);
+                    card = card.child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(u(16.))
+                            .overflow_hidden()
+                            .bg(theme::console_sidebar())
+                            .children(still.map(|still| img(still).size_full().object_fit(ObjectFit::Contain)))
+                            .child(
+                                div().absolute().inset_0().flex().items_center().justify_center().child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .size(u(84.))
+                                        .rounded_full()
+                                        .bg(kit::ink(0.36))
+                                        .child(crate::ui::icon(Icon::PlayArrow, u(42.), kit::strong())),
+                                ),
+                            ),
+                    );
+                    card = card.child(kit::title(SharedString::from(trailer_title(trailer)), 28.).line_clamp(1));
                     card = card.child(
                         div()
                             .flex_none()
-                            .text_size(u(12.))
-                            .text_color(theme::text_muted())
-                            .line_clamp(1)
-                            .child(SharedString::from(trailer.url.clone())),
+                            .flex()
+                            .items_center()
+                            .gap(u(8.))
+                            .child(kit::key_glyph(Btn::X))
+                            .child(div().text_size(u(13.)).text_color(theme::text_muted()).child(tr!("Play"))),
                     );
                 }
                 (2, card.into_any_element())
@@ -561,19 +563,15 @@ impl CollectionView {
         self.images.get_or_request(&id, || vec![chain], pw, ph, Variant::Cover, 200).map(ImageSource::Render)
     }
 
-    /// The trailer's banner: the title's own backdrop when the metadata has one
-    /// — it is wide by construction (a film's fanart is 16:9 or wider) — and the
-    /// trailer's still only when there is none. Either way it is cropped to the
-    /// box: a trailer can be a vertical Short, and a vertical picture is not a
-    /// banner.
-    fn trailer_banner(&mut self, backdrop: Option<&str>, trailer: &Trailer, scale: f32) -> Option<ImageSource> {
-        let mut urls: Vec<String> = backdrop.map(str::to_owned).into_iter().collect();
-        urls.extend(trailer.stills.iter().cloned());
-        let first = urls.first()?.clone();
+    /// The trailer's own picture, whole: the player's frame shows it the way mpv
+    /// would — a vertical Short pillarboxed, a wide trailer filling — never
+    /// cropped and never stretched. The sources list the wide sizes first.
+    fn trailer_still(&mut self, trailer: &Trailer, scale: f32) -> Option<ImageSource> {
+        let first = trailer.stills.first()?;
         let (pw, ph) = ((1280. * scale).round() as u32, (720. * scale).round() as u32);
-        let id: SharedString = format!("trailer-banner:{first}:{pw}x{ph}").into();
-        let chain: Vec<ImageRef> = urls.into_iter().map(ImageRef::Url).collect();
-        self.images.get_or_request(&id, || chain, pw, ph, Variant::Cover, 200).map(ImageSource::Render)
+        let id: SharedString = format!("trailer-still:{first}:{pw}x{ph}").into();
+        let chain: Vec<ImageRef> = trailer.stills.iter().map(|url| ImageRef::Url(url.clone())).collect();
+        self.images.get_or_request(&id, || chain, pw, ph, Variant::Fit { ink: None }, 200).map(ImageSource::Render)
     }
 
     pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
