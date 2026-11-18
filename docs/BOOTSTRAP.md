@@ -51,7 +51,8 @@ names, comma separated (`--only app,retroarch`, `--skip audio,mounts`).
 | `retroarch` | Downloads the libretro joypad profiles for Xbox and/or PlayStation pads into the account's config, and sets fullscreen in `retroarch.cfg` | `~/.config/retroarch/autoconfig/udev`, `~/.config/retroarch/retroarch.cfg` |
 | `audio` | Adds the account to `audio` and pins a sound card profile (asked once, or `--audio-card`/`--audio-profile`) so it is re-applied at every login | `~/.config/systemd/user/hearthdeck-audio-profile.service` |
 | `mounts` | Offers the unmounted filesystems it finds (or takes `--mount UUID=<uuid>=/path`) and adds them to fstab with `nofail` and `x-systemd.automount` | `/etc/fstab`, `/mnt/…` |
-| `tmdb` | Asks for this app's TMDB API key (free from themoviedb.org → Settings → API → Developer) and stores it 0600 in `~/.config/hearthdeck/tmdb-api-key`; skipped when the file already has one | `~/.config/hearthdeck/tmdb-api-key` |
+| `tmdb` | Asks for this app's TMDB API key (free from themoviedb.org → Settings → API → Developer) and the optional v4 read token, and stores both 0600; each is skipped when its file already has one | `~/.config/hearthdeck/tmdb-api-key`, `~/.config/hearthdeck/tmdb-access-token` |
+| `simkl` | Asks for this app's Simkl client id (free from simkl.com → Apps → Developers; an AUTH V2 *TV, devices & command line* app) and stores it 0600; skipped when the file already has one | `~/.config/hearthdeck/simkl-client-id` |
 | `session` | Disables display managers (asks first), turns `seatd` off, enables tty1 autologin and adds the kiosk block to the account's profile | `/etc/systemd/system/getty@tty1.service.d/autologin.conf`, `~/.bash_profile`, `~/.hushlogin` |
 | `lockdown` | Takes the console account out of `wheel`, but only when another account can still administer the machine | `/etc/group` |
 
@@ -360,4 +361,36 @@ step is where it is asked for:
   into its credential store the first time Settings opens, so no rebuild is
   needed; without it, Settings → Watch → Providers says the key is missing and
   refuses to pretend a Connect would work.
+- **The v4 read token is a second file**, `~/.config/hearthdeck/tmdb-access-token`
+  (the long value on the same TMDB page). It is optional and only powers the
+  account's "recommended for you" rails, so an empty answer skips it. The key and
+  the token are asked for independently: a re-run that finds the key already
+  there still asks for a missing token, and `--dry-run` reports both without
+  writing either.
 - **Skipping it**: answer empty. TMDB stays off; everything else works.
+
+## Simkl client id
+
+Simkl is a tracker: it keeps what you watch in step across devices. Like TMDB it
+authenticates every call with an *application* credential — a **client id** —
+and the person's part is a code approved from the TV:
+
+- **Where to get it**: log in to simkl.com → your account → **Apps →
+  Developers** and create an app of type **TV, devices & command line** (the
+  device/PIN flow needs an AUTH V2 app; see <https://api.simkl.org>). The
+  `client_id` it shows is public and safe to keep on the machine; create it once
+  per installation (or once for the fork, if the release carries it).
+- **Where it goes**: `~/.config/hearthdeck/simkl-client-id`, mode 0600, owned by
+  the console account. Nothing else is touched, and the id is never logged.
+- **Setting it later**: `scripts/bootstrap.sh --only simkl`. The app adopts the
+  file into its credential store the first time Settings opens; without it,
+  Settings → Watch → Providers says the client id is missing and refuses to
+  pretend a Connect would work.
+- **How the person signs in**: Settings → Watch → Providers → **Connect Simkl**
+  asks Simkl for a device code and draws `https://simkl.com/pin?user_code=…` as a
+  QR code, with the eight-character code underneath. The phone approves it and
+  the card turns into "Signed in to Simkl" on its own: the app polls every
+  interval Simkl returns (five seconds), slows down when asked to, and gives up
+  when the code's fifteen minutes are gone. The tokens are kept in
+  `~/.config/hearthdeck/simkl-auth.json` (0600).
+- **Skipping it**: answer empty. Simkl stays off; everything else works.

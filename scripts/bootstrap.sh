@@ -1752,46 +1752,46 @@ EOF
 
 step_tmdb() {
   section "TMDB"
-  local user="$HD_APP_USER" home file key
+  local user="$HD_APP_USER" home file token_file key token
   home=$(home_or_default "$user")
   file="$home/.config/$HD_DATA_DIR/tmdb-api-key"
+  token_file="$home/.config/$HD_DATA_DIR/tmdb-access-token"
+
   if [[ -s $file ]]; then
     info "the TMDB key is already set ($file)"
-    return 0
-  fi
-  say "  TMDB fills the film pages, its rails and the account's lists. Its API needs"
-  say "  this app's own key, free from TMDB: themoviedb.org → your account →"
-  say "  Settings → API → Request an API key → Developer. It is 32 characters,"
-  say "  and it is stored on this machine only (0600), never in the shell history."
-  if ! prompt "TMDB API key (empty to skip)" ""; then
-    warn "no terminal to ask for the key: TMDB stays off (Settings → Watch → Providers says so)"
-    return 0
-  fi
-  key=$(printf '%s' "$REPLY" | tr -d '[:space:]')
-  if [[ -z $key ]]; then
-    note "no key given: TMDB stays off; re-run with --only tmdb to set it later"
-    return 0
-  fi
-  if [[ ! $key =~ ^[0-9a-fA-F]{32}$ ]]; then
-    warn "that is not 32 hexadecimal characters; saving it anyway"
-  fi
-  if [[ $DRY_RUN -eq 1 ]]; then
-    say "  [dry-run] would write $file"
-    return 0
-  fi
-  # Written with printf, not `run`: the key must never reach the log.
-  install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$(dirname "$file")"
-  if printf '%s\n' "$key" >"$file"; then
-    chown "$user" "$file" && chmod 600 "$file"
-    info "the TMDB key is set for $user"
   else
-    warn "could not write $file"
+    say "  TMDB fills the film pages, its rails and the account's lists. Its API needs"
+    say "  this app's own key, free from TMDB: themoviedb.org → your account →"
+    say "  Settings → API → Request an API key → Developer. It is 32 characters,"
+    say "  and it is stored on this machine only (0600), never in the shell history."
+    if ! prompt "TMDB API key (empty to skip)" ""; then
+      warn "no terminal to ask for the key: TMDB stays off (Settings → Watch → Providers says so)"
+    else
+      key=$(printf '%s' "$REPLY" | tr -d '[:space:]')
+      if [[ -z $key ]]; then
+        note "no key given: TMDB stays off; re-run with --only tmdb to set it later"
+      elif [[ $DRY_RUN -eq 1 ]]; then
+        say "  [dry-run] would write $file"
+      else
+        if [[ ! $key =~ ^[0-9a-fA-F]{32}$ ]]; then
+          warn "that is not 32 hexadecimal characters; saving it anyway"
+        fi
+        # Written with printf, not `run`: the key must never reach the log.
+        install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$(dirname "$file")"
+        if printf '%s\n' "$key" >"$file"; then
+          chown "$user" "$file" && chmod 600 "$file"
+          info "the TMDB key is set for $user"
+        else
+          warn "could not write $file"
+        fi
+      fi
+    fi
   fi
 
   # The v4 read access token: what the account's own recommendations need. It is
   # the long value on the same TMDB page, and optional — without it the home page
-  # keeps TMDB's catalogue rails and no account rails.
-  local token_file="$home/.config/$HD_DATA_DIR/tmdb-access-token" token
+  # keeps TMDB's catalogue rails and no account rails. Asked for even when the
+  # key above was already there: the two files are set independently.
   if [[ -s $token_file ]]; then
     info "the TMDB read token is already set ($token_file)"
     return 0
@@ -1815,6 +1815,44 @@ step_tmdb() {
     info "the TMDB read token is set for $user"
   else
     warn "could not write $token_file"
+  fi
+}
+
+step_simkl() {
+  section "Simkl"
+  local user="$HD_APP_USER" home file client_id
+  home=$(home_or_default "$user")
+  file="$home/.config/$HD_DATA_DIR/simkl-client-id"
+  if [[ -s $file ]]; then
+    info "the Simkl client id is already set ($file)"
+    return 0
+  fi
+  say "  Simkl keeps what you watch in step across devices. Its API needs a client"
+  say "  id for this app: simkl.com → your account → Apps → Developers, and create"
+  say "  an app of the type \"TV, devices & command line\" (the PIN flow needs an"
+  say "  AUTH V2 app; see api.simkl.org). It is stored on this machine only (0600),"
+  say "  never in the shell history. The person signs in from the TV: Settings →"
+  say "  Watch → Providers shows a QR code for a phone to approve."
+  if ! prompt "Simkl client id (empty to skip)" ""; then
+    warn "no terminal to ask for the client id: Simkl stays off (Settings → Watch → Providers says so)"
+    return 0
+  fi
+  client_id=$(printf '%s' "$REPLY" | tr -d '[:space:]')
+  if [[ -z $client_id ]]; then
+    note "no client id given: Simkl stays off; re-run with --only simkl to set it later"
+    return 0
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "  [dry-run] would write $file"
+    return 0
+  fi
+  # Written with printf, not `run`: the client id must never reach the log.
+  install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$(dirname "$file")"
+  if printf '%s\n' "$client_id" >"$file"; then
+    chown "$user" "$file" && chmod 600 "$file"
+    info "the Simkl client id is set for $user"
+  else
+    warn "could not write $file"
   fi
 }
 
@@ -1904,7 +1942,7 @@ preflight() {
 build_step_list() {
   local step candidate keep
   SELECTED=()
-  for step in user packages aur ludusavi app tmdb mpv retroarch audio mounts session lockdown; do
+  for step in user packages aur ludusavi app tmdb simkl mpv retroarch audio mounts session lockdown; do
     keep=1
     if [[ ${#ONLY[@]} -gt 0 ]]; then
       local matched=0
@@ -1936,8 +1974,9 @@ plan() {
   say "  sound       the card profile you pick, re-applied at every login"
   say "  storage     ${#MOUNTS[@]} disk(s) given on the command line, or picked interactively"
   say "  session     tty1 autologin -> cage -> $HD_APP_BIN --console"
+  say "  tmdb        this app's TMDB API key, asked once (free from themoviedb.org), kept 0600"
+  say "  simkl       this app's Simkl client id, asked once (free from simkl.com), kept 0600"
   if [[ $LOCKDOWN -eq 1 ]]; then
-    say "  tmdb        this app's TMDB API key, asked once (free from themoviedb.org), kept 0600"
     say "  lockdown    $HD_APP_USER loses sudo at the end, if another admin exists"
   else
     say "  lockdown    asks before taking sudo away; --yes never does"
@@ -2042,7 +2081,7 @@ Options:
   -V, --version             print the bootstrap version
 
 Steps, in order:
-  user packages aur ludusavi app mpv retroarch audio mounts session lockdown
+  user packages aur ludusavi app tmdb simkl mpv retroarch audio mounts session lockdown
 
 Examples:
   sudo bash bootstrap.sh --dry-run
