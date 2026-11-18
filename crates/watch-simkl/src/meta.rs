@@ -246,7 +246,14 @@ fn trailers(record: &Record) -> Vec<Trailer> {
                 name: video.name.as_deref().map(str::trim).unwrap_or_default().to_owned(),
                 kind: video.kind.as_deref().map(str::trim).unwrap_or_default().to_owned(),
                 url: format!("https://www.youtube.com/watch?v={id}"),
-                thumbnail: Some(format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg")),
+                // The wide sizes only: `hqdefault` is 4:3 with black bars baked
+                // in, and cropping it is what made the banner look cut. Not every
+                // video has a `maxres`, so the small one that always exists backs
+                // it up.
+                stills: ["maxresdefault", "hq720", "mqdefault"]
+                    .iter()
+                    .map(|size| format!("https://i.ytimg.com/vi/{id}/{size}.jpg"))
+                    .collect(),
             })
         })
         .collect()
@@ -557,7 +564,15 @@ mod tests {
         assert_eq!(trailer.name, "Official Trailer");
         assert_eq!(trailer.kind, "trailer");
         assert_eq!(trailer.url, "https://www.youtube.com/watch?v=YoHD9XEInc0");
-        assert_eq!(trailer.thumbnail.as_deref(), Some("https://i.ytimg.com/vi/YoHD9XEInc0/hqdefault.jpg"));
+        assert_eq!(
+            trailer.stills,
+            [
+                "https://i.ytimg.com/vi/YoHD9XEInc0/maxresdefault.jpg",
+                "https://i.ytimg.com/vi/YoHD9XEInc0/hq720.jpg",
+                "https://i.ytimg.com/vi/YoHD9XEInc0/mqdefault.jpg",
+            ],
+            "wide sizes only, best first"
+        );
         assert_eq!(details.poster.as_deref(), Some("https://wsrv.nl/?url=https://simkl.in/posters/74/74415673dcdc9cdd_w.webp&q=90"));
         assert!(details.background.is_some());
         let facts: Vec<(&str, &str)> = details.extras.iter().map(|fact| (fact.id.as_str(), fact.value.as_str())).collect();

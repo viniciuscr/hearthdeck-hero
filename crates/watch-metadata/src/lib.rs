@@ -223,7 +223,7 @@ mod merge_tests {
                     name: "Official Trailer".into(),
                     kind: "trailer".into(),
                     url: "https://www.youtube.com/watch?v=abc".into(),
-                    thumbnail: Some("https://i.ytimg.com/vi/abc/hqdefault.jpg".into()),
+                    stills: vec!["https://i.ytimg.com/vi/abc/maxresdefault.jpg".into()],
                 }],
                 extras: vec![Fact { id: "network".into(), label: "Network".into(), value: "HBO".into(), source: "rich".into() }],
                 ..TitleDetails::default()

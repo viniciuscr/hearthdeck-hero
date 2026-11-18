@@ -4,6 +4,15 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-18 — a trailer's still is wide, and never cut.** The card
+> shows the trailer's picture whole: the sources offer **wide (16:9) stills, best
+> first** (`Trailer::stills`, e.g. YouTube's `maxresdefault` → `hq720` →
+> `mqdefault`), the loader takes the first that arrives with `Fit` (no crop) and
+> the page draws it with `Contain`. The old `hqdefault` is 4:3 with black bars
+> baked in, so cropping it to a banner cut the picture — that was the "broken"
+> look. The details cache schema is 3, so a week-old answer with the 4:3 URL is
+> fetched again.
+>
 > **Revision 2026-11-18 — Simkl metadata resolves through `/redirect`, and
 > nothing is on by default.** `/search/id` is Simkl's *search*, and AUTH V2 puts
 > search behind the account's token — a signed-out machine got **401** and the

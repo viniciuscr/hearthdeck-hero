@@ -229,9 +229,11 @@ pub struct Trailer {
     pub kind: String,
     /// The page to open: a full URL, whatever site the source uses.
     pub url: String,
-    /// A 16:9 still for the card, when the source has one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thumbnail: Option<String>,
+    /// Wide (16:9) stills for the card, best first. A source offers its best
+    /// frame and a smaller one that always exists; the page shows the first that
+    /// loads, whole — never a crop of a bar-baked 4:3 thumbnail.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stills: Vec<String>,
 }
 
 impl TitleDetails {

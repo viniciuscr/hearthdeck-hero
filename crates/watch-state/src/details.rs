@@ -23,10 +23,10 @@ pub const ROOT: &str = "watch-details";
 pub const FRESH_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// The shape of what is cached. Bumped when `TitleDetails` gains something a
-/// screen shows (the trailers, in 2): an answer written by an older build lacks
-/// it, and a week of freshness must not hide it. An answer of another shape is
-/// only ever served when no source can be asked.
-pub const SCHEMA: u32 = 2;
+/// screen shows (the trailers in 2, their wide stills in 3): an answer written by
+/// an older build lacks it, and a week of freshness must not hide it. An answer
+/// of another shape is only ever served when no source can be asked.
+pub const SCHEMA: u32 = 3;
 
 /// One cached answer: the details, when they were fetched, and which shape of
 /// them they are.
