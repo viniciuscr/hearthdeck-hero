@@ -3,7 +3,8 @@
 `scripts/bootstrap.sh` turns a fresh Arch-based machine (Arch, CachyOS,
 EndeavourOS, Manjaro…) into the console the project is made for: tty1 boots
 into `cage` and `hearthdeck-hero --console`, with RetroArch and its cores,
-Stremio, mpv, Dolphin, PCSX2, rclone, luakit and Ludusavi installed and
+Stremio, mpv (with `yt-dlp`, which plays a YouTube trailer in Watch's Trailer
+tab), Dolphin, PCSX2, rclone, luakit and Ludusavi installed and
 configured.
 
 It is one self-contained bash file, so it can be pasted as a single command
@@ -349,7 +350,7 @@ them to a test harness.
 
 TMDB authenticates every call with an *application* key: the app carries one, and
 a person using it only ever approves a session (by scanning a QR code from
-Settings → Watch → Providers). The key therefore belongs to the machine, and this
+Settings → Watch → Accounts). The key therefore belongs to the machine, and this
 step is where it is asked for:
 
 - **Where to get it**: log in to themoviedb.org → your account → **Settings →
@@ -359,7 +360,7 @@ step is where it is asked for:
   console account. Nothing else is touched, and the key is never logged.
 - **Setting it later**: `scripts/bootstrap.sh --only tmdb`. The app adopts the file
   into its credential store the first time Settings opens, so no rebuild is
-  needed; without it, Settings → Watch → Providers says the key is missing and
+  needed; without it, Settings → Watch → Accounts says the key is missing and
   refuses to pretend a Connect would work.
 - **The v4 read token is a second file**, `~/.config/hearthdeck/tmdb-access-token`
   (the long value on the same TMDB page). It is optional and only powers the
@@ -384,9 +385,9 @@ and the person's part is a code approved from the TV:
   the console account. Nothing else is touched, and the id is never logged.
 - **Setting it later**: `scripts/bootstrap.sh --only simkl`. The app adopts the
   file into its credential store the first time Settings opens; without it,
-  Settings → Watch → Providers says the client id is missing and refuses to
+  Settings → Watch → Accounts says the client id is missing and refuses to
   pretend a Connect would work.
-- **How the person signs in**: Settings → Watch → Providers → **Connect Simkl**
+- **How the person signs in**: Settings → Watch → Accounts → **Connect Simkl**
   is the only button, and it opens a pairing panel: the eight-character code at
   the top, `https://simkl.com/pin?user_code=…` as a QR under it, and the wait
   under that. The phone approves it and the panel closes on its own — the app

@@ -113,5 +113,5 @@ repository secret `SIMKL_CLIENT_ID`.
 - Normal path: `scripts/bootstrap.sh` asks for it and writes it to
   `~/.config/hearthdeck/simkl-client-id` (0600); the app adopts that file into
   its credential store the first time Settings opens.
-- A tag built without the secret is not fatal: Settings → Watch → Providers says
+- A tag built without the secret is not fatal: Settings → Watch → Accounts says
   the client id is missing instead of offering a Connect that cannot work.

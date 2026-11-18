@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/viniciuscr/hearthdeck-hero/fork/main/scripts/bootstrap.sh | sudo bash -s --
 #
 # What it does, in order: creates the console account, installs the packages
-# (RetroArch and cores, Stremio, mpv, Dolphin, PCSX2, rclone, luakit,
+# (RetroArch and cores, Stremio, mpv with yt-dlp, Dolphin, PCSX2, rclone, luakit,
 # Ludusavi), installs Hearthdeck Hero itself, sets up RetroArch (controller
 # profiles and screen settings), picks the sound card profile, mounts external
 # disks, and makes tty1 boot straight into `cage` + `hearthdeck-hero --console`.
@@ -49,7 +49,8 @@ readonly -a HD_PKGS_EMULATION=(
   libretro-mupen64plus-next libretro-beetle-psx-hw libretro-melonds
   libretro-mame dolphin-emu
 )
-readonly -a HD_PKGS_MEDIA=(mpv rclone luakit)
+# `yt-dlp` is what mpv resolves a YouTube trailer through (Watch's Trailer tab).
+readonly -a HD_PKGS_MEDIA=(mpv yt-dlp rclone luakit)
 readonly -a HD_PKGS_AUR=(stremio-service-bin pcsx2-latest-bin ludusavi)
 readonly -a HD_DISPLAY_MANAGERS=(sddm gdm lightdm cosmic-greeter greetd ly lxdm slim xdm)
 
@@ -1965,7 +1966,7 @@ plan() {
   say ""
   say "${C_BOLD}Plan${C_RESET}"
   say "  account     $HD_APP_USER (created if missing, added to video, audio, input, render)"
-  say "  packages    session, RetroArch, the libretro cores, mpv, rclone, luakit, Dolphin"
+  say "  packages    session, RetroArch, the libretro cores, mpv + yt-dlp, rclone, luakit, Dolphin"
   say "  AUR         ${HD_PKGS_AUR[*]}"
   say "  Ludusavi    per-game emulator saves for the emulators that are installed"
   say "  app         $HD_APP_NAME from $REPO_URL (or the latest release package)"

@@ -4,6 +4,121 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-18 — Simkl metadata resolves through `/redirect`, and
+> nothing is on by default.** `/search/id` is Simkl's *search*, and AUTH V2 puts
+> search behind the account's token — a signed-out machine got **401** and the
+> merge silently lost the source. The docs' own recommendation is cheaper and
+> token-free: `GET /redirect?to=simkl&imdb=…` answers a `301` whose `Location` is
+> the Simkl page (`simkl.com/tv/17465/…`); read the header (never follow it), take
+> the id and the catalog from the path, then ask the Cloudflare-cached record
+> endpoint. That needs one new transport primitive, `Transport::get_location`,
+> implemented by `UreqTransport` with `max_redirects(0)`. Search is gone from the
+> metadata source entirely.
+>
+> Also: **the sources start empty.** Catalogues, metadata and trackers are all
+> `[]` on a fresh profile — the person turns on what they want in Sources, and
+> some, all or none are all valid states. The one exception is the media provider
+> (`stremio`), because it *is* the space: its account, its rails and its streams.
+> And a manual mark now confirms itself with a toast ("Marked as watched"),
+> because a row that flips silently leaves a person pressing it twice.
+>
+> **Revision 2026-11-18 — a trailer tab, from any metadata source.** The details
+> card gained a third side: **Trailer**, offered only while a metadata source
+> brought one — the page asks the merged `TitleDetails`, never a particular
+> service, so TMDB or Cinemeta can supply it the day they fetch videos. The field
+> is neutral (`trailers: [{ name, kind, url, thumbnail }]`); one source's list
+> wins as a whole, no half-lists stitched. Simkl supplies them today: its
+> `trailers` array (YouTube ids, in its own order — English first, trailers
+> before teasers) becomes a page (`youtube.com/watch?v=…`) with the video's still.
+> LB / RB cycle Details → Streams → Trailer; **X plays it in mpv**, the same
+> player a title uses (and A does the same for a couch), leaving nothing behind —
+> no progress, no session, no tracker event. mpv resolves the YouTube page through
+> `yt-dlp`, which the bootstrap installs (`pacman -S yt-dlp`); pressing X again
+> stops it, and a stream already playing has to stop first. The addon protocol's
+> meta still reports none, and a title with no trailer simply has two tabs.
+> Three things make the tab reliable: the cached details carry a **schema**
+> (`details::SCHEMA`, 2 as of the trailers), so an answer written before the field
+> existed is fetched again instead of hiding the tab for a week; the machine's
+> own credentials (`tmdb-api-key`, `simkl-client-id`) are **adopted when details
+> are asked**, not only when Settings opens, so a page is not left without the
+> source just because nobody visited that page; and a metadata source that cannot
+> answer now says so in the log instead of vanishing from the merge.
+>
+> **Revision 2026-11-18 — the settings split: Accounts and Sources.** The
+> Providers page had grown into two pages' worth of questions — *"who am I signed
+> in as?"* and *"what feeds the tabs and the film page?"* — so it is now two
+> sections. **Accounts** is sign-in and nothing else: Stremio's link, TMDB's
+> session, Simkl's sign-in, each with Sign out (and no "Forget": clearing the
+> app's credential is the bootstrap's or the file's job, not a button a person
+> presses by accident). Cinemeta has no account, so it has no card. **Sources**
+> is four short groups, one switch per thing, named after the thing itself:
+> **Streams** (`Stremio`, plus "Stop the service after watching"), **Catalogs**
+> (`Cinemeta`, `TMDB`), **Metadata** and **Trackers** (`Simkl`). A metadata
+> source's switch *is* its priority — one value per source, `Off` or `1`..`n`,
+> changed with ◀ ▶ in console mode and a select on the desktop; the list order is
+> what the details page follows, no move rows, no second "not used" list. The
+> details cache keys include that order, so changing a place refetches. Switching
+> a **tracker** on is its first sync: the finished history already on the machine
+> goes over (with its own timestamps) and only what happens afterwards is sent;
+> its line under the switch says what is waiting, or the last fault, and the
+> titles Simkl could not match. The file gained `streamProviders` (default
+> `["stremio"]`): off refuses that provider's streams and nothing else — its
+> account and rails stay. The section answers to `sources`, `streams`, `catalogs`
+> and `catalog`; the last one no longer opens Providers.
+>
+> **Revision 2026-11-18 — trackers: what is watched leaves the machine, after the
+> fact.** Watch's history is local and stays local: `movies.json` and
+> `watch-sessions.json` are written first, and a **tracker** (Simkl, the only one
+> so far) is a follower told about it afterwards. `docs/WATCH-TRACKERS.md` owns
+> the contract; the shape is: an event (`watched`, `in progress`, `un watched`)
+> about a title or one episode goes into the **outbox** (`watch-tracking.json`)
+> when a tracker is enabled, and a background drain delivers it when the network
+> lets it — at the end of a playback, after a mark, at sign-in, when Settings →
+> Watch → Providers opens, or from **Sync now**. The outbox folds the newest
+> state of the same title/episode, retries a temporary fault on a 1/5/30-minute
+> schedule, stops retrying a title Simkl cannot match (and says which), and is
+> pruned once every enabled tracker has it. A tracker never blocks a playback.
+>
+> What a screen shows about progress gained a third state: **unwatched**,
+> **in progress** (the half mark, and "In progress · 40 %") and **watched** (the
+> tick), derived from the position, the length and the `finished` flag — 70 % is
+> watched, one minute is the line where watching starts. A series counts its
+> episodes ("3 of 8 episodes watched") instead of claiming to be watched when its
+> few records are finished, and each episode record keeps its `season` and
+> `number` so a tracker is never handed a provider-shaped id. A mark can be made
+> by hand — on a film, and on the picked episode — writing the same record a
+> playback would and queueing the same event.
+>
+> Simkl receives a finished film or episode as `POST /sync/history` stamped with
+> **when it was watched**; an un-marked one as `/sync/history/remove`; a title
+> left part-way as `POST /scrobble/stop` with its progress — a **paused
+> playback**, which is Simkl's own "continue watching", because its history has
+> no notion of half a film. Every request carries `client_id`, `app-name` and
+> `app-version`, and the person's token as a bearer — and **no id is looked up
+> first**: Simkl resolves `imdb` (with `title`/`year` as the fallback) on every
+> write, so a `/search/id` round-trip would only double the quota. Requests go
+> one at a time, because of Simkl's 20-second per-user lock. Simkl is also a
+> **metadata source**, and only when the person asks: it joins the registry last
+> and `metadataSources` does not list it, so Settings → Watch → Providers shows a
+> **Describe titles** switch on its card (off until turned on; the details cache
+> keys include the source set, so turning it on refetches). Catalog lookups are
+> the one thing Simkl exempts from the user token, so its answer needs only the
+> app's client id: the IMDb id is resolved through `/search/id`, `/movies` or
+> `/tv`/`/anime` answers the card (title, year or year span, release, runtime,
+> IMDb score, overview, genres, director, country, poster and fanart through
+> Simkl's image proxy, certification, network, budget, original language), and a
+> series adds `/tv/episodes` for the picker. It is never a catalog: no tab pages
+> through it, and trailers and the rest of its catalog are a later slice. The
+> pull slice is
+> pinned to the guide's two-phase model in `docs/WATCH-TRACKERS.md`: one snapshot
+> of `/sync/activities` before a sequential full pull, then `date_from` deltas —
+> never a timer without the person doing something. **Send my history** posts
+> the sessions already on the machine, with their own timestamps, so a library
+> that predates the tracker appears there. One way only for now: nothing Simkl
+> knows is pulled back (that is its own slice), and real-time scrobbling
+> (`/start`, `/pause`, the 80 % auto-mark) needs a mid-playback hook and comes
+> later with it.
+>
 > **Revision 2026-11-18 — Simkl is the second account, and the phone approves the
 > TV.** Simkl is a **tracker**: it keeps what a person watched in step across
 > devices, and it plays nothing. It therefore joins Settings → Watch → Providers
