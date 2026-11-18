@@ -22,7 +22,7 @@ use heronite_data::text::DateLocale;
 use heronite_data::CollectionGame;
 use heronite_i18n::{tr, trn};
 use heronite_images::{ImageRef, Variant};
-use heronite_watch::metadata::{Episode, Fact, TitleDetails, Trailer};
+use heronite_watch::metadata::{Episode, Fact, TitleDetails};
 use heronite_watch::progress::WatchedState;
 
 use super::super::watch_personal::Flag;
@@ -152,16 +152,6 @@ fn fact_label(fact: &Fact) -> SharedString {
         "original_language" => tr!("Original language").into(),
         _ if fact.label.trim().is_empty() => SharedString::from(fact.id.clone()),
         _ => SharedString::from(fact.label.clone()),
-    }
-}
-
-/// The trailer's own name, or what it is when the source did not name it.
-fn trailer_title(trailer: &Trailer) -> String {
-    let name = trailer.name.trim();
-    if name.is_empty() {
-        tr!("Trailer").to_string()
-    } else {
-        name.to_owned()
     }
 }
 
@@ -346,16 +336,11 @@ impl CollectionView {
                 10.,
             ));
 
-        // The card's sides: what the title or the picked episode is, the streams
-        // it can be played from, and — only when a metadata source brought one —
-        // its trailer. One structure for films and series.
-        let has_trailer = details.as_ref().is_some_and(|details| !details.trailers.is_empty());
-        let tab = self.watch_tab_shown(has_trailer);
-        let mut labels = vec![tr!("Details"), tr!("Streams")];
-        if has_trailer {
-            labels.push(tr!("Trailer"));
-        }
-        let tabs: Vec<SharedString> = labels.into_iter().map(SharedString::from).collect();
+        // The card's two sides: what the title or the picked episode is, and the
+        // streams it can be played from. The trailer is not a card: it is a press
+        // of X, offered in the hint bar while there is one.
+        let tab = self.watch_tab();
+        let tabs: Vec<SharedString> = [tr!("Details"), tr!("Streams")].into_iter().map(SharedString::from).collect();
         let (active, body) = match tab {
             DetailTab::Details => {
                 let mut about = div()
@@ -389,55 +374,6 @@ impl CollectionView {
                 let focused = self.watch_pane() == Pane::Card;
                 let list = self.watch_streams_nav().render("console-watch-streams", &rows, focused);
                 (1, list.flex_1().min_h_0().into_any_element())
-            }
-            DetailTab::Trailer => {
-                let trailers = details.as_ref().map(|details| details.trailers.as_slice()).unwrap_or(&[]);
-                let mut card = div().id("console-watch-trailer").size_full().min_h_0().flex().flex_col().gap(u(16.)).overflow_hidden();
-                if let Some(trailer) = trailers.first() {
-                    // The frame a player would give it: black, the trailer's own
-                    // picture inside (whole, so a vertical Short sits pillarboxed),
-                    // and the play badge where a player puts it. X on the card
-                    // plays it in mpv — the hint below says so, and nothing else
-                    // does.
-                    let still = self.trailer_still(trailer, s);
-                    card = card.child(
-                        div()
-                            .relative()
-                            .flex_1()
-                            .min_h_0()
-                            .w_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(u(16.))
-                            .overflow_hidden()
-                            .bg(theme::console_sidebar())
-                            .children(still.map(|still| img(still).size_full().object_fit(ObjectFit::Contain)))
-                            .child(
-                                div().absolute().inset_0().flex().items_center().justify_center().child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .size(u(84.))
-                                        .rounded_full()
-                                        .bg(kit::ink(0.36))
-                                        .child(crate::ui::icon(Icon::PlayArrow, u(42.), kit::strong())),
-                                ),
-                            ),
-                    );
-                    card = card.child(kit::title(SharedString::from(trailer_title(trailer)), 28.).line_clamp(1));
-                    card = card.child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap(u(8.))
-                            .child(kit::key_glyph(Btn::X))
-                            .child(div().text_size(u(13.)).text_color(theme::text_muted()).child(tr!("Play"))),
-                    );
-                }
-                (2, card.into_any_element())
             }
         };
 
@@ -563,27 +499,20 @@ impl CollectionView {
         self.images.get_or_request(&id, || vec![chain], pw, ph, Variant::Cover, 200).map(ImageSource::Render)
     }
 
-    /// The trailer's own picture, whole: the player's frame shows it the way mpv
-    /// would — a vertical Short pillarboxed, a wide trailer filling — never
-    /// cropped and never stretched. The sources list the wide sizes first.
-    fn trailer_still(&mut self, trailer: &Trailer, scale: f32) -> Option<ImageSource> {
-        let first = trailer.stills.first()?;
-        let (pw, ph) = ((1280. * scale).round() as u32, (720. * scale).round() as u32);
-        let id: SharedString = format!("trailer-still:{first}:{pw}x{ph}").into();
-        let chain: Vec<ImageRef> = trailer.stills.iter().map(|url| ImageRef::Url(url.clone())).collect();
-        self.images.get_or_request(&id, || chain, pw, ph, Variant::Fit { ink: None }, 200).map(ImageSource::Render)
-    }
-
     pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(game) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else { return false };
         let details = self.watch_details(key);
-        // The trailer tab exists only while a metadata source brought one.
         let has_trailer = details.as_ref().is_some_and(|details| !details.trailers.is_empty());
-        let tab = self.watch_tab_shown(has_trailer);
-        // LB / RB: the previous or the next card, with the pad where that card
-        // expects it. LB goes back, so no tab is ever a one-way door.
+        let tab = self.watch_tab();
+        // X is the hardware's, when the title has a trailer: the hint bar says
+        // "Watch trailer" and this is the press it promises. A stream is A.
+        if pad == Pad::X && has_trailer {
+            self.watch_play_trailer(&game, cx);
+            return true;
+        }
+        // LB / RB: the other card, with the pad where that card expects it.
         if matches!(pad, Pad::LB | Pad::RB) {
-            self.watch_switch_tab(has_trailer, pad == Pad::LB);
+            self.watch_switch_tab();
             if self.watch_tab() == DetailTab::Streams {
                 let video = self.watch_picked_video(&game);
                 self.watch_ensure_streams(&game, video.as_deref(), cx);
@@ -614,20 +543,6 @@ impl CollectionView {
                     }
                     Pad::X => {
                         self.watch_play_picked(&game, picked_video.as_deref(), cx);
-                        true
-                    }
-                    _ => false,
-                },
-                DetailTab::Trailer => match pad {
-                    // ◀ goes back to the list; X (or A) opens the trailer in the
-                    // person's browser, as every external link here does.
-                    Pad::Left => {
-                        self.watch_focus_pane(Pane::List);
-                        cx.notify();
-                        true
-                    }
-                    Pad::X | Pad::A => {
-                        self.watch_play_trailer(&game, cx);
                         true
                     }
                     _ => false,
@@ -709,15 +624,23 @@ impl CollectionView {
         }
     }
 
-    /// The page's hint bar: what A, the bumpers and X do on the card shown.
+    /// The page's hint bar: what A, the bumpers and X do on the card shown. X
+    /// is the trailer while the title has one, so the press and the label agree.
     pub(super) fn watch_page_hints(&self, key: &SharedString) -> Vec<Hint> {
         let primary = self.lib.as_ref().and_then(|lib| lib.get(key)).map(|game| self.primary_label(game)).unwrap_or(tr!("Play"));
+        let has_trailer = self.watch_details(key).is_some_and(|details| !details.trailers.is_empty());
         let mut hints = vec![hint(Btn::A, tr!("Select")), hint(Btn::LeftRight, tr!("Panels")), hint(Btn::Bumpers, tr!("Tabs"))];
-        hints.push(hint(Btn::X, primary));
+        hints.push(trailer_hint(has_trailer).unwrap_or_else(|| hint(Btn::X, primary)));
         hints.push(hint(Btn::B, tr!("Back")));
         hints.push(hint(Btn::Start, tr!("Menu")));
         hints
     }
+}
+
+/// The hint bar's X, when the title has a trailer to watch: the press plays it in
+/// mpv instead of the stream. No trailer, no hint — nothing to offer.
+fn trailer_hint(has_trailer: bool) -> Option<Hint> {
+    has_trailer.then(|| hint(Btn::X, tr!("Watch trailer")))
 }
 
 /// Whether the card has room for two columns of facts (design px, as the
@@ -865,13 +788,11 @@ mod tests {
     }
 
     #[test]
-    fn a_trailer_is_named_or_called_a_trailer() {
-        let mut trailer = Trailer { url: "https://www.youtube.com/watch?v=x".into(), ..Trailer::default() };
-        assert_eq!(trailer_title(&trailer), "Trailer", "a source that did not name it");
-        trailer.name = "Official Trailer".into();
-        assert_eq!(trailer_title(&trailer), "Official Trailer");
-        trailer.name = "   ".into();
-        assert_eq!(trailer_title(&trailer), "Trailer", "blank is not a name");
+    fn the_hint_bar_offers_the_trailer_only_when_there_is_one() {
+        assert!(trailer_hint(false).is_none(), "no trailer, nothing to offer");
+        let offered = trailer_hint(true).expect("a trailer is offered on X");
+        assert_eq!(offered.btn, Btn::X);
+        assert_eq!(offered.label, "Watch trailer");
     }
 
     #[test]

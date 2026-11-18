@@ -4,6 +4,14 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-18 — the Trailer tab is gone; X is the trailer.** A third
+> card was the wrong shape for a thirty-second video, so the film page is back to
+> two (Details, Streams) and the trailer moved to the **hint bar**: while a
+> metadata source has a trailer for the title, the bar reads `X · Watch trailer`
+> and X plays it in mpv (nothing recorded — no progress, no session, no tracker
+> event); with no trailer the hint stays whatever X did before (`Play`). The press
+> and the label come from one function, `trailer_hint`, so they cannot disagree.
+>
 > **Revision 2026-11-18 — a trailer's still is wide, and never cut.** The card
 > shows the trailer's picture whole: the sources offer **wide (16:9) stills, best
 > first** (`Trailer::stills`, e.g. YouTube's `maxresdefault` → `hq720` →

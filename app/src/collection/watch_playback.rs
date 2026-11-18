@@ -58,14 +58,12 @@ pub(super) struct Selection {
     pub episode: usize,
 }
 
-/// The cards the film page shows beside the list. The Trailer is only in the
-/// cycle while a metadata source brought one.
+/// The two cards the film page shows beside the list.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum DetailTab {
     #[default]
     Details,
     Streams,
-    Trailer,
 }
 
 /// Which side of the film page the pad drives: the title's list (Play, season,
@@ -307,25 +305,17 @@ impl CollectionView {
         self.watch.tab
     }
 
-    /// LB / RB: the previous or the next card, with the pad where that card
-    /// expects it.
-    pub(super) fn watch_switch_tab(&mut self, has_trailer: bool, back: bool) -> DetailTab {
-        self.watch.tab = if back { previous_tab(self.watch.tab, has_trailer) } else { next_tab(self.watch.tab, has_trailer) };
+    /// LB / RB: the other card, with the pad where that card expects it.
+    pub(super) fn watch_switch_tab(&mut self) -> DetailTab {
+        self.watch.tab = match self.watch.tab {
+            DetailTab::Details => DetailTab::Streams,
+            DetailTab::Streams => DetailTab::Details,
+        };
         self.watch.pane = tab_pane(self.watch.tab);
         self.watch.tab
     }
 
-    /// The tab the page shows: a Trailer left over from another title falls back
-    /// to the details, because that tab is not there any more.
-    pub(super) fn watch_tab_shown(&mut self, has_trailer: bool) -> DetailTab {
-        if self.watch.tab == DetailTab::Trailer && !has_trailer {
-            self.watch.tab = DetailTab::Details;
-            self.watch.pane = tab_pane(DetailTab::Details);
-        }
-        self.watch.tab
-    }
-
-    /// X on the Trailer card: the trailer plays in **mpv**, like a title does,
+    /// X, when the title has a trailer: it plays in **mpv**, like a title does,
     /// and leaves nothing behind — no progress, no session, no tracker event.
     /// Pressing it again while it plays stops it, and one player at a time still
     /// holds: a stream playing has to stop first.
@@ -768,27 +758,7 @@ fn default_selection(details: &TitleDetails, resume: Option<&str>) -> Selection 
 fn tab_pane(tab: DetailTab) -> Pane {
     match tab {
         DetailTab::Details => Pane::List,
-        DetailTab::Streams | DetailTab::Trailer => Pane::Card,
-    }
-}
-
-/// RB: the next card. Details, Streams, and the Trailer when the title has one.
-fn next_tab(tab: DetailTab, has_trailer: bool) -> DetailTab {
-    match tab {
-        DetailTab::Details => DetailTab::Streams,
-        DetailTab::Streams if has_trailer => DetailTab::Trailer,
-        DetailTab::Streams | DetailTab::Trailer => DetailTab::Details,
-    }
-}
-
-/// LB: the previous card, so a step forward is always a step back. With two
-/// tabs this was the same toggle either way; with three it is not.
-fn previous_tab(tab: DetailTab, has_trailer: bool) -> DetailTab {
-    match tab {
-        DetailTab::Details if has_trailer => DetailTab::Trailer,
-        DetailTab::Details => DetailTab::Streams,
-        DetailTab::Streams => DetailTab::Details,
-        DetailTab::Trailer => DetailTab::Streams,
+        DetailTab::Streams => Pane::Card,
     }
 }
 
@@ -930,32 +900,7 @@ mod tests {
     fn the_card_takes_the_pad_for_the_streams_and_the_list_for_the_details() {
         assert_eq!(tab_pane(DetailTab::Details), Pane::List);
         assert_eq!(tab_pane(DetailTab::Streams), Pane::Card);
-        assert_eq!(tab_pane(DetailTab::Trailer), Pane::Card, "the trailer is a card too");
         assert_eq!(Pane::default(), Pane::List);
-    }
-
-    #[test]
-    fn the_trailer_is_in_the_cycle_only_while_the_title_has_one() {
-        assert_eq!(next_tab(DetailTab::Details, true), DetailTab::Streams);
-        assert_eq!(next_tab(DetailTab::Streams, true), DetailTab::Trailer);
-        assert_eq!(next_tab(DetailTab::Trailer, true), DetailTab::Details);
-        assert_eq!(next_tab(DetailTab::Streams, false), DetailTab::Details, "no trailer: two tabs only");
-        assert_eq!(next_tab(DetailTab::Trailer, false), DetailTab::Details, "and a stale one falls back");
-    }
-
-    #[test]
-    fn a_step_back_undoes_a_step_forward() {
-        for (has_trailer, tabs) in [
-            (true, vec![DetailTab::Details, DetailTab::Streams, DetailTab::Trailer]),
-            (false, vec![DetailTab::Details, DetailTab::Streams]),
-        ] {
-            for tab in tabs {
-                let there = next_tab(tab, has_trailer);
-                assert_eq!(previous_tab(there, has_trailer), tab, "{tab:?} forward then back, trailer={has_trailer}");
-            }
-        }
-        assert_eq!(previous_tab(DetailTab::Details, false), DetailTab::Streams, "two tabs turn either way");
-        assert_eq!(previous_tab(DetailTab::Details, true), DetailTab::Trailer, "and three wrap the other way");
     }
 
     #[test]
