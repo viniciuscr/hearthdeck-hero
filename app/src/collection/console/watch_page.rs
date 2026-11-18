@@ -394,10 +394,12 @@ impl CollectionView {
                 let trailers = details.as_ref().map(|details| details.trailers.as_slice()).unwrap_or(&[]);
                 let mut card = div().id("console-watch-trailer").size_full().min_h_0().flex().flex_col().gap(u(18.)).overflow_hidden();
                 if let Some(trailer) = trailers.first() {
-                    // The still takes the room the card has left, whole: `Fit` in
-                    // the loader and `Contain` here mean a wide banner is never a
-                    // cut picture, whatever aspect the card ends up with.
-                    let still = self.trailer_still(trailer, s);
+                    // The banner takes the room the card has left, filled: the
+                    // title's backdrop (wide) before the trailer's own still, and
+                    // cropped either way, so a vertical trailer never shows as a
+                    // vertical picture.
+                    let backdrop = details.as_ref().and_then(|details| details.background.as_deref());
+                    let still = self.trailer_banner(backdrop, trailer, s);
                     if let Some(still) = still {
                         card = card.child(
                             div()
@@ -410,7 +412,7 @@ impl CollectionView {
                                 .rounded(u(14.))
                                 .overflow_hidden()
                                 .bg(kit::ink(0.08))
-                                .children(Some(img(still).size_full().object_fit(ObjectFit::Contain))),
+                                .children(Some(img(still).size_full().object_fit(ObjectFit::Cover))),
                         );
                     }
                     card = card.child(kit::title(SharedString::from(trailer_title(trailer)), 30.).line_clamp(2));
@@ -559,15 +561,19 @@ impl CollectionView {
         self.images.get_or_request(&id, || vec![chain], pw, ph, Variant::Cover, 200).map(ImageSource::Render)
     }
 
-    /// The trailer's wide still: the first of the source's that loads, at the
-    /// size of a 720p frame scaled to this screen, and never cropped — a banner
-    /// that cuts the picture reads as a broken layout, not as a picture.
-    fn trailer_still(&mut self, trailer: &Trailer, scale: f32) -> Option<ImageSource> {
-        let first = trailer.stills.first()?;
+    /// The trailer's banner: the title's own backdrop when the metadata has one
+    /// — it is wide by construction (a film's fanart is 16:9 or wider) — and the
+    /// trailer's still only when there is none. Either way it is cropped to the
+    /// box: a trailer can be a vertical Short, and a vertical picture is not a
+    /// banner.
+    fn trailer_banner(&mut self, backdrop: Option<&str>, trailer: &Trailer, scale: f32) -> Option<ImageSource> {
+        let mut urls: Vec<String> = backdrop.map(str::to_owned).into_iter().collect();
+        urls.extend(trailer.stills.iter().cloned());
+        let first = urls.first()?.clone();
         let (pw, ph) = ((1280. * scale).round() as u32, (720. * scale).round() as u32);
-        let id: SharedString = format!("trailer:{first}:{pw}x{ph}").into();
-        let chain: Vec<ImageRef> = trailer.stills.iter().map(|url| ImageRef::Url(url.clone())).collect();
-        self.images.get_or_request(&id, || chain, pw, ph, Variant::Fit { ink: None }, 200).map(ImageSource::Render)
+        let id: SharedString = format!("trailer-banner:{first}:{pw}x{ph}").into();
+        let chain: Vec<ImageRef> = urls.into_iter().map(ImageRef::Url).collect();
+        self.images.get_or_request(&id, || chain, pw, ph, Variant::Cover, 200).map(ImageSource::Render)
     }
 
     pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
