@@ -40,6 +40,14 @@ pub struct State {
     pub tmdb_username: Option<SharedString>,
     /// The request token waiting for the person to approve it in their browser.
     pub tmdb_pending: Option<String>,
+    /// Whether this build can talk to Simkl: the app's client id is stored (the
+    /// bootstrap writes a file that is adopted here) or compiled in. The person
+    /// is never asked for it.
+    pub simkl_ready: bool,
+    /// Whether a Simkl account is signed in on this machine.
+    pub simkl_signed_in: bool,
+    /// The device code waiting for the person to approve it on their phone.
+    pub simkl_pending: Option<heronite_watch::simkl_sign_in::DeviceCode>,
     /// The window the recap is showing.
     pub recap: recap::Recency,
     /// The collection rails the build declares, with their source: read once for
@@ -56,6 +64,11 @@ impl State {
         heronite_watch::tmdb_sign_in::adopt_key_file(&ctx.app);
         let tmdb_ready = heronite_watch::tmdb_sign_in::configured(&ctx.app);
         let tmdb_username = heronite_watch::tmdb_sign_in::session(&ctx.app).map(|session| SharedString::from(session.username));
+        // The Simkl client id, adopted the same way: the bootstrap writes it, the
+        // store keeps it, and the person only ever approves a code.
+        heronite_watch::simkl_sign_in::adopt_client_id_file(&ctx.app);
+        let simkl_ready = heronite_watch::simkl_sign_in::configured(&ctx.app);
+        let simkl_signed_in = heronite_watch::simkl_sign_in::session(&ctx.app).is_some();
         let collections = heronite_watch::collections::descriptors(&ctx.app);
         Self {
             linked,
@@ -65,6 +78,9 @@ impl State {
             tmdb_ready,
             tmdb_username,
             tmdb_pending: None,
+            simkl_ready,
+            simkl_signed_in,
+            simkl_pending: None,
             recap: recap::Recency::default(),
             collections,
         }
@@ -257,6 +273,9 @@ struct Provider {
     metadata: bool,
     /// Declares rails for the first page.
     collections: bool,
+    /// Owns the person's account and nothing else (yet): its card is the
+    /// sign-in.
+    account: bool,
 }
 
 /// Every provider Watch has, the streaming services first. An id that is more
@@ -266,8 +285,15 @@ fn providers() -> Vec<Provider> {
     let mut add = |id: &str, name: &str, set: fn(&mut Provider)| match out.iter_mut().find(|provider| provider.id == id) {
         Some(provider) => set(provider),
         None => {
-            let mut provider =
-                Provider { id: id.to_owned(), name: name.to_owned(), media: false, catalog: false, metadata: false, collections: false };
+            let mut provider = Provider {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                media: false,
+                catalog: false,
+                metadata: false,
+                collections: false,
+                account: false,
+            };
             set(&mut provider);
             out.push(provider);
         }
@@ -287,10 +313,30 @@ fn providers() -> Vec<Provider> {
         let descriptor = source.descriptor();
         add(descriptor.id, descriptor.name, |entry| entry.collections = true);
     }
+    // The providers that are only an account so far: they serve no titles and no
+    // catalogs, so no registry declares them, and their card is the sign-in.
+    for &(id, name) in heronite_watch::registry::ACCOUNTS {
+        add(id, name, |entry| entry.account = true);
+    }
     // The streaming services first: they hold the person's account, and the
     // sources only fill in what those provide.
     out.sort_by_key(|provider| !provider.media);
     out
+}
+
+/// The cards that are not streaming services: the sources, and the accounts
+/// only. [`split`] returns the streaming services beside this.
+struct Groups {
+    sources: Vec<Provider>,
+    accounts: Vec<Provider>,
+}
+
+/// The cards split the way the page draws them: the streaming services first,
+/// then the source and account groups.
+fn split(all: Vec<Provider>) -> (Vec<Provider>, Groups) {
+    let (media, rest): (Vec<Provider>, Vec<Provider>) = all.into_iter().partition(|provider| provider.media);
+    let (accounts, sources): (Vec<Provider>, Vec<Provider>) = rest.into_iter().partition(|provider| provider.account);
+    (media, Groups { sources, accounts })
 }
 
 /// What a provider gives, in one line under its name.
@@ -308,6 +354,9 @@ fn capabilities(provider: &Provider) -> String {
     if provider.collections {
         parts.push(tr!("Rails"));
     }
+    if provider.account {
+        parts.push(tr!("Account"));
+    }
     parts.join(" \u{b7} ")
 }
 
@@ -315,8 +364,7 @@ fn capabilities(provider: &Provider) -> String {
 /// each provider offers the screens is set on the Home page.
 pub fn render_providers(d: &mut SettingsPage, _window: &mut Window, cx: &mut Context<SettingsPage>) -> AnyElement {
     let settings = heronite_watch::settings::read(&d.ctx.app);
-    let all = providers();
-    let (media, sources): (Vec<Provider>, Vec<Provider>) = all.into_iter().partition(|provider| provider.media);
+    let (media, groups) = split(providers());
 
     let mut column = div().flex().flex_col().gap(px(14.));
     if !media.is_empty() {
@@ -327,11 +375,21 @@ pub fn render_providers(d: &mut SettingsPage, _window: &mut Window, cx: &mut Con
             column = column.child(provider_card(d, provider, &settings, cx));
         }
     }
-    if !sources.is_empty() {
+    if !groups.sources.is_empty() {
         column = column.child(caption(tr!("Sources"))).child(div().px(px(6.)).child(meta_text(tr!(
             "What the tabs browse and what describes a title. Metadata sources are asked in this order: the first answer for a field wins."
         ))));
-        for provider in &sources {
+        for provider in &groups.sources {
+            column = column.child(provider_card(d, provider, &settings, cx));
+        }
+    }
+    if !groups.accounts.is_empty() {
+        column = column.child(caption(tr!("Accounts"))).child(
+            div()
+                .px(px(6.))
+                .child(meta_text(tr!("Where your watch history is kept: signing in keeps the account in step across your devices."))),
+        );
+        for provider in &groups.accounts {
             column = column.child(provider_card(d, provider, &settings, cx));
         }
     }
@@ -396,6 +454,9 @@ fn provider_card(
     if provider.id == "tmdb" {
         rows.push(tmdb_card(d, cx));
     }
+    if provider.id == "simkl" {
+        rows.push(simkl_card(d, cx));
+    }
     let card = card_box()
         .py(px(12.))
         .px(px(14.))
@@ -437,9 +498,10 @@ fn stremio_account(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) -> AnyE
         actions =
             actions.child(action_button("watch-unlink", ButtonKind::Ghost, tr!("Unlink"), !busy, cx.listener(|d, _, _, cx| unlink(d, cx))));
     } else if d.watch.offer.is_some() {
+        // The check is automatic; this is the manual retry for a poll that gave up.
         actions = actions.child(action_button(
             "watch-check",
-            ButtonKind::Primary,
+            ButtonKind::Glass,
             tr!("Check"),
             !busy,
             cx.listener(|d, _, _, cx| check_link(d, cx)),
@@ -480,7 +542,8 @@ fn stremio_account(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) -> AnyE
                 .flex_col()
                 .gap(px(4.))
                 .child(div().text_size(px(13.)).child(tr!("Code {code}", code = offer.code.clone())))
-                .child(meta_text(tr!("Scan the code with the Stremio app, or open {link}", link = offer.link.clone()))),
+                .child(meta_text(tr!("Scan the code with the Stremio app, or open {link}", link = offer.link.clone())))
+                .child(meta_text(tr!("Waiting for the approval: this card follows on its own."))),
         );
         account = account.child(detail);
     }
@@ -737,6 +800,207 @@ fn sign_out_tmdb(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     cx.notify();
 }
 
+/// The Simkl credential: the code to approve while waiting, or who is signed in.
+fn simkl_card(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let (title, desc) = match (&d.watch.simkl_pending, d.watch.simkl_signed_in) {
+        (Some(_), _) => (
+            tr!("Approve the sign-in on your phone.").to_string(),
+            tr!("Simkl is waiting for the code: this card follows when it is approved."),
+        ),
+        (None, true) => (tr!("Signed in to Simkl").to_string(), tr!("What you watch follows the account across your devices.")),
+        (None, false) if d.watch.simkl_ready => {
+            (tr!("Simkl").to_string(), tr!("Connect and approve it on your phone: Simkl keeps what you watch in step."))
+        }
+        (None, false) => (
+            tr!("Simkl").to_string(),
+            tr!("Simkl needs this app's client id, which the bootstrap sets (or a file in ~/.config/hearthdeck/simkl-client-id)."),
+        ),
+    };
+    let mut card = div().flex().flex_col().gap(px(10.)).child(
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.))
+            .child(div().flex().flex_col().gap(px(3.)).child(div().text_size(px(13.5)).child(title)).child(meta_text(desc)))
+            .child(simkl_buttons(d, cx)),
+    );
+    // Waiting for the approval: the same page as a QR, so a phone approves it
+    // without a keyboard anywhere near the TV.
+    if let Some(code) = &d.watch.simkl_pending {
+        let mut row = div().flex().items_center().gap(px(16.));
+        if let Some(qr) = qr::qr_code(&code.verification_url, 3.0) {
+            row = row.child(qr);
+        }
+        row = row.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .child(div().text_size(px(13.)).child(tr!("Code {code}", code = code.user_code.clone())))
+                .child(meta_text(tr!("Scan it with a phone to approve, or open {link}", link = code.verification_url.clone()))),
+        );
+        card = card.child(row);
+    }
+    card.into_any_element()
+}
+
+fn simkl_buttons(d: &SettingsPage, cx: &mut Context<SettingsPage>) -> Div {
+    let mut buttons = div().flex().items_center().gap(px(8.));
+    if d.watch.simkl_signed_in {
+        buttons = buttons.child(action_button(
+            "watch-simkl-sign-out",
+            ButtonKind::Ghost,
+            tr!("Sign out"),
+            true,
+            cx.listener(|d, _, _, cx| sign_out_simkl(d, cx)),
+        ));
+        buttons = buttons.child(action_button(
+            "watch-simkl-forget",
+            ButtonKind::Ghost,
+            tr!("Forget Simkl"),
+            true,
+            cx.listener(|d, _, _, cx| clear_simkl(d, cx)),
+        ));
+    } else if d.watch.simkl_pending.is_none() {
+        buttons = buttons.child(action_button(
+            "watch-simkl-connect",
+            ButtonKind::Primary,
+            tr!("Connect Simkl"),
+            d.watch.simkl_ready,
+            cx.listener(|d, _, _, cx| connect_simkl(d, cx)),
+        ));
+    }
+    buttons
+}
+
+/// The one way in: the app's client id must be there (the bootstrap sets it),
+/// then Simkl hands out a code and the phone approves it.
+fn connect_simkl(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    d.watch.notice = None;
+    if !d.watch.simkl_ready {
+        d.watch.notice = Some(
+            tr!("Simkl needs this app's client id, which the bootstrap sets (or a file in ~/.config/hearthdeck/simkl-client-id).").into(),
+        );
+        cx.notify();
+        return;
+    }
+    start_simkl_sign_in(d, cx);
+}
+
+/// Asks Simkl for a code to show. Asking is a network call, so it happens off
+/// the UI thread or a slow answer looks exactly like a dead button.
+fn start_simkl_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    let app = d.ctx.app.clone();
+    cx.spawn(async move |this, cx| {
+        let started = cx.background_spawn(async move { heronite_watch::simkl_sign_in::start(&app) }).await;
+        this.update(cx, |d, cx| match started {
+            Ok(code) => {
+                d.watch.simkl_pending = Some(code.clone());
+                d.watch.notice = None;
+                // The phone approves on another device: ask again every interval
+                // instead of waiting for a button.
+                wait_for_simkl(d, code, cx);
+            }
+            Err(error) => {
+                log::warn!("Simkl sign-in did not start: {error:#}");
+                d.watch.notice = Some(format!("{error:#}").into());
+            }
+        })
+        .ok();
+    })
+    .detach();
+    cx.notify();
+}
+
+/// Polls until the code is approved, the code expires, or another attempt
+/// replaces this one. Simkl records no refusal, so the code's own lifetime is
+/// what ends the wait.
+fn wait_for_simkl(d: &mut SettingsPage, code: heronite_watch::simkl_sign_in::DeviceCode, cx: &mut Context<SettingsPage>) {
+    let app = d.ctx.app.clone();
+    cx.spawn(async move |this, cx| {
+        let mut interval = code.interval_secs.max(1);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(code.expires_in);
+        loop {
+            // Another press may have started over, or the card may be gone.
+            let waiting = this
+                .update(cx, |d, _| {
+                    d.watch.simkl_pending.as_ref().map(|pending| pending.device_code.as_str()) == Some(code.device_code.as_str())
+                })
+                .unwrap_or(false);
+            if !waiting {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                this.update(cx, |d, cx| {
+                    d.watch.simkl_pending = None;
+                    d.watch.notice = Some(tr!("Simkl expired the code: connect again.").into());
+                    cx.notify();
+                })
+                .ok();
+                return;
+            }
+            cx.background_spawn(async move { std::thread::sleep(std::time::Duration::from_secs(interval)) }).await;
+            let (app, asked) = (app.clone(), code.clone());
+            let step = cx.background_spawn(async move { heronite_watch::simkl_sign_in::poll(&app, &asked) }).await;
+            match step {
+                Ok(heronite_watch::simkl_sign_in::Step::Approved(_)) => {
+                    this.update(cx, |d, cx| {
+                        if d.watch.simkl_pending.as_ref().map(|pending| pending.device_code.as_str()) != Some(code.device_code.as_str()) {
+                            return;
+                        }
+                        d.watch.simkl_pending = None;
+                        d.watch.simkl_signed_in = true;
+                        d.watch.notice = None;
+                        cx.notify();
+                    })
+                    .ok();
+                    return;
+                }
+                // Polled too fast: Simkl wants a longer wait, not another attempt.
+                Ok(heronite_watch::simkl_sign_in::Step::SlowDown) => interval += heronite_watch::simkl_sign_in::SLOW_DOWN,
+                // Not approved yet: keep asking.
+                Ok(heronite_watch::simkl_sign_in::Step::Pending) => {}
+                Err(error) => {
+                    log::debug!("Simkl sign-in: {error:#}");
+                    this.update(cx, |d, cx| {
+                        d.watch.simkl_pending = None;
+                        d.watch.notice = Some(format!("{error:#}").into());
+                        cx.notify();
+                    })
+                    .ok();
+                    return;
+                }
+            }
+        }
+    })
+    .detach();
+}
+
+/// Forgets the session (the app's client id stays).
+fn sign_out_simkl(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    d.watch.notice = None;
+    match heronite_watch::simkl_sign_in::sign_out(&d.ctx.app) {
+        Ok(()) => {
+            d.watch.simkl_signed_in = false;
+            d.watch.simkl_pending = None;
+        }
+        Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
+    }
+    cx.notify();
+}
+
+/// Forgets the app's client id and the session with it.
+fn clear_simkl(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    if let Err(error) = heronite_watch::store::clear_simkl_client_id(&d.ctx.app) {
+        log::warn!("clearing the Simkl client id: {error:#}");
+    }
+    d.watch.simkl_ready = heronite_watch::simkl_sign_in::configured(&d.ctx.app);
+    d.watch.simkl_signed_in = false;
+    d.watch.simkl_pending = None;
+    cx.notify();
+}
+
 /// The enabled rails after a toggle: a rail turned on joins at the end (the list
 /// is the rail order), and one already there keeps its place — a press must not
 /// reorder the tab.
@@ -805,12 +1069,64 @@ fn start_link(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
         this.update(cx, |d, cx| {
             d.watch.busy = false;
             match result {
-                Ok(offer) => d.watch.offer = Some(offer),
+                Ok(offer) => {
+                    d.watch.offer = Some(offer.clone());
+                    // The phone scans the code: the app notices on its own.
+                    wait_for_link(offer, cx);
+                }
                 Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
             }
             cx.notify();
         })
         .ok();
+    })
+    .detach();
+}
+
+/// Polls the link code every five seconds until the account is linked, another
+/// flow replaces this one, or ten minutes pass — the person scans on a phone and
+/// dismisses the code, so asking again is the app's job, not a button's.
+fn wait_for_link(offer: LinkOffer, cx: &mut Context<SettingsPage>) {
+    let link = Endpoints::default().link;
+    let code = offer.code;
+    cx.spawn(async move |this, cx| {
+        for _ in 0..120 {
+            cx.background_spawn(async { std::thread::sleep(std::time::Duration::from_secs(5)) }).await;
+            let waiting = this
+                .update(cx, |d, _| d.watch.offer.as_ref().map(|offer| offer.code.as_str()) == Some(code.as_str()) && !d.watch.linked)
+                .unwrap_or(false);
+            if !waiting {
+                return;
+            }
+            let (link, asked) = (link.clone(), code.clone());
+            let result = cx.background_spawn(async move { read_link(&UreqTransport::new(), &link, &asked) }).await;
+            match result {
+                Ok(LinkPoll::Linked(key)) => {
+                    this.update(cx, |d, cx| {
+                        if d.watch.offer.as_ref().map(|offer| offer.code.as_str()) != Some(code.as_str()) {
+                            return;
+                        }
+                        match heronite_watch::store::write_auth(&d.ctx.app, &key) {
+                            Ok(()) => {
+                                d.watch.linked = true;
+                                d.watch.offer = None;
+                                d.watch.notice = None;
+                            }
+                            Err(error) => d.watch.notice = Some(format!("{error:#}").into()),
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                    return;
+                }
+                Ok(LinkPoll::Pending) => {}
+                // A network fault ends the poll: the manual check stays available.
+                Err(error) => {
+                    log::debug!("Stremio link: {error:#}");
+                    return;
+                }
+            }
+        }
     })
     .detach();
 }
@@ -872,10 +1188,9 @@ pub(crate) fn console_rows(_d: &SettingsPage) -> Vec<Row> {
 /// key, and the switches that turn it on.
 pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
     let settings = heronite_watch::settings::read(&d.ctx.app);
-    let all = providers();
-    let (media, sources): (Vec<Provider>, Vec<Provider>) = all.into_iter().partition(|provider| provider.media);
+    let (media, groups) = split(providers());
     let mut rows = Vec::new();
-    for (group, providers) in [(tr!("Streaming services"), media), (tr!("Sources"), sources)] {
+    for (group, providers) in [(tr!("Streaming services"), media), (tr!("Sources"), groups.sources), (tr!("Accounts"), groups.accounts)] {
         if providers.is_empty() {
             continue;
         }
@@ -937,6 +1252,38 @@ pub(crate) fn provider_rows(d: &SettingsPage) -> Vec<Row> {
                     rows.push(Row::action("watch-tmdb-forget", tr!("Forget TMDB")));
                 }
             }
+            if provider.id == "simkl" {
+                if d.watch.simkl_signed_in {
+                    rows.push(
+                        Row::info("watch-simkl-account", tr!("Account"), tr!("Signed in"))
+                            .desc(tr!("What you watch follows the account across your devices.")),
+                    );
+                    rows.push(Row::action("watch-simkl-sign-out", tr!("Sign out")));
+                    rows.push(Row::action("watch-simkl-forget", tr!("Forget Simkl")));
+                } else if let Some(code) = &d.watch.simkl_pending {
+                    rows.push(Row::info(
+                        "watch-simkl-code",
+                        tr!("Code {code}", code = code.user_code.clone()),
+                        code.verification_url.clone(),
+                    ));
+                    rows.push(Row::action("watch-simkl-qr", tr!("Show the code as a QR")));
+                    rows.push(Row::info("watch-simkl-waiting", tr!("Waiting for the approval"), tr!("Checked automatically")));
+                } else {
+                    // The hint under a focused row is where a sentence fits — and
+                    // where a failure has to show, since a console row cannot.
+                    let hint: String = match &d.watch.notice {
+                        Some(notice) => notice.to_string(),
+                        None if d.watch.simkl_ready => {
+                            tr!("Simkl keeps what you watch in step across your devices.").to_string()
+                        }
+                        None => tr!(
+                            "Simkl needs this app's client id, which the bootstrap sets (or a file in ~/.config/hearthdeck/simkl-client-id)."
+                        )
+                        .to_string(),
+                    };
+                    rows.push(Row::action("watch-simkl-connect", tr!("Connect Simkl")).desc(hint));
+                }
+            }
         }
     }
     rows
@@ -970,6 +1317,14 @@ pub(crate) fn provider_apply(d: &mut SettingsPage, outcome: Outcome, window: &mu
             }
             "watch-tmdb-approved" => check_tmdb_sign_in(d, cx),
             "watch-tmdb-sign-out" => sign_out_tmdb(d, cx),
+            "watch-simkl-connect" => connect_simkl(d, cx),
+            "watch-simkl-forget" => clear_simkl(d, cx),
+            "watch-simkl-sign-out" => sign_out_simkl(d, cx),
+            "watch-simkl-qr" => {
+                if let Some(code) = d.watch.simkl_pending.clone() {
+                    open_qr(d, tr!("Approve Simkl"), &code.verification_url, window, cx);
+                }
+            }
             _ => {}
         },
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-catalog:") => {
@@ -1024,7 +1379,14 @@ mod tests {
         assert!(tmdb.catalog && tmdb.metadata && tmdb.collections && !tmdb.media, "one provider, every capability");
         let cinemeta = find("cinemeta");
         assert!(cinemeta.catalog && cinemeta.metadata, "a source that is no account at all");
+        let simkl = find("simkl");
+        assert!(simkl.account && !simkl.media && !simkl.catalog, "a tracker: its card is the sign-in");
+        assert_eq!(capabilities(simkl), tr!("Account"));
         let ids: Vec<&str> = all.iter().map(|provider| provider.id.as_str()).collect();
+        let (_, groups) = split(providers());
+        assert_eq!(groups.accounts.len(), 1, "the accounts come last, one card each");
+        assert_eq!(groups.accounts[0].id, "simkl");
+        assert!(groups.sources.iter().all(|provider| !provider.account), "an account card is not a source card");
         let mut unique = ids.clone();
         unique.dedup();
         assert_eq!(unique.len(), ids.len(), "a provider that is several kinds is one card: {ids:?}");

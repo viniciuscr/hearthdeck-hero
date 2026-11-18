@@ -18,7 +18,7 @@ pub const HOME: Section = Section::WatchHome;
 pub const RECAP: Section = Section::WatchRecap;
 pub const GROUP: (&str, &[Section]) = (n_!("Watch"), &[Section::Watch, Section::WatchProviders, Section::WatchHome, Section::WatchRecap]);
 pub const KEYWORDS: &str = "watch stremio movies series theme reset filmes series tema reiniciar";
-pub const PROVIDER_KEYWORDS: &str = "watch providers stremio tmdb cinemeta account link qr api key sign in connect service torrent metadata catalogs filmes series provedores conta chave entrar conectar servico metadados catalogos";
+pub const PROVIDER_KEYWORDS: &str = "watch providers stremio tmdb simkl cinemeta account link qr api key client id pin sign in connect service torrent metadata catalogs filmes series provedores conta chave entrar conectar servico metadados catalogos";
 pub const RECAP_KEYWORDS: &str = "watch recap stats statistics hours watched streak binge year month week filmes series resumo estatisticas horas assistido sequencia ano mes semana";
 pub const HOME_KEYWORDS: &str = "watch home rails continue watching recommended top rated popular shelf filmes series inicio prateleiras continuar assistindo recomendados destaques";
 
