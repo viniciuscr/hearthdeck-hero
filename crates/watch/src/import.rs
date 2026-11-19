@@ -50,13 +50,93 @@ impl Report {
     }
 }
 
+/// How often an automatic pull runs while the app is open. One change-query
+/// request when nothing moved, so a day costs at most 96 — inside the free plan's
+/// 500 and leaving room for writes.
+pub const INTERVAL: chrono::Duration = chrono::Duration::minutes(15);
+
+/// Waits after consecutive failures, in minutes.
+const BACKOFF_MINUTES: [i64; 4] = [1, 5, 30, 60];
+
+/// The pullers this build ships, in registry order.
+pub fn providers() -> &'static [&'static dyn WatchSync] {
+    static SIMKL: SimklPull = SimklPull;
+    static ALL: [&'static dyn WatchSync; 1] = [&SIMKL];
+    &ALL
+}
+
 /// Runs one import for Simkl with the app's own transport and credentials.
 pub fn run_simkl(app: &AppPaths) -> Result<Report> {
+    run(app, providers()[0])
+}
+
+/// [`run_simkl`] for any provider, with the app's own transport and credentials.
+pub fn run(app: &AppPaths, sync: &dyn WatchSync) -> Result<Report> {
     // The baseline may carry episode rows: a larger ceiling than the 1 MiB default.
     let http = UreqTransport::with_limits(Duration::from_secs(60), 64 << 20);
     let credentials = StoreCredentials::new(app);
     let ctx = Ctx { http: &http, credentials: &credentials };
-    run_with(app, &SimklPull, &ctx)
+    run_with(app, sync, &ctx)
+}
+
+/// Whether a provider's next automatic pull is due.
+pub fn due(cursor: &cursor::Cursor, now: DateTime<Utc>) -> bool {
+    cursor.next_at.is_none_or(|at| at <= now)
+}
+
+/// How long to wait after `attempts` consecutive failures.
+pub fn backoff(attempts: u32) -> chrono::Duration {
+    let index = usize::try_from(attempts.saturating_sub(1)).unwrap_or(usize::MAX).min(BACKOFF_MINUTES.len() - 1);
+    chrono::Duration::minutes(BACKOFF_MINUTES[index])
+}
+
+/// The schedule and the row's sentence, after one attempt.
+pub fn record_result(cursor: &mut cursor::Cursor, result: &Result<Report>, now: DateTime<Utc>) {
+    match result {
+        Ok(report) => {
+            cursor.attempts = 0;
+            cursor.next_at = Some(now + INTERVAL);
+            cursor.last = Some(cursor::LastImport {
+                at: now,
+                watched: report.watched,
+                positions: report.positions,
+                unchanged: report.unchanged,
+                error: None,
+            });
+        }
+        Err(error) => {
+            cursor.attempts = cursor.attempts.saturating_add(1);
+            cursor.next_at = Some(now + backoff(cursor.attempts));
+            cursor.last =
+                Some(cursor::LastImport { at: now, watched: 0, positions: 0, unchanged: false, error: Some(format!("{error:#}")) });
+        }
+    }
+}
+
+/// Every enabled provider whose pull is due, run once. Called from the app on a
+/// timer, on opening Watch, and after a playback: never from a background service.
+pub fn tick(app: &AppPaths) -> Vec<(&'static str, Result<Report>)> {
+    let enabled = heronite_watch_state::settings::read(app).import_providers;
+    let mut ran = Vec::new();
+    for sync in providers() {
+        if !enabled.iter().any(|id| id == sync.id()) {
+            continue;
+        }
+        let stored = cursor::read(app, sync.id());
+        if !due(&stored, Utc::now()) {
+            continue;
+        }
+        let result = run(app, *sync);
+        let now = Utc::now();
+        // The schedule is kept even when the pull failed: a failure is a schedule
+        // fact, not a reason to hammer the provider.
+        let _ = cursor::update(app, sync.id(), |cursor| {
+            record_result(cursor, &result, now);
+            Ok(())
+        });
+        ran.push((sync.id(), result));
+    }
+    ran
 }
 
 /// [`run_simkl`] with an injected provider and transport, for tests.
@@ -394,6 +474,30 @@ mod tests {
         fn clear(&self, _: &str) -> Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn a_cursor_without_a_schedule_is_due_and_a_failure_backs_off() {
+        let mut cursor = cursor::Cursor::default();
+        let now = Utc::now();
+        assert!(due(&cursor, now), "never pulled is due");
+
+        record_result(&mut cursor, &Ok(Report { watched: 1, positions: 2, ..Report::default() }), now);
+        assert!(!due(&cursor, now), "a success schedules the next one");
+        assert!(due(&cursor, now + INTERVAL));
+        let last = cursor.last.clone().expect("a result is kept");
+        assert_eq!((last.watched, last.positions, last.unchanged), (1, 2, false));
+
+        record_result(&mut cursor, &Err(anyhow::anyhow!("network down")), now);
+        assert_eq!(cursor.attempts, 1);
+        assert_eq!(cursor.next_at, Some(now + backoff(1)));
+        assert!(cursor.last.as_ref().unwrap().error.as_deref().is_some_and(|error| error.contains("network down")));
+
+        record_result(&mut cursor, &Err(anyhow::anyhow!("again")), now);
+        assert_eq!(cursor.next_at, Some(now + backoff(2)));
+        assert!(backoff(2) > backoff(1), "the ladder grows");
+        record_result(&mut cursor, &Ok(Report::default()), now);
+        assert_eq!(cursor.attempts, 0, "a success resets the ladder");
     }
 
     #[test]

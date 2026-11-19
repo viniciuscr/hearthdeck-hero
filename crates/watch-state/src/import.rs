@@ -34,9 +34,32 @@ pub struct Cursor {
     /// against, so "not there" is never read as "removed there".
     #[serde(default)]
     pub list_ids: BTreeMap<String, Vec<String>>,
+    /// When the next automatic pull is due.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_at: Option<DateTime<Utc>>,
+    /// Failed attempts since the last success: the backoff's index.
+    #[serde(default)]
+    pub attempts: u32,
+    /// What the last pull did, for the settings row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<LastImport>,
     /// A newer build's fields survive a write here.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// What the last pull did — what the settings row says out loud.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastImport {
+    pub at: DateTime<Utc>,
+    pub watched: usize,
+    pub positions: usize,
+    /// The change query said nothing moved: no pull ran.
+    #[serde(default)]
+    pub unchanged: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// The folder the cursors live in.

@@ -57,6 +57,12 @@ pub struct Settings {
     /// skipped — the file is hand-editable and survives a version change.
     #[serde(default = "trackers_by_default")]
     pub trackers: Vec<String>,
+    /// The providers whose history is **brought in** (`simkl`): the reverse of
+    /// `trackers`. Separate on purpose — turning import on must never queue a
+    /// backfill of what was watched here. Empty until the person chooses, like
+    /// everything else.
+    #[serde(default = "import_by_default")]
+    pub import_providers: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -84,6 +90,11 @@ fn trackers_by_default() -> Vec<String> {
     Vec::new()
 }
 
+/// Nothing is pulled until the person turns it on.
+fn import_by_default() -> Vec<String> {
+    Vec::new()
+}
+
 /// The exception, and the space's own: the media provider is what makes Watch a
 /// Watch space (its account, its rails and its streams). It is on until the
 /// person turns it off in Sources → Streams.
@@ -99,6 +110,7 @@ impl Default for Settings {
             metadata_sources: metadata_by_default(),
             home_rails: Vec::new(),
             trackers: trackers_by_default(),
+            import_providers: import_by_default(),
             stream_providers: streams_by_default(),
             extra: Map::new(),
         }
