@@ -447,7 +447,10 @@ impl CollectionView {
         rows.push(Row::choice("season", tr!("Season"), options, selection.season));
         // The picked episode's own mark, for a person who watched it elsewhere.
         if let Some(episode) = picked_episode(details, selection) {
-            let watched = progress.as_ref().and_then(|progress| progress.episodes.get(&episode.id)).is_some_and(|record| record.finished);
+            let watched = progress
+                .as_ref()
+                .and_then(|progress| progress.episode(&episode.id, episode.season, episode.number))
+                .is_some_and(|record| record.finished);
             let code = episode.code();
             rows.push(watched_toggle_row(
                 tr!("Mark {episode} as watched", episode = code.clone()).to_string(),
@@ -462,7 +465,12 @@ impl CollectionView {
         let episodes = progress.map(|progress| progress.episodes).unwrap_or_default();
         let resuming = self.watch_resume().map(str::to_owned);
         for (index, episode) in details.episodes_of(season).enumerate() {
-            let state = episodes.get(episode.id.as_str()).map_or(WatchedState::Unwatched, |record| record.state());
+            // By the video id, then by season and number: an imported episode is
+            // keyed the second way, a played one the first.
+            let state = episodes
+                .get(episode.id.as_str())
+                .or_else(|| episodes.values().find(|record| record.season == Some(season) && record.number == Some(episode.number)))
+                .map_or(WatchedState::Unwatched, |record| record.state());
             let resuming = resuming.as_deref() == Some(episode.id.as_str());
             rows.push(episode_row(episode, index, state, resuming, locale));
         }

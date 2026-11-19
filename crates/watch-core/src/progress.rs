@@ -80,6 +80,19 @@ impl WatchedState {
 }
 
 impl MovieProgress {
+    /// The record for one episode: by the provider's own video id **or** by its
+    /// season and number.
+    ///
+    /// Playback keys episodes by the video id it played (`tt1:1:2`); an imported
+    /// episode is keyed the way a tracker names it. Both are the same episode, and
+    /// a screen asking which one is watched must not care which writer got there
+    /// first.
+    pub fn episode(&self, video_id: &str, season: u32, number: u32) -> Option<&EpisodeProgress> {
+        self.episodes
+            .get(video_id)
+            .or_else(|| self.episodes.values().find(|episode| episode.season == Some(season) && episode.number == Some(number)))
+    }
+
     /// The film's own state. A series keeps one per episode —
     /// [`MovieProgress::episodes`] — and its standing is [`SeriesStanding`].
     pub fn state(&self) -> WatchedState {

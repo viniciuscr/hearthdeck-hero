@@ -19,7 +19,7 @@ use heronite_watch_core::pull::{Pulled, RemoteMembership, RemotePosition, Remote
 use heronite_watch_core::sync_rules::{reconcile, Action, Local, Remote, Seen};
 use heronite_watch_core::title::IMPORTED_ADDON;
 use heronite_watch_core::tracker::{Delivery, ListChange, TrackedTitle, TrackedView};
-use heronite_watch_core::types::{MovieItem, MovieProgress, Origin};
+use heronite_watch_core::types::{EpisodeProgress, MovieItem, MovieProgress, Origin};
 use heronite_watch_simkl::pull::SimklPull;
 use heronite_watch_state::import as cursor;
 use heronite_watch_state::placeholders::{self, Placeholder};
@@ -330,7 +330,36 @@ fn apply(
             };
             let (kind, view) = view_of(&watch.view);
             let Some(record) = find(movies, imdb) else {
+                // The library does not have this title, but the watch is still a
+                // fact: a placeholder draws the title, and an episode record is what
+                // makes its episodes read as watched when the page opens. Without
+                // it a whole imported series was invisible.
                 missing.push((imdb.to_owned(), kind, watch.title.title.clone(), watch.title.year.clone()));
+                if let TrackedView::Episode { season, number } = view {
+                    let mut record = MovieProgress {
+                        provider: IMPORTED_ADDON.to_owned(),
+                        id: imdb.to_owned(),
+                        imdb: Some(imdb.to_owned()),
+                        updated_at: now,
+                        ..MovieProgress::default()
+                    };
+                    record.episodes.insert(
+                        format!("{imdb}:{season}:{number}"),
+                        EpisodeProgress {
+                            season: Some(season),
+                            number: Some(number),
+                            finished: true,
+                            updated_at: now,
+                            origin: Origin::Imported,
+                            imported_from: Some(provider.to_owned()),
+                            imported_at: Some(now),
+                            remote_updated_at: watch.at,
+                            ..EpisodeProgress::default()
+                        },
+                    );
+                    movies.progress.push(record);
+                    watched += 1;
+                }
                 continue;
             };
             present.push((imdb.to_owned(), kind));
@@ -769,6 +798,22 @@ mod tests {
 
     fn episode(imdb: &str, season: u32, number: u32) -> RemoteWatch {
         RemoteWatch { title: title(imdb), view: TrackedView::Episode { season, number }, at: Some(Utc::now()) }
+    }
+
+    #[test]
+    fn a_show_the_library_lacks_still_keeps_its_episodes() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        // Nothing recorded for this show, and no rail carrying it either.
+        let pulled = Pulled { watches: vec![episode("tt9", 3, 7)], ..Default::default() };
+        let (report, _) = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+        assert_eq!(report.watched, 1, "{report:?}");
+        assert_eq!(report.no_local, 1, "and the title is a placeholder");
+
+        let record = stored(&app, "tt9");
+        let entry = record.episodes.values().next().expect("the episode is a record");
+        assert_eq!((entry.season, entry.number), (Some(3), Some(7)));
+        assert!(entry.finished, "a series nobody here has can still be partly watched");
     }
 
     #[test]
