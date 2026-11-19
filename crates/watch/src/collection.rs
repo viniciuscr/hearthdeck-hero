@@ -60,6 +60,26 @@ fn items(http: &dyn Transport, app: &AppPaths, collections: &[(String, Collectio
     if !kept.is_empty() {
         rails.push(Rail { catalog: RailDescriptor { id: "personal", kind: "" }, items: kept });
     }
+    // Titles a provider knows and no source here has: entries of their own, so
+    // they appear where titles appear (greyed — the app greys what is not
+    // installed) instead of being invisible until the library gains them.
+    let imported = heronite_watch_state::placeholders::read(app);
+    if !imported.items.is_empty() {
+        let items: Vec<MovieItem> = imported
+            .items
+            .iter()
+            .map(|placeholder| MovieItem {
+                id: placeholder.imdb.clone(),
+                kind: placeholder.kind.clone(),
+                name: placeholder.title.clone(),
+                year: placeholder.year.clone(),
+                provider: String::new(),
+                addon: "imported".into(),
+                ..MovieItem::default()
+            })
+            .collect();
+        rails.push(Rail { catalog: RailDescriptor { id: "imported", kind: "" }, items });
+    }
     let mut movies = assemble(rails);
     // The collection rails the person turned on, marked on the titles they
     // brought: the Shelf tab reads the mark back, so drawing a rail asks the

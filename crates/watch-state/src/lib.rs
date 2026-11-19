@@ -6,6 +6,7 @@ pub mod collection;
 pub mod details;
 pub mod import;
 pub mod personal;
+pub mod placeholders;
 pub mod sessions;
 pub mod settings;
 pub mod store;

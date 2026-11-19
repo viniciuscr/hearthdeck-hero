@@ -18,6 +18,7 @@ use heronite_watch_core::tracker::{TrackedTitle, TrackedView};
 use heronite_watch_core::types::{MovieProgress, Origin};
 use heronite_watch_simkl::pull::SimklPull;
 use heronite_watch_state::import as cursor;
+use heronite_watch_state::placeholders::{self, Placeholder};
 use heronite_watch_state::store;
 use heronite_watch_state::store::StoreCredentials;
 
@@ -219,20 +220,26 @@ fn apply(app: &AppPaths, provider: &str, pulled: &Pulled, last_pull_at: Option<D
 
     let mut watched = 0usize;
     let mut placed = 0usize;
-    let mut no_local = 0usize;
     let mut held = 0usize;
+    // Titles the library does not have, and titles it just gained: written after
+    // the movies lock is released (a different file).
+    let mut missing: Vec<(String, String, String, Option<String>)> = Vec::new();
+    let mut present: Vec<(String, String)> = Vec::new();
+
     store::update_movies(app, |movies| {
         for watch in &watches {
             let Some(imdb) = watch.title.imdb.as_deref() else {
                 continue;
             };
+            let (kind, view) = view_of(&watch.view);
             let Some(record) = find(movies, imdb) else {
-                no_local += 1;
+                missing.push((imdb.to_owned(), kind, watch.title.title.clone(), watch.title.year.clone()));
                 continue;
             };
+            present.push((imdb.to_owned(), kind));
             // An episode's watched state comes with the extended pull; a film is
             // ours to finish.
-            if !matches!(watch.view, TrackedView::Movie) {
+            if !matches!(view, TrackedView::Movie) {
                 held += 1;
                 continue;
             }
@@ -248,10 +255,12 @@ fn apply(app: &AppPaths, provider: &str, pulled: &Pulled, last_pull_at: Option<D
             let Some(imdb) = position.title.imdb.as_deref() else {
                 continue;
             };
+            let (kind, _) = view_of(&position.view);
             let Some(record) = find(movies, imdb) else {
-                no_local += 1;
+                missing.push((imdb.to_owned(), kind, position.title.title.clone(), position.title.year.clone()));
                 continue;
             };
+            present.push((imdb.to_owned(), kind));
             if record.finished || record.unwatched || record.duration_ms == 0 {
                 held += 1;
                 continue;
@@ -273,11 +282,29 @@ fn apply(app: &AppPaths, provider: &str, pulled: &Pulled, last_pull_at: Option<D
         Ok(())
     })?;
 
+    // A title no source here has becomes a library entry of its own: it appears
+    // where titles appear, greyed, and leaves when the library gains it.
+    for (imdb, kind, title, year) in missing {
+        placeholders::upsert(app, Placeholder { imdb, kind, title, year, provider: provider.to_owned(), first_seen: Some(now) })?;
+        report.no_local += 1;
+    }
+    for (imdb, kind) in present {
+        placeholders::remove(app, &imdb, &kind)?;
+    }
+
     report.watched = watched;
     report.positions = placed;
-    report.no_local = no_local;
     report.blocked += held;
     Ok(report)
+}
+
+/// The library kind and the view a remote fact carries.
+fn view_of(view: &TrackedView) -> (String, TrackedView) {
+    let kind = match view {
+        TrackedView::Movie => "movie",
+        TrackedView::Episode { .. } => "series",
+    };
+    (kind.to_owned(), view.clone())
 }
 
 /// Whether the outbox or the echo window says "leave this title alone".
@@ -395,12 +422,28 @@ mod tests {
     }
 
     #[test]
-    fn a_title_the_library_does_not_have_is_counted_not_created() {
+    fn a_title_the_library_does_not_have_becomes_a_placeholder() {
         let root = tempfile::tempdir().unwrap();
         let app = app(root.path());
         let report = apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None).unwrap();
         assert_eq!(report.no_local, 1);
-        assert!(store::read_movies(&app).progress.is_empty(), "no record is invented yet");
+        assert!(store::read_movies(&app).progress.is_empty(), "no watch record is invented");
+        let placeholders = placeholders::read(&app).items;
+        assert_eq!(placeholders.len(), 1);
+        assert_eq!(placeholders[0].imdb, "tt9");
+        assert_eq!(placeholders[0].provider, "simkl");
+    }
+
+    #[test]
+    fn a_placeholder_leaves_when_the_library_gains_the_title() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None).unwrap();
+        assert_eq!(placeholders::read(&app).items.len(), 1);
+
+        record(&app, "tt9", 6_000_000);
+        apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None).unwrap();
+        assert!(placeholders::read(&app).items.is_empty(), "the library has it now");
     }
 
     #[test]
