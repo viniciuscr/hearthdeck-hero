@@ -192,7 +192,7 @@ impl CollectionView {
             wide_title: (landscape_art && logo.is_none() && src.is_some()).then(|| title.clone()),
             src,
             logo,
-            grey: theme.tiles.grey_uninstalled && missing,
+            grey: (theme.tiles.grey_uninstalled || game.as_ref().is_some_and(|g| crate::fork::watch::sources::imported(g))) && missing,
             badge: if theme.tiles.badges == Badges::Off { None } else { running },
             favourite: all_badges && game.as_ref().is_some_and(|g| g.favourite),
             new: all_badges && game.as_ref().and_then(|g| self.game_extras.added.get(&g.key)).is_some_and(|d| is_new(d)),

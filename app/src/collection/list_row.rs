@@ -42,7 +42,7 @@ pub(super) fn row(
     on_play: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
     let vm = s.vm;
-    let grey = (s.grey_uninstalled && !vm.installed || vm.hidden) && !s.hovered;
+    let grey = ((s.grey_uninstalled || vm.imported) && !vm.installed || vm.hidden) && !s.hovered;
     let left_out = s.pick == Some(false) && !s.hovered;
     let r = s.look.radius.min(4.);
     let thumb = div()

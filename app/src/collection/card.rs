@@ -113,7 +113,7 @@ pub fn card(
         BoxShadow { color: theme::shadow_a(0.38), offset: point(px(0.), px(8.)), blur_radius: px(20.), spread_radius: px(0.), inset: false }
     };
 
-    let grey = (s.grey_uninstalled && !vm.installed || vm.hidden) && !s.hovered;
+    let grey = ((s.grey_uninstalled || vm.imported) && !vm.installed || vm.hidden) && !s.hovered;
     // The categories: the circles join the star's row; the corner styles
     // give way to the selection's tick and push the copies badge left.
     let style = look.categories.filter(|_| !s.categories.is_empty());

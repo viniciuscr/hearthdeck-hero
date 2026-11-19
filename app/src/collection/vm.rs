@@ -29,6 +29,9 @@ pub(super) struct CardVm {
     /// The playtime, or the value the list is sorted by.
     pub caption: Caption,
     pub installed: bool,
+    /// A Watch placeholder: imported from a provider and playable by no source
+    /// here. Dimmed always — "not available" is information, not decoration.
+    pub imported: bool,
     pub playing: bool,
     /// Hidden in Heroic and shown because "Show hidden games" is on.
     pub hidden: bool,
@@ -352,6 +355,7 @@ mod tests {
                 title: key.to_string().into(),
                 caption: Caption { icon: Icon::Add, text: "".into(), muted: false, stars: None, tint: None },
                 installed: true,
+                imported: false,
                 playing: false,
                 hidden: false,
                 favourite: false,
