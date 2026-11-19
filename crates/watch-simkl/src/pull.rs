@@ -51,9 +51,19 @@ impl WatchSync for SimklPull {
         let mut pulled = Pulled::default();
 
         let mut url = api_url(&client_id, "/sync/all-items")?;
-        url.query_pairs_mut().append_pair("extended", "ids_only");
-        if let Some(all) = since.and_then(|since| since.get("all")).and_then(Value::as_str) {
-            url.query_pairs_mut().append_pair("date_from", all);
+        // `full` carries the ids a tracker needs; `episode_watched_at=yes` puts the
+        // stamps on the episodes. The first pull also asks for every episode, so a
+        // show finished on another device arrives whole; a delta only asks for what
+        // moved.
+        url.query_pairs_mut().append_pair("extended", "full");
+        url.query_pairs_mut().append_pair("episode_watched_at", "yes");
+        match since.and_then(|since| since.get("all")).and_then(Value::as_str) {
+            Some(all) => {
+                url.query_pairs_mut().append_pair("date_from", all);
+            }
+            None => {
+                url.query_pairs_mut().append_pair("include_all_episodes", "yes");
+            }
         }
         let body = ctx.http.get_bearer(&url, &token).context("Simkl all-items")?;
         let answer: AllItems = serde_json::from_slice(&body).context("Simkl all-items")?;
@@ -70,9 +80,11 @@ impl WatchSync for SimklPull {
                 },
             }
         }
-        // A show-level fact says nothing about which episode: episode rows come
-        // with the extended pull, and are a later slice.
-        pulled.skipped += answer.shows.len() + answer.anime.len();
+        for show in answer.shows.into_iter().chain(answer.anime) {
+            let (episodes, missing) = show.watched_episodes();
+            pulled.watches.extend(episodes);
+            pulled.skipped += missing;
+        }
 
         let url = api_url(&client_id, "/sync/playback")?;
         let body = ctx.http.get_bearer(&url, &token).context("Simkl playback")?;
@@ -115,9 +127,68 @@ struct AllItems {
     #[serde(default)]
     movies: Vec<MovieRow>,
     #[serde(default)]
-    shows: Vec<Value>,
+    shows: Vec<ShowRow>,
     #[serde(default)]
-    anime: Vec<Value>,
+    anime: Vec<ShowRow>,
+}
+
+/// One show in the pull, with the episodes Simkl lists under it.
+#[derive(Deserialize)]
+struct ShowRow {
+    show: Media,
+    #[serde(default)]
+    seasons: Vec<SeasonRow>,
+}
+
+#[derive(Deserialize, Default)]
+struct SeasonRow {
+    #[serde(default)]
+    number: u32,
+    #[serde(default)]
+    episodes: Vec<EpisodeRow>,
+}
+
+#[derive(Deserialize, Default)]
+struct EpisodeRow {
+    #[serde(default)]
+    number: u32,
+    /// Present when `episode_watched_at` was asked for, and only on an episode the
+    /// person watched.
+    #[serde(default)]
+    watched_at: Option<String>,
+}
+
+impl ShowRow {
+    /// The watched episodes of one show, each its own fact.
+    ///
+    /// With `episode_watched_at=yes` Simkl shares the show's last-watched stamp
+    /// across its episodes: honest enough for the one-time baseline and the reason
+    /// a delta asks for it too — an episode that moved carries its own date.
+    fn watched_episodes(self) -> (Vec<RemoteWatch>, usize) {
+        let ShowRow { show, seasons } = self;
+        let (mut title, _) = match show.into_title_and_view() {
+            Some((title, _)) => (title, ()),
+            // Without a title anybody can be shown, its episodes are not facts we
+            // can place: counted, not guessed.
+            None => return (Vec::new(), seasons.iter().map(|season| season.episodes.len()).sum()),
+        };
+        title.kind = "series".into();
+        let mut watches = Vec::new();
+        let mut missing = 0;
+        for season in seasons {
+            for episode in season.episodes {
+                match at(episode.watched_at.as_deref()) {
+                    Some(stamp) => watches.push(RemoteWatch {
+                        title: title.clone(),
+                        view: TrackedView::Episode { season: season.number, number: episode.number },
+                        at: Some(stamp),
+                    }),
+                    None => missing += 1,
+                }
+            }
+        }
+        (watches, missing)
+    }
 }
 
 #[derive(Deserialize)]
@@ -239,7 +310,8 @@ mod tests {
                       {"status":"plantowatch","movie":{"title":"Dune","ids":{"imdb":"tt1160419"}}},
                       {"status":"completed","movie":{"title":"No ids"}}
                     ],
-                    "shows":[{"status":"completed","show":{"title":"A Show","ids":{"imdb":"tt0944947"}}}],
+                    "shows":[{"status":"watching","last_watched_at":"2026-01-03T20:00:00Z","show":{"title":"A Show","ids":{"imdb":"tt0944947"}},
+                      "seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2026-01-03T20:00:00Z"},{"number":2},{"number":3,"watched_at":"2026-01-03T20:00:00Z"}]}]}],
                     "anime":[]
                 }"#,
             );
@@ -312,6 +384,29 @@ mod tests {
     }
 
     #[test]
+    fn the_baseline_asks_for_every_episode_and_a_delta_does_not() {
+        let fake = Fake::new();
+        let credentials = credentials();
+        let ctx = Ctx { http: &fake, credentials: &credentials };
+        let _ = SimklPull.pull(&ctx, None).unwrap();
+        let seen = fake.asked();
+        assert!(seen.iter().any(|url| url.contains("include_all_episodes=yes")), "{seen:?}");
+        assert!(
+            seen.iter()
+                .filter(|url| url.contains("/sync/all-items"))
+                .all(|url| url.contains("episode_watched_at=yes") && url.contains("extended=full")),
+            "the episodes and their stamps, on every pull: {seen:?}"
+        );
+
+        let since = serde_json::json!({"all": "2026-01-01T00:00:00Z"});
+        let _ = SimklPull.pull(&ctx, Some(&since)).unwrap();
+        let seen = fake.asked();
+        let delta: Vec<&String> = seen.iter().filter(|url| url.contains("date_from=")).collect();
+        assert!(!delta.is_empty(), "{seen:?}");
+        assert!(delta.iter().all(|url| !url.contains("include_all_episodes")), "a delta asks for what moved: {seen:?}");
+    }
+
+    #[test]
     fn the_first_pull_has_no_date_and_later_ones_do() {
         let fake = Fake::new();
         let credentials = credentials();
@@ -338,11 +433,17 @@ mod tests {
         let credentials = credentials();
         let ctx = Ctx { http: &fake, credentials: &credentials };
         let pulled = SimklPull.pull(&ctx, None).unwrap();
-        assert_eq!(pulled.watches.len(), 1, "{:?}", pulled.watches);
+        assert_eq!(pulled.watches.len(), 3, "{:?}", pulled.watches);
         let watch = &pulled.watches[0];
         assert_eq!(watch.title.imdb.as_deref(), Some("tt1375666"));
         assert_eq!(watch.view, TrackedView::Movie);
         assert!(watch.at.is_some(), "the provider's own stamp");
+
+        // The show arrives as its episodes, each its own fact.
+        assert_eq!(pulled.watches[1].view, TrackedView::Episode { season: 1, number: 1 });
+        assert_eq!(pulled.watches[2].view, TrackedView::Episode { season: 1, number: 3 });
+        assert_eq!(pulled.watches[1].title.kind, "series");
+        assert_eq!(pulled.watches[1].title.imdb.as_deref(), Some("tt0944947"));
         // the id-less film and the show-level fact
         assert_eq!(pulled.skipped, 2, "{pulled:?}");
         assert_eq!(pulled.memberships.len(), 1, "plantowatch is a list, not a watch");

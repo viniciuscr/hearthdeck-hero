@@ -285,19 +285,47 @@ fn apply(
                 continue;
             };
             present.push((imdb.to_owned(), kind));
-            // An episode's watched state comes with the extended pull; a film is
-            // ours to finish.
-            if !matches!(view, TrackedView::Movie) {
+            // A title marked "not watched" here stays that way: the person said so.
+            if record.unwatched {
                 held += 1;
                 continue;
             }
-            if record.unwatched || record.finished {
-                held += 1;
-                continue;
+            match view {
+                TrackedView::Movie => {
+                    if record.finished {
+                        held += 1;
+                        continue;
+                    }
+                    record.finished = true;
+                    stamp(record, provider, now, watch.at);
+                    watched += 1;
+                }
+                TrackedView::Episode { season, number } => {
+                    // A series keeps one record per episode. Playback keys them by
+                    // the provider's episode id, so an entry is matched by its own
+                    // season and number before a new one is made.
+                    let key = record
+                        .episodes
+                        .iter()
+                        .find(|(_, episode)| episode.season == Some(season) && episode.number == Some(number))
+                        .map(|(key, _)| key.clone())
+                        .unwrap_or_else(|| format!("{season}:{number}"));
+                    let episode = record.episodes.entry(key).or_default();
+                    if episode.unwatched || episode.finished {
+                        held += 1;
+                        continue;
+                    }
+                    episode.season = Some(season);
+                    episode.number = Some(number);
+                    episode.finished = true;
+                    episode.updated_at = watch.at.unwrap_or(now);
+                    episode.origin = Origin::Imported;
+                    episode.imported_from = Some(provider.to_owned());
+                    episode.imported_at = Some(now);
+                    episode.remote_updated_at = watch.at;
+                    watched += 1;
+                }
             }
-            record.finished = true;
-            stamp(record, provider, now, watch.at);
-            watched += 1;
         }
         for position in &positions {
             let Some(imdb) = position.title.imdb.as_deref() else {
@@ -678,6 +706,42 @@ mod tests {
         .0;
         assert_eq!(report.blocked, 1);
         assert_eq!(stored(&app, "tt1").position_ms, 4_800_000);
+    }
+
+    fn episode(imdb: &str, season: u32, number: u32) -> RemoteWatch {
+        RemoteWatch { title: title(imdb), view: TrackedView::Episode { season, number }, at: Some(Utc::now()) }
+    }
+
+    #[test]
+    fn an_episode_watched_elsewhere_finishes_here() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        record(&app, "tt9", 6_000_000);
+
+        let pulled = Pulled { watches: vec![episode("tt9", 2, 4)], ..Default::default() };
+        let (report, _) = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+        assert_eq!(report.watched, 1, "{report:?}");
+
+        let stored = stored(&app, "tt9");
+        let entry = stored.episodes.values().next().expect("one episode");
+        assert_eq!((entry.season, entry.number), (Some(2), Some(4)), "which episode it was");
+        assert!(entry.finished, "watched elsewhere, watched here");
+        assert_eq!(entry.origin, Origin::Imported);
+        assert_eq!(entry.imported_from.as_deref(), Some("simkl"));
+    }
+
+    #[test]
+    fn an_episode_already_finished_is_left_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        record(&app, "tt9", 6_000_000);
+        let pulled = Pulled { watches: vec![episode("tt9", 2, 4)], ..Default::default() };
+        let _ = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+
+        let (second, _) = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+        assert_eq!(second.watched, 0, "nothing new to record");
+        assert_eq!(second.blocked, 1, "counted as held, not rewritten");
+        assert_eq!(stored(&app, "tt9").episodes.len(), 1, "still one entry");
     }
 
     fn membership(imdb: &str) -> RemoteMembership {
