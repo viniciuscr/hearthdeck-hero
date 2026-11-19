@@ -462,6 +462,9 @@ impl CollectionView {
             _ if game.is_some() => vec![hint(Btn::A, tr!("Actions")), hint(Btn::X, primary), hint(Btn::Y, tr!("Search"))],
             _ => vec![hint(Btn::A, tr!("Open")), hint(Btn::Y, tr!("Search"))],
         };
+        if game.is_some() {
+            h.extend(self.console_trailer_hint());
+        }
         h.extend(self.console_tab_hints());
         h
     }

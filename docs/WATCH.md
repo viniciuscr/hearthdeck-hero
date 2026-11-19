@@ -4,6 +4,22 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-19 — the trailer moves to L3, on every screen.** Y was the
+> trailer's on the film page, but Y is the list's search: one press cannot be two
+> things, and a person who learned the trailer on the page could not play it
+> from the grid. The trailer now answers to **L3 (the click of the left stick)**
+> everywhere — the film page's hint bar reads `L3 · Watch trailer`, and the
+> covers of every layout in the Watch space carry the same hint and play the
+> focused title's trailer. A cover never opened the page, so the press asks the
+> metadata sources for the title's details first and plays the trailer with the
+> answer; a title without one says `No trailer for this title.` X keeps starting
+> the title, and Y keeps the search.
+>
+> Also: **TMDB's sign-in on a TV no longer opens a browser.** The settings page
+> opened the approval page on the host *and* showed its QR, which took the
+> screen away from the panel the person was looking at. Console mode shows only
+> the panel; a desk still opens the browser, having no panel over the page.
+>
 > **Revision 2026-11-18 — the Trailer tab is gone; Y is the trailer.** A third
 > card was the wrong shape for a thirty-second video, so the film page is back to
 > two (Details, Streams) and the trailer moved to the **hint bar**: while a

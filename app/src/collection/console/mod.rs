@@ -602,6 +602,15 @@ impl CollectionView {
             }
             return;
         }
+        // L3 plays the focused title's trailer from any layout: the covers keep
+        // Y for the search, so the press that follows the title across the
+        // screens is the stick's click.
+        if pad == Pad::L3 && self.space == Space::Watch {
+            if let Some(game) = self.selected.as_ref().and_then(|key| self.lib.as_ref()?.get(key)).cloned() {
+                self.watch_play_trailer(&game, cx);
+            }
+            return;
+        }
         let (tab, spec) = self.console_shown_tab();
         if !self.layout_pad(tab, &spec, pad, window, cx) {
             match pad {
@@ -731,7 +740,8 @@ impl CollectionView {
         h
     }
 
-    /// A / X on a cover (as the theme's `nav.aButton` says), Y search, tabs, menu.
+    /// A / X on a cover (as the theme's `nav.aButton` says), Y search, the
+    /// trailer, tabs, menu.
     pub(super) fn console_cover_hints(&self) -> Vec<Hint> {
         let primary = self.selected.as_ref().and_then(|k| self.lib.as_ref()?.get(k)).map(|g| self.primary_label(g)).unwrap_or(tr!("Play"));
         let mut h = if look::theme().nav.a_button == AButton::Details {
@@ -740,8 +750,15 @@ impl CollectionView {
             vec![hint(Btn::A, primary), hint(Btn::X, tr!("Details"))]
         };
         h.push(hint(Btn::Y, tr!("Search")));
+        h.extend(self.console_trailer_hint());
         h.extend(self.console_tab_hints());
         h
+    }
+
+    /// L3 on a cover of the Watch space: the trailer plays from the list as it
+    /// does from the title's page, where Y keeps the search it has here.
+    pub(super) fn console_trailer_hint(&self) -> Option<Hint> {
+        (self.space == Space::Watch && self.selected.is_some()).then(|| hint(Btn::L3, tr!("Watch trailer")))
     }
 
     /// Hints of whatever takes the presses now.

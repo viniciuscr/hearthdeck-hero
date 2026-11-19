@@ -47,6 +47,9 @@ pub(super) struct WatchPlayback {
     /// Play the first stream as soon as this title/episode's list arrives (A on
     /// an episode, or Play, starts the best at once). `Some(None)` is a film.
     pending: Option<Option<String>>,
+    /// A trailer was asked for before the title's details arrived (from a
+    /// cover, where nobody has opened the page yet): it plays with them.
+    trailer_pending: Option<String>,
 }
 
 /// The series picker's state: which season and episode the page shows.
@@ -118,6 +121,18 @@ struct Running {
     stop: Arc<AtomicBool>,
 }
 
+/// What the page knows about a title's trailer, before asking anyone.
+enum Trailer {
+    /// The first trailer's page, for mpv.
+    Found(String),
+    /// The sources answered, and the title has none.
+    NotFound,
+    /// The sources could not be asked.
+    Unavailable,
+    /// Nobody has asked yet: the details are still on their way.
+    Unasked,
+}
+
 impl CollectionView {
     /// Drops the loaded sources and asks a running mpv to quit.
     pub(super) fn watch_reset(&mut self) {
@@ -171,6 +186,14 @@ impl CollectionView {
                         TitleState::Failed
                     }
                 };
+                // A trailer pressed on a cover asked for these details: it plays
+                // now, or says there is none.
+                if this.watch.trailer_pending.as_deref() == Some(key.as_str()) {
+                    this.watch.trailer_pending = None;
+                    if let Some(game) = this.lib.as_ref().and_then(|lib| lib.get(&key)).cloned() {
+                        this.watch_play_trailer(&game, cx);
+                    }
+                }
                 cx.notify();
             })
             .ok();
@@ -193,6 +216,23 @@ impl CollectionView {
     /// Whether the sources could not be asked for `key`'s details.
     pub(super) fn watch_details_failed(&self, key: &str) -> bool {
         self.watch.info.item.as_deref() == Some(key) && matches!(self.watch.info.state, TitleState::Failed)
+    }
+
+    /// What is known about `key`'s trailer without asking: the details may not
+    /// describe this title yet (a cover never opened it).
+    fn watch_trailer(&self, key: &str) -> Trailer {
+        if self.watch.info.item.as_deref() != Some(key) {
+            return Trailer::Unasked;
+        }
+        match &self.watch.info.state {
+            TitleState::Ready(details) => match details.trailers.first() {
+                Some(trailer) => Trailer::Found(trailer.url.clone()),
+                None => Trailer::NotFound,
+            },
+            TitleState::Missing => Trailer::NotFound,
+            TitleState::Failed => Trailer::Unavailable,
+            TitleState::Idle | TitleState::Loading => Trailer::Unasked,
+        }
     }
 
     /// Loads the streams of `game` (or of one episode, when `video` names it)
@@ -315,10 +355,13 @@ impl CollectionView {
         self.watch.tab
     }
 
-    /// Y (the triangle), when the title has a trailer: it plays in **mpv**, like
-    /// a title does, and leaves nothing behind — no progress, no session, no
-    /// tracker event. Pressing it again while it plays stops it, and one player
-    /// at a time still holds: a stream playing has to stop first.
+    /// L3 (the click of the left stick), when the title has a trailer: it plays
+    /// in **mpv**, like a title does, and leaves nothing behind — no progress,
+    /// no session, no tracker event. Pressing it again while it plays stops it,
+    /// and one player at a time still holds: a stream playing has to stop first.
+    ///
+    /// A cover on the list never opened the page, so the details may not be in
+    /// hand yet: the press asks for them and the trailer starts with the answer.
     pub(super) fn watch_play_trailer(&mut self, game: &CollectionGame, cx: &mut Context<Self>) {
         if let Some(running) = &self.watch.running {
             if running.key == game.key {
@@ -329,9 +372,21 @@ impl CollectionView {
             cx.notify();
             return;
         }
-        let Some(url) = self.watch_details(&game.key).and_then(|details| details.trailers.first().map(|trailer| trailer.url.clone()))
-        else {
-            return;
+        let url = match self.watch_trailer(&game.key) {
+            Trailer::Found(url) => url,
+            Trailer::NotFound => {
+                self.show_toast(tr!("No trailer for this title."), true, cx);
+                return;
+            }
+            Trailer::Unavailable => {
+                self.show_toast(tr!("Details unavailable right now."), true, cx);
+                return;
+            }
+            Trailer::Unasked => {
+                self.watch.trailer_pending = Some(game.key.clone());
+                self.watch_ensure_details(game, cx);
+                return;
+            }
         };
         let title = format!("{} \u{2014} {}", game.title, self.watch_title(game));
         let stop = Arc::new(AtomicBool::new(false));

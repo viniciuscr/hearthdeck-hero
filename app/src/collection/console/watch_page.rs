@@ -502,13 +502,13 @@ impl CollectionView {
     pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(game) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else { return false };
         let details = self.watch_details(key);
-        let has_trailer = details.as_ref().is_some_and(|details| !details.trailers.is_empty());
         let tab = self.watch_tab();
-        // Y (the triangle) is the trailer's, when the title has one: the hint
-        // bar says "Watch trailer" and this is the press it promises. X keeps
-        // what it does on the list — it starts the title — so the two presses
-        // never trade places.
-        if trailer_press(pad, has_trailer) {
+        // L3 (the left stick's click) is the trailer's: the hint bar says
+        // "Watch trailer" while the title has one, and this is the press it
+        // promises. X keeps what it does on the list — it starts the title —
+        // and Y keeps the list's search, so no two presses trade places. A
+        // title with no trailer answers the press itself (`watch_play_trailer`).
+        if trailer_press(pad) {
             self.watch_play_trailer(&game, cx);
             return true;
         }
@@ -626,8 +626,8 @@ impl CollectionView {
         }
     }
 
-    /// The page's hint bar: what A, the bumpers, X and Y do on the card shown. X
-    /// starts the title, as it does on the list; Y is the trailer while the
+    /// The page's hint bar: what A, the bumpers, X and L3 do on the card shown.
+    /// X starts the title, as it does on the list; L3 is the trailer while the
     /// title has one, so each press and its label agree.
     pub(super) fn watch_page_hints(&self, key: &SharedString) -> Vec<Hint> {
         let primary = self.lib.as_ref().and_then(|lib| lib.get(key)).map(|game| self.primary_label(game)).unwrap_or(tr!("Play"));
@@ -641,21 +641,23 @@ impl CollectionView {
     }
 }
 
-/// The hint bar's Y, when the title has a trailer to watch: the press plays it
+/// The hint bar's L3: the press it names is the one `trailer_press` takes, so
+/// the label and what it does cannot drift apart.
+const TRAILER_BTN: Btn = Btn::L3;
+
+/// The hint bar's L3, when the title has a trailer to watch: the press plays it
 /// in mpv instead of the stream. No trailer, no hint — nothing to offer.
 fn trailer_hint(has_trailer: bool) -> Option<Hint> {
     has_trailer.then(|| hint(TRAILER_BTN, tr!("Watch trailer")))
 }
 
-/// The button a trailer answers to: the triangle, never the primary's X (that
-/// one starts the title, as it does on the list). A hint click maps back to the
-/// same press, so the label and what it does cannot drift apart.
-const TRAILER_BTN: Btn = Btn::Y;
-
-/// Whether `pad` is the trailer's press. A title without a trailer offers it to
-/// nobody, and no other button is ever taken for it.
-fn trailer_press(pad: Pad, has_trailer: bool) -> bool {
-    has_trailer && pad == Pad::Y
+/// Whether `pad` is the trailer's press: the click of the left stick, never the
+/// primary's X (that one starts the title, as it does on the list) and never Y
+/// (the list keeps it for the search). The title's own state says what the press
+/// does — play the trailer, or answer that there is none — so the press is the
+/// same on the page and on the covers, even before the details are in hand.
+fn trailer_press(pad: Pad) -> bool {
+    pad == Pad::L3
 }
 
 /// Whether the card has room for two columns of facts (design px, as the
@@ -805,17 +807,16 @@ mod tests {
     #[test]
     fn the_hint_bar_offers_the_trailer_only_when_there_is_one() {
         assert!(trailer_hint(false).is_none(), "no trailer, nothing to offer");
-        let offered = trailer_hint(true).expect("a trailer is offered on the triangle");
-        assert_eq!(offered.btn, Btn::Y, "the triangle, never the primary's X");
+        let offered = trailer_hint(true).expect("a trailer is offered on the stick's click");
+        assert_eq!(offered.btn, Btn::L3, "the stick's click, never the primary's X");
         assert_eq!(offered.label, "Watch trailer");
     }
 
     #[test]
-    fn only_the_triangle_presses_the_trailer() {
-        assert!(trailer_press(Pad::Y, true), "the triangle plays it");
-        assert!(!trailer_press(Pad::Y, false), "no trailer, nothing to press");
-        for pad in [Pad::X, Pad::A, Pad::B, Pad::Up, Pad::Down, Pad::Left, Pad::LB, Pad::Start] {
-            assert!(!trailer_press(pad, true), "{pad:?} keeps its own job");
+    fn only_the_sticks_click_presses_the_trailer() {
+        assert!(trailer_press(Pad::L3), "the click plays it");
+        for pad in [Pad::X, Pad::A, Pad::B, Pad::Y, Pad::Up, Pad::Down, Pad::Left, Pad::LB, Pad::Start] {
+            assert!(!trailer_press(pad), "{pad:?} keeps its own job");
         }
     }
 
