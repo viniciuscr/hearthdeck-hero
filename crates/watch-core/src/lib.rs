@@ -14,6 +14,7 @@ pub mod progress;
 pub mod provider;
 pub mod pull;
 pub mod sync_rules;
+pub mod title;
 pub mod tracker;
 pub mod types;
 
