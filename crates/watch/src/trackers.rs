@@ -116,7 +116,7 @@ pub fn record_manual(app: &AppPaths, title: TrackedTitle, view: TrackedView, wat
     // A series marked before its episode list is known has nothing a tracker can
     // understand: a film's mark on a show would be posted as a movie entry.
     if view == TrackedView::Movie && title.kind == "series" {
-        log::debug!("not queueing a film mark for the series {}", title.title);
+        log::info!("not sending {}: a series mark needs its episode, and its list is not here yet", title.title);
         return;
     }
     queue(app, TrackEvent { seq: 0, at: Utc::now(), title, view, watch });
@@ -188,6 +188,16 @@ pub fn drain(app: &AppPaths) -> Result<Report> {
     for (id, tracker, event) in work {
         match tracker.deliver(&event) {
             Ok(delivery) => {
+                // One line per attempt: the only place a person can see that the
+                // remote tracker took the mark, or why it did not.
+                match &delivery {
+                    Delivery::Delivered => log::info!("{id} took {}", describe(&event)),
+                    Delivery::Unmatched(reason) => log::warn!("{id} could not match {}: {reason}", describe(&event)),
+                    Delivery::Retry { reason, after } => {
+                        let wait = after.map(|wait| format!(", again in {} min", wait.num_minutes())).unwrap_or_default();
+                        log::warn!("{id} did not take {}: {reason}{wait}", describe(&event));
+                    }
+                }
                 if let Delivery::Retry { reason, .. } = &delivery {
                     failed = Some(reason.clone());
                 }
@@ -208,6 +218,9 @@ pub fn drain(app: &AppPaths) -> Result<Report> {
     report.delivered = results.iter().filter(|(_, _, delivery)| matches!(delivery, Delivery::Delivered)).count();
     report.unmatched = results.iter().filter(|(_, _, delivery)| matches!(delivery, Delivery::Unmatched(_))).count();
     report.failed = failed;
+    if report.delivered + report.unmatched > 0 {
+        log::info!("trackers: {} delivered, {} unmatched", report.delivered, report.unmatched);
+    }
 
     tracking::update(app, |file| {
         let mut delivered: Vec<TrackEvent> = Vec::new();
@@ -348,11 +361,29 @@ fn queued_mut(file: &mut tracking::TrackingFile, seq: u64) -> Option<&mut tracki
 /// Queues `event`, when there is somewhere to send it. A tracker turned on later
 /// gets the history through [`backfill`], not by replaying an unbounded log.
 fn queue(app: &AppPaths, event: TrackEvent) {
-    if enabled(app).is_empty() {
+    let on = enabled(app);
+    // Named before the event is moved into the outbox.
+    let what = describe(&event);
+    if on.is_empty() {
+        log::info!("{what} stays here: no tracker is on");
         return;
     }
-    if let Err(error) = tracking::enqueue(app, event) {
-        log::warn!("queueing the watch event: {error:#}");
+    match tracking::enqueue(app, event) {
+        Ok(_) => log::info!("{what} queued for {}", on.join(", ")),
+        Err(error) => log::warn!("queueing {what}: {error:#}"),
+    }
+}
+
+/// A title and the part of it an event is about, for a log line a person reads.
+fn describe(event: &TrackEvent) -> String {
+    let what = match event.watch {
+        TrackedWatch::Watched => "watched",
+        TrackedWatch::Unwatched => "not watched",
+        TrackedWatch::InProgress { .. } => "a position",
+    };
+    match event.view {
+        TrackedView::Movie => format!("{} ({what})", event.title.title),
+        TrackedView::Episode { season, number } => format!("{} S{season}E{number} ({what})", event.title.title),
     }
 }
 

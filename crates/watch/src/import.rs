@@ -221,6 +221,15 @@ pub fn run_with(app: &AppPaths, sync: &dyn WatchSync, ctx: &Ctx<'_>) -> Result<R
 
     let pulled = sync.pull(ctx, since.as_ref())?;
     let (report, seen) = apply(app, provider, &pulled, stored.last_pull_at, &stored.list_ids)?;
+    log::info!(
+        "{provider} pull: {} watched, {} positions, {} skipped, {} added to a list, {} removed, {} list changes delivered",
+        report.watched,
+        report.positions,
+        report.skipped,
+        report.lists_added,
+        report.lists_removed,
+        report.lists_delivered
+    );
     // Last, and only now: a failed apply leaves the cursor where it was, so the
     // next run asks for the same window again.
     cursor::update(app, provider, |cursor| {

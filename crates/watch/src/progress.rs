@@ -103,6 +103,14 @@ pub fn set_watched(app: &AppPaths, mark: &Mark<'_>, watched: bool) -> Result<()>
         Ok(())
     })?;
 
+    // Said here, after the write: the log is the only place a person can see that
+    // a mark landed, and the drain's lines say where it went afterwards.
+    let what = match mark.target {
+        MarkTarget::Movie => format!("{} {} · {}", mark.kind, mark.name, mark.provider),
+        MarkTarget::Episode { season, number, .. } => format!("{} S{season}E{number}", mark.name),
+    };
+    log::info!("marked {what} as {} here", if watched { "watched" } else { "not watched" });
+
     crate::trackers::record_manual(
         app,
         TrackedTitle {
