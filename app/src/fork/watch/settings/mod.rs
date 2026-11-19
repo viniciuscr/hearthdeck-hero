@@ -1551,8 +1551,12 @@ pub(crate) fn source_rows(d: &SettingsPage) -> Vec<Row> {
         for id in trackers {
             let on = d.watch.trackers.iter().any(|known| known == &id);
             rows.push(
-                Row::toggle(SharedString::from(format!("watch-tracker:{id}")), SharedString::from(tracker_name(&id)), on)
-                    .desc(tracker_state(d)),
+                Row::toggle(
+                    SharedString::from(format!("watch-tracker:{id}")),
+                    tr!("Send what I watch to {provider}", provider = tracker_name(&id)),
+                    on,
+                )
+                .desc(tracker_state(d)),
             );
             // The other direction, a separate switch: reading never queues a
             // backfill of what was watched here.

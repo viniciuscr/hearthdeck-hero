@@ -40,6 +40,8 @@ const DEVICE: &str = "/oauth2/device";
 const TOKEN: &str = "/oauth2/token";
 /// The grant the polling endpoint takes.
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+/// The grant that trades a refresh token for a new pair.
+const REFRESH_GRANT: &str = "refresh_token";
 
 /// What Simkl handed out for one sign-in attempt: the credential to poll with,
 /// the code to show, and how often/how long.
@@ -146,6 +148,43 @@ pub fn start(http: &dyn Transport, client_id: &str) -> Result<DeviceCode> {
     })
 }
 
+/// Replaces an expired access token. Simkl's tokens last seven days; the refresh
+/// token is what keeps a machine signed in without asking the person again.
+pub fn refresh(http: &dyn Transport, client_id: &str, refresh_token: &str) -> Result<Tokens> {
+    let url = Url::parse(&format!("{API}{TOKEN}"))?;
+    let body = serde_json::json!({
+        "grant_type": REFRESH_GRANT,
+        "client_id": client_id.trim(),
+        "refresh_token": refresh_token.trim(),
+    });
+    let (status, answer) = http.post_json_answer(&url, &body).context("Simkl refresh")?;
+    match status {
+        200 => tokens_from(&answer),
+        400 => match error_code(&answer).as_deref() {
+            Some(code) => Err(anyhow!("Simkl refused the refresh ({code}): sign in again")),
+            None => Err(anyhow!("Simkl refused the refresh: sign in again")),
+        },
+        401 | 403 => Err(anyhow::Error::from(HttpStatus::new(&url, status))).context("Simkl refused this session: sign in again"),
+        status => Err(anyhow!("Simkl answered HTTP {status} to the refresh")),
+    }
+}
+
+/// The tokens a token answer carries; one parser for the sign-in and the refresh.
+fn tokens_from(answer: &[u8]) -> Result<Tokens> {
+    let answer: TokenAnswer = serde_json::from_slice(answer).context("Simkl tokens")?;
+    let access_token = answer.access_token.trim().to_owned();
+    if access_token.is_empty() {
+        bail!("Simkl answered no access token");
+    }
+    let seconds = answer.expires_in.filter(|seconds| *seconds > 0).unwrap_or(ACCESS_TOKEN_SECONDS);
+    Ok(Tokens {
+        access_token,
+        refresh_token: answer.refresh_token.trim().to_owned(),
+        scope: answer.scope.trim().to_owned(),
+        expires_at: Utc::now() + Duration::seconds(seconds as i64),
+    })
+}
+
 /// One poll for the approval. [`Step::Pending`] is the normal answer until the
 /// person is done, and also what a declined code looks like: Simkl records no
 /// refusal, so the caller's deadline is the only way out.
@@ -158,20 +197,7 @@ pub fn poll(http: &dyn Transport, client_id: &str, code: &DeviceCode) -> Result<
     });
     let (status, answer) = http.post_json_answer(&url, &body)?;
     match status {
-        200 => {
-            let answer: TokenAnswer = serde_json::from_slice(&answer).context("Simkl sign-in")?;
-            let access_token = answer.access_token.trim().to_owned();
-            if access_token.is_empty() {
-                bail!("Simkl approved the sign-in but answered no access token");
-            }
-            let seconds = answer.expires_in.filter(|seconds| *seconds > 0).unwrap_or(ACCESS_TOKEN_SECONDS);
-            Ok(Step::Approved(Tokens {
-                access_token,
-                refresh_token: answer.refresh_token.trim().to_owned(),
-                scope: answer.scope.trim().to_owned(),
-                expires_at: Utc::now() + Duration::seconds(seconds as i64),
-            }))
-        }
+        200 => Ok(Step::Approved(tokens_from(&answer)?)),
         400 => match error_code(&answer).as_deref() {
             Some("slow_down") => Ok(Step::SlowDown),
             Some("expired_token") => Err(anyhow!("Simkl expired the code before it was approved: start the sign-in again")),
@@ -483,5 +509,20 @@ mod tests {
         let tokens = tokens_of(&secret).expect("the access token is what makes it a session");
         assert!(tokens.expires_at <= Utc::now(), "a caller refreshes rather than being refused");
         assert!(tokens.refresh_token.is_empty() && tokens.scope.is_empty());
+    }
+
+    #[test]
+    fn a_refresh_replaces_the_tokens() {
+        let fake = Fake::new(200, TOKEN_BODY);
+        let tokens = refresh(&fake, "client-1", "simkl_rt_y").expect("refreshed");
+        assert_eq!(tokens.access_token, "simkl_at_x");
+        assert!(tokens.expires_at > Utc::now(), "a week from now");
+    }
+
+    #[test]
+    fn a_refused_refresh_says_to_sign_in_again() {
+        let fake = Fake::new(401, r#"{"error":"invalid_grant"}"#);
+        let error = refresh(&fake, "client-1", "simkl_rt_y").unwrap_err();
+        assert!(format!("{error:#}").contains("sign in again"), "{error:#}");
     }
 }

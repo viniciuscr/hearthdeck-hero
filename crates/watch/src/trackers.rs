@@ -247,10 +247,11 @@ pub fn backfill(app: &AppPaths) -> Result<usize> {
 fn deliverers<'a>(app: &AppPaths, http: &'a UreqTransport, enabled: &[String]) -> Vec<(&'static str, Box<dyn WatchTracker + 'a>)> {
     let mut out: Vec<(&'static str, Box<dyn WatchTracker + 'a>)> = Vec::new();
     if enabled.iter().any(|id| id == SIMKL) {
-        if let (Ok(client_id), Some(tokens)) = (simkl_sign_in::client_id(app), simkl_sign_in::tokens(app)) {
-            out.push((SIMKL, Box::new(SimklTracker::new(http, &client_id, &tokens.access_token))));
-        } else {
-            log::debug!("Simkl is enabled but this machine has no session for it");
+        // Refreshed here, before a delivery could meet an expired token.
+        match (simkl_sign_in::client_id(app), simkl_sign_in::tokens_fresh_with(http, app)) {
+            (Ok(client_id), Ok(Some(tokens))) => out.push((SIMKL, Box::new(SimklTracker::new(http, &client_id, &tokens.access_token)))),
+            (_, Err(error)) => log::warn!("Simkl session: {error:#}; not delivering to it"),
+            _ => log::debug!("Simkl is enabled but this machine has no session for it"),
         }
     }
     out

@@ -114,6 +114,7 @@
   "Season": "Temporada",
   "Season {n}": "Temporada {n}",
   "Seasons": "Temporadas",
+  "Send what I watch to {provider}": "Enviar lo que veo a {provider}",
   "Sent {n} watch events.": "{n} eventos de visualización enviados.",
   "Sent {n} watch sessions.": "{n} sesiones de visualización enviadas.",
   "series": "series",

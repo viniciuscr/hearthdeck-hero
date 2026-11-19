@@ -151,7 +151,11 @@ impl<'a> Sync<'a> {
             409 => Ok(Delivery::Delivered),
             401 | 403 => Err(anyhow!("Simkl refused this account's token: sign in again (HTTP {status})")),
             // A malformed request will not fix itself; a rate limit will.
-            400 if code.as_deref() == Some("RATE_LIMIT") => Ok(Delivery::Retry("Simkl is rate limiting requests".into())),
+            // The docs print both spellings; the lock is a sub-second condition,
+            // not a quota.
+            400 if code.as_deref().is_some_and(|code| code.eq_ignore_ascii_case("RATE_LIMIT")) => {
+                Ok(Delivery::Retry("Simkl is rate limiting requests".into()))
+            }
             400 => Ok(Delivery::Unmatched(
                 code.map_or_else(|| "Simkl refused the write".into(), |code| format!("Simkl refused the write ({code})")),
             )),

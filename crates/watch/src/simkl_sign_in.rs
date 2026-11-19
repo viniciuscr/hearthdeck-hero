@@ -9,11 +9,12 @@
 //! slice, so a failure here degrades to "not signed in".
 
 use anyhow::{Context, Result};
+use chrono::{Duration, Utc};
 use heronite_data::paths::AppPaths;
-use heronite_watch_core::http::UreqTransport;
+use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::provider::Credentials;
 use heronite_watch_simkl::auth;
-use heronite_watch_simkl::PROVIDER;
+use heronite_watch_simkl::{Tokens, PROVIDER};
 use heronite_watch_state::store::StoreCredentials;
 
 pub use heronite_watch_simkl::auth::{DeviceCode, Session, Step, SLOW_DOWN};
@@ -47,6 +48,34 @@ pub fn session(app: &AppPaths) -> Option<Session> {
 pub fn tokens(app: &AppPaths) -> Option<heronite_watch_simkl::Tokens> {
     let secret = StoreCredentials::new(app).get(PROVIDER).ok().flatten()?;
     auth::tokens_of(&secret)
+}
+
+/// Refreshed this long before expiry, so a delivery never meets an expired token.
+const REFRESH_BEFORE: Duration = Duration::hours(24);
+
+/// The tokens a tracker delivers with, refreshed when they are close to expiring.
+/// Simkl's tokens last seven days; without this a machine stops delivering after
+/// one week with a 401 and nobody knows why.
+pub fn tokens_fresh(app: &AppPaths) -> Result<Option<Tokens>> {
+    tokens_fresh_with(&UreqTransport::new(), app)
+}
+
+/// [`tokens_fresh`] with an injected transport, for tests.
+pub fn tokens_fresh_with(http: &dyn Transport, app: &AppPaths) -> Result<Option<Tokens>> {
+    let store = StoreCredentials::new(app);
+    let Some(secret) = store.get(PROVIDER)? else {
+        return Ok(None);
+    };
+    let Some(tokens) = auth::tokens_of(&secret) else {
+        return Ok(None);
+    };
+    if tokens.expires_at > Utc::now() + REFRESH_BEFORE {
+        return Ok(Some(tokens));
+    }
+    let client_id = client_id(app)?;
+    let fresh = auth::refresh(http, &client_id, &tokens.refresh_token)?;
+    store.set(PROVIDER, &auth::secret_with_tokens(&client_id, &fresh)).context("keeping the refreshed Simkl session")?;
+    Ok(Some(fresh))
 }
 
 /// Forgets the session and keeps the client id, so signing in again needs
@@ -160,5 +189,49 @@ mod tests {
         let app = app_paths(dir.path());
         let error = start(&app).unwrap_err();
         assert!(format!("{error:#}").contains("this app's client id"), "{error:#}");
+    }
+
+    struct Refreshing {
+        answer: &'static str,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl heronite_watch_core::http::Transport for Refreshing {
+        fn get(&self, _: &url::Url) -> Result<Vec<u8>> {
+            unreachable!("a refresh is a POST")
+        }
+        fn post_json(&self, _: &url::Url, _: &serde_json::Value) -> Result<Vec<u8>> {
+            unreachable!("a refresh answers with a status")
+        }
+        fn post_json_answer(&self, _: &url::Url, _: &serde_json::Value) -> Result<(u16, Vec<u8>)> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok((200, self.answer.as_bytes().to_vec()))
+        }
+    }
+
+    fn session_until(at: chrono::DateTime<Utc>) -> Tokens {
+        Tokens { access_token: "at".into(), refresh_token: "rt".into(), scope: "media:read".into(), expires_at: at }
+    }
+
+    #[test]
+    fn a_fresh_session_is_used_as_it_is_and_an_expiring_one_is_refreshed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_paths(dir.path());
+        heronite_watch_state::store::write_simkl_client_id(&app, "client-1").unwrap();
+        let store = StoreCredentials::new(&app);
+
+        store.set(PROVIDER, &auth::secret_with_tokens("client-1", &session_until(Utc::now() + Duration::days(5)))).unwrap();
+        let quiet = Refreshing { answer: "", calls: Default::default() };
+        assert_eq!(tokens_fresh_with(&quiet, &app).unwrap().unwrap().access_token, "at");
+        assert_eq!(quiet.calls.load(std::sync::atomic::Ordering::Relaxed), 0, "a fresh token costs no request");
+
+        store.set(PROVIDER, &auth::secret_with_tokens("client-1", &session_until(Utc::now() + Duration::hours(1)))).unwrap();
+        let fake = Refreshing {
+            answer: r#"{"access_token":"at2","refresh_token":"rt2","expires_in":604800,"scope":"media:read"}"#,
+            calls: Default::default(),
+        };
+        assert_eq!(tokens_fresh_with(&fake, &app).unwrap().unwrap().access_token, "at2");
+        assert_eq!(tokens(&app).unwrap().access_token, "at2", "the store keeps the new pair");
+        assert_eq!(fake.calls.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 }
