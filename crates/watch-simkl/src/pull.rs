@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use url::Url;
 
+use heronite_watch_core::http::HttpStatus;
 use heronite_watch_core::provider::Ctx;
 use heronite_watch_core::pull::{Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
 use heronite_watch_core::tracker::{TrackedTitle, TrackedView};
@@ -50,40 +51,26 @@ impl WatchSync for SimklPull {
         let (client_id, token) = credentials(ctx)?;
         let mut pulled = Pulled::default();
 
-        let mut url = api_url(&client_id, "/sync/all-items")?;
-        // `full` carries the ids a tracker needs; `episode_watched_at=yes` puts the
-        // stamps on the episodes. The first pull also asks for every episode, so a
-        // show finished on another device arrives whole; a delta only asks for what
-        // moved.
-        url.query_pairs_mut().append_pair("extended", "full");
-        url.query_pairs_mut().append_pair("episode_watched_at", "yes");
-        match since.and_then(|since| since.get("all")).and_then(Value::as_str) {
-            Some(all) => {
-                url.query_pairs_mut().append_pair("date_from", all);
+        let since = since.and_then(|since| since.get("all")).and_then(Value::as_str);
+        for answer in self.all_items(ctx, &client_id, &token, since)? {
+            for movie in answer.movies {
+                match movie.status.as_str() {
+                    // A plan-to-watch row is list membership, not a watch.
+                    "plantowatch" => match movie.membership() {
+                        Some(membership) => pulled.memberships.push(membership),
+                        None => pulled.skipped += 1,
+                    },
+                    _ => match movie.watched() {
+                        Some(watch) => pulled.watches.push(watch),
+                        None => pulled.skipped += 1,
+                    },
+                }
             }
-            None => {
-                url.query_pairs_mut().append_pair("include_all_episodes", "yes");
+            for show in answer.shows.into_iter().chain(answer.anime) {
+                let (episodes, missing) = show.watched_episodes();
+                pulled.watches.extend(episodes);
+                pulled.skipped += missing;
             }
-        }
-        let body = ctx.http.get_bearer(&url, &token).context("Simkl all-items")?;
-        let answer: AllItems = serde_json::from_slice(&body).context("Simkl all-items")?;
-        for movie in answer.movies {
-            match movie.status.as_str() {
-                // A plan-to-watch row is list membership, not a watch.
-                "plantowatch" => match movie.membership() {
-                    Some(membership) => pulled.memberships.push(membership),
-                    None => pulled.skipped += 1,
-                },
-                _ => match movie.watched() {
-                    Some(watch) => pulled.watches.push(watch),
-                    None => pulled.skipped += 1,
-                },
-            }
-        }
-        for show in answer.shows.into_iter().chain(answer.anime) {
-            let (episodes, missing) = show.watched_episodes();
-            pulled.watches.extend(episodes);
-            pulled.skipped += missing;
         }
 
         let url = api_url(&client_id, "/sync/playback")?;
@@ -97,6 +84,80 @@ impl WatchSync for SimklPull {
         }
         Ok(pulled)
     }
+}
+
+/// What one listing answered: the rows, or Simkl saying the request is too big.
+enum Size {
+    Fits(AllItems),
+    TooBig,
+}
+
+impl SimklPull {
+    /// Every row of the library, splitting the request when Simkl says it is too
+    /// big — by media type first, then by status. That is the guide's own ladder,
+    /// and the reason a pull can finish on a library of any size.
+    fn all_items(&self, ctx: &Ctx<'_>, client_id: &str, token: &str, since: Option<&str>) -> Result<Vec<AllItems>> {
+        match self.items_at(ctx, client_id, token, "/sync/all-items", since)? {
+            Size::Fits(answer) => return Ok(vec![answer]),
+            Size::TooBig => {}
+        }
+        let mut answers = Vec::new();
+        for kind in ["movies", "shows", "anime"] {
+            match self.items_at(ctx, client_id, token, &format!("/sync/all-items/{kind}"), since)? {
+                Size::Fits(answer) => answers.push(answer),
+                Size::TooBig => {
+                    for status in ["watching", "plantowatch", "hold", "completed", "dropped"] {
+                        // A single status still too big is counted as empty: the
+                        // alternative is giving up on the whole library.
+                        if let Size::Fits(answer) =
+                            self.items_at(ctx, client_id, token, &format!("/sync/all-items/{kind}/{status}"), since)?
+                        {
+                            answers.push(answer);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(answers)
+    }
+
+    fn items_at(&self, ctx: &Ctx<'_>, client_id: &str, token: &str, path: &str, since: Option<&str>) -> Result<Size> {
+        let url = items_url(client_id, path, since)?;
+        let (status, body) = ctx.http.get_bearer_answer(&url, token).context("Simkl all-items")?;
+        if status == 400 && error_code(&body).as_deref() == Some("max_items") {
+            return Ok(Size::TooBig);
+        }
+        if !(200..300).contains(&status) {
+            return Err(HttpStatus::new(&url, status).into());
+        }
+        Ok(Size::Fits(serde_json::from_slice(&body).context("Simkl all-items")?))
+    }
+}
+
+/// One listing's URL: full rows with the episode stamps, and the window.
+fn items_url(client_id: &str, path: &str, since: Option<&str>) -> Result<Url> {
+    let mut url = api_url(client_id, path)?;
+    url.query_pairs_mut().append_pair("extended", "full");
+    url.query_pairs_mut().append_pair("episode_watched_at", "yes");
+    match since {
+        // The exact stamp the snapshot gave, never one of ours.
+        Some(all) => {
+            url.query_pairs_mut().append_pair("date_from", all);
+        }
+        // The first pull wants every episode, so a show finished elsewhere
+        // arrives whole.
+        None => {
+            url.query_pairs_mut().append_pair("include_all_episodes", "yes");
+        }
+    }
+    Ok(url)
+}
+
+/// The `error` code an answer carries, when it carries one.
+fn error_code(body: &[u8]) -> Option<String> {
+    let answer: Value = serde_json::from_slice(body).ok()?;
+    let code = answer.get("error")?.as_str()?.trim();
+    (!code.is_empty()).then(|| code.to_owned())
 }
 
 /// The client id and token a pull runs with.
@@ -337,6 +398,9 @@ mod tests {
         fn post_json(&self, _: &Url, _: &serde_json::Value) -> Result<Vec<u8>> {
             unreachable!("a pull reads")
         }
+        fn get_bearer_answer(&self, url: &Url, token: &str) -> Result<(u16, Vec<u8>)> {
+            Ok((200, self.get_bearer(url, token)?))
+        }
         fn get_bearer(&self, url: &Url, token: &str) -> Result<Vec<u8>> {
             assert_eq!(token, "simkl_at_x");
             self.seen.lock().unwrap().push(url.to_string());
@@ -345,6 +409,66 @@ mod tests {
                 .map(|body| body.as_bytes().to_vec())
                 .ok_or_else(|| anyhow!("the fake has no answer for {}", url.path()))
         }
+    }
+
+    /// A fake that answers each path with a status: the ladder needs refusals.
+    struct Sized {
+        answers: HashMap<&'static str, (u16, &'static str)>,
+        seen: Mutex<Vec<String>>,
+    }
+
+    impl Transport for Sized {
+        fn get(&self, _: &Url) -> Result<Vec<u8>> {
+            unreachable!("a pull reads with the bearer")
+        }
+        fn post_json(&self, _: &Url, _: &serde_json::Value) -> Result<Vec<u8>> {
+            unreachable!("a pull reads")
+        }
+        fn get_bearer(&self, url: &Url, token: &str) -> Result<Vec<u8>> {
+            Ok(self.get_bearer_answer(url, token)?.1)
+        }
+        fn get_bearer_answer(&self, url: &Url, _: &str) -> Result<(u16, Vec<u8>)> {
+            self.seen.lock().unwrap().push(url.to_string());
+            let (status, body) = self.answers.get(url.path()).copied().ok_or_else(|| anyhow!("no answer for {}", url.path()))?;
+            Ok((status, body.as_bytes().to_vec()))
+        }
+    }
+
+    #[test]
+    fn a_library_that_is_too_big_is_split_by_type() {
+        let mut answers = HashMap::new();
+        answers.insert("/sync/activities", (200, r#"{"all":"2026-01-05T00:00:00Z"}"#));
+        answers.insert("/sync/all-items", (400, r#"{"error":"max_items"}"#));
+        answers.insert(
+            "/sync/all-items/movies",
+            (200, r#"{"movies":[{"status":"completed","last_watched_at":"2026-01-02T20:00:00Z","movie":{"title":"Inception","ids":{"imdb":"tt1375666"}}}]}"#),
+        );
+        answers.insert("/sync/all-items/shows", (200, r#"{"shows":[]}"#));
+        answers.insert("/sync/all-items/anime", (200, r#"{"anime":[]}"#));
+        answers.insert("/sync/playback", (200, "[]"));
+        let fake = Sized { answers, seen: Mutex::new(Vec::new()) };
+        let credentials = credentials();
+        let ctx = Ctx { http: &fake, credentials: &credentials };
+
+        let pulled = SimklPull.pull(&ctx, None).unwrap();
+        assert_eq!(pulled.watches.len(), 1, "the film came from its own request");
+        let seen = fake.seen.lock().unwrap().clone();
+        assert!(seen.iter().any(|url| url.contains("/sync/all-items/movies")), "{seen:?}");
+        assert!(seen.iter().any(|url| url.contains("/sync/all-items/shows")), "{seen:?}");
+    }
+
+    #[test]
+    fn a_refusal_that_is_not_a_size_is_still_an_error() {
+        let mut answers = HashMap::new();
+        answers.insert("/sync/activities", (200, r#"{"all":"2026-01-05T00:00:00Z"}"#));
+        answers.insert("/sync/all-items", (400, r#"{"error":"invalid_date_from"}"#));
+        let fake = Sized { answers, seen: Mutex::new(Vec::new()) };
+        let credentials = credentials();
+        let ctx = Ctx { http: &fake, credentials: &credentials };
+
+        let error = SimklPull.pull(&ctx, None).unwrap_err();
+        assert!(format!("{error:#}").contains("HTTP 400"), "{error:#}");
+        assert_eq!(fake.seen.lock().unwrap().len(), 1, "no ladder on a different refusal");
     }
 
     struct WithCredentials(Secret);

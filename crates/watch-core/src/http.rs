@@ -22,6 +22,14 @@ pub trait Transport: Send + Sync {
         Ok((200, self.post_json(url, body)?))
     }
 
+    /// A GET carrying a bearer, with the status **and** the body of a refused
+    /// answer: a pull needs to read the error code (`max_items`) to split a big
+    /// request, which a status alone cannot tell.
+    fn get_bearer_answer(&self, url: &Url, token: &str) -> Result<(u16, Vec<u8>)> {
+        let _ = (url, token);
+        anyhow::bail!("this transport cannot show a refused answer's body")
+    }
+
     /// A POST whose answer comes back whole: status, headers and body. `token`,
     /// when given, is sent as a bearer. A transport that cannot show headers says
     /// so, and the caller falls back to the body-only call.
@@ -49,20 +57,6 @@ pub trait Transport: Send + Sync {
         anyhow::bail!("this transport cannot read a redirect's Location")
     }
 
-    /// A GET carrying `Authorization: Bearer <token>` whose **status and body**
-    /// both come back: an importer reads what a refusal says (`400 max_items`
-    /// asks for a narrower pull) instead of treating it as an opaque fault. A
-    /// transport that cannot send headers says so rather than sending the
-    /// request unauthenticated.
-    fn get_bearer_answer(&self, url: &Url, token: &str) -> Result<(u16, Vec<u8>)> {
-        let _ = (url, token);
-        anyhow::bail!("this transport cannot carry an Authorization header")
-    }
-
-    /// A GET carrying `Authorization: Bearer <token>`: what TMDB's v4 endpoints
-    /// take instead of a key in the query. A transport that cannot send headers
-    /// says so rather than sending an unauthenticated request that would come
-    /// back as a puzzle.
     fn get_bearer(&self, url: &Url, token: &str) -> Result<Vec<u8>> {
         let _ = (url, token);
         anyhow::bail!("this transport cannot carry an Authorization header")
@@ -324,6 +318,14 @@ mod tests {
             let _ = socket.write_all(response.as_bytes());
         });
         Url::parse(&format!("http://{address}/oauth2/token")).expect("a local url")
+    }
+
+    #[test]
+    fn a_refused_get_can_show_its_body() {
+        let url = answer_once(400, r#"{"error":"max_items"}"#);
+        let (status, body) = UreqTransport::new().get_bearer_answer(&url, "tok").expect("an answer");
+        assert_eq!(status, 400);
+        assert!(String::from_utf8_lossy(&body).contains("max_items"), "the code is readable");
     }
 
     #[test]
