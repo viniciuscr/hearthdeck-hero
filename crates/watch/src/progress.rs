@@ -20,7 +20,17 @@ use heronite_watch_state::store;
 /// episode in `video_id`.
 pub fn local(app: &AppPaths, provider: &str, id: &str) -> Option<MovieProgress> {
     let movies = store::read_movies(app);
-    record_for(&movies, provider, id).cloned()
+    let mut base = record_for(&movies, provider, id).cloned()?;
+    // Episodes can live in another writer's record for the same title — a file
+    // written before the import learned to reuse the existing record, for instance.
+    // The read is the title's, so it takes the union and never hides a watch.
+    for other in movies.progress.iter().filter(|record| record.id == id || record.imdb.as_deref() == Some(id)) {
+        for (key, episode) in &other.episodes {
+            base.episodes.entry(key.clone()).or_insert_with(|| episode.clone());
+        }
+        base.finished |= other.finished;
+    }
+    Some(base)
 }
 
 /// The record for a title: the one its provider wrote, or the one another writer
@@ -168,6 +178,40 @@ mod tests {
             let _ = log::set_logger(&Captured).map(|()| log::set_max_level(log::LevelFilter::Info));
         });
         &LINES
+    }
+
+    #[test]
+    fn a_read_unions_episodes_from_the_other_record_for_the_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let at = Utc::now();
+        store::update_movies(&app, |movies| {
+            // The record playback made, with no episodes…
+            movies.progress.push(MovieProgress {
+                provider: "stremio".into(),
+                id: "tt9".into(),
+                updated_at: at,
+                ..MovieProgress::default()
+            });
+            // …and the one the import made before it learned to reuse it.
+            let mut imported = MovieProgress {
+                provider: "imported".into(),
+                id: "tt9".into(),
+                imdb: Some("tt9".into()),
+                updated_at: at,
+                ..MovieProgress::default()
+            };
+            imported.episodes.insert(
+                "tt9:1:2".into(),
+                EpisodeProgress { season: Some(1), number: Some(2), finished: true, updated_at: at, ..EpisodeProgress::default() },
+            );
+            movies.progress.push(imported);
+            Ok(())
+        })
+        .unwrap();
+
+        let seen = local(&app, "stremio", "tt9").expect("the title's record");
+        assert!(seen.episode("tt9:1:2", 1, 2).is_some_and(|episode| episode.finished), "the watch is not hidden because two records exist");
     }
 
     #[test]

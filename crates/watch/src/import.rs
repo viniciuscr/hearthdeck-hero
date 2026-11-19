@@ -692,7 +692,10 @@ fn blocked(app: &AppPaths, title: &TrackedTitle, view: &TrackedView) -> bool {
 
 /// The record a remote fact is about: the local one carrying the same IMDb id.
 fn find<'a>(movies: &'a mut heronite_watch_state::store::MoviesFile, imdb: &str) -> Option<&'a mut MovieProgress> {
-    movies.progress.iter_mut().find(|record| record.imdb.as_deref() == Some(imdb))
+    // By the id **or** the imdb: a record written by playback carries the provider's
+    // id and may leave `imdb` empty, and matching only the imdb made the import write
+    // a second record for a title this machine already knew.
+    movies.progress.iter_mut().find(|record| record.id == imdb || record.imdb.as_deref() == Some(imdb))
 }
 
 /// Who wrote it, and when: provenance, never a change of behaviour.
@@ -886,6 +889,37 @@ mod tests {
 
     fn episode(imdb: &str, season: u32, number: u32) -> RemoteWatch {
         RemoteWatch { title: title(imdb), view: TrackedView::Episode { season, number }, at: Some(Utc::now()) }
+    }
+
+    #[test]
+    fn an_import_writes_into_the_record_playback_made() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        // What playback writes: the provider's id, and `imdb` left empty.
+        store::update_movies(&app, |movies| {
+            movies.progress.push(MovieProgress {
+                provider: "stremio".into(),
+                id: "tt9".into(),
+                updated_at: Utc::now(),
+                ..MovieProgress::default()
+            });
+            Ok(())
+        })
+        .unwrap();
+
+        let pulled = Pulled { watches: vec![episode("tt9", 1, 2)], ..Default::default() };
+        let (report, _) = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+        assert_eq!(report.watched, 1, "{report:?}");
+        assert_eq!(report.no_local, 0, "the title was already known here");
+
+        let movies = store::read_movies(&app);
+        let records: Vec<_> = movies.progress.iter().filter(|record| record.id == "tt9").collect();
+        assert_eq!(records.len(), 1, "one record, not two");
+        assert_eq!(records[0].provider, "stremio", "the one playback made");
+        assert!(
+            records[0].episodes.values().any(|episode| episode.season == Some(1) && episode.number == Some(2) && episode.finished),
+            "with the imported episode in it"
+        );
     }
 
     #[test]
