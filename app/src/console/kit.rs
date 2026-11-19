@@ -250,6 +250,8 @@ pub(crate) fn mark(style: Glyphs, btn: Btn, swap_ab: bool) -> Mark {
         Btn::RB => Mark::Cap(rb),
         Btn::Bumpers => Mark::Pair(lb, rb),
         Btn::LT => Mark::Cap(lt),
+        // The stick's click: Xbox labels it by the stick, the others number it.
+        Btn::L3 => Mark::Cap(if style == Glyphs::Xbox { "LS" } else { "L3" }),
         Btn::Start => match style {
             Glyphs::PlayStation => Mark::Cap("Options"),
             Glyphs::Nintendo => Mark::Cap("+"),
@@ -376,6 +378,7 @@ pub fn key_glyph(btn: Btn) -> Div {
         Btn::Y => key_cap("Y"),
         Btn::LB => key_cap("Q"),
         Btn::RB => key_cap("E"),
+        Btn::L3 => key_cap("L"),
         Btn::Bumpers => draw(Mark::Pair("Q", "E"), Glyphs::Keyboard),
         Btn::Start => key_cap("M"),
         // No key for these: the pad's own look.
@@ -420,6 +423,7 @@ pub fn btn_pad(btn: Btn) -> Pad {
         Btn::LB => Pad::LB,
         Btn::RB | Btn::Bumpers => Pad::RB,
         Btn::LT => Pad::LT,
+        Btn::L3 => Pad::L3,
         Btn::Start => Pad::Start,
         Btn::LeftRight => Pad::Right,
     }
@@ -853,6 +857,8 @@ mod tests {
         assert_eq!(mark(Glyphs::Deck, Btn::Y, false), Mark::Letter("Y", Face::North));
         assert_eq!(mark(Glyphs::Xbox, Btn::Bumpers, false), Mark::Pair("LB", "RB"));
         assert_eq!(mark(Glyphs::Deck, Btn::LB, false), Mark::Cap("L1"));
+        assert_eq!(mark(Glyphs::Xbox, Btn::L3, false), Mark::Cap("LS"));
+        assert_eq!(mark(Glyphs::Deck, Btn::L3, false), Mark::Cap("L3"));
         assert_eq!(mark(Glyphs::Deck, Btn::Start, false), Mark::Menu);
     }
 
@@ -873,6 +879,7 @@ mod tests {
         assert_eq!(mark(Glyphs::PlayStation, Btn::B, false), Mark::Shape(Face::East));
         assert_eq!(mark(Glyphs::PlayStation, Btn::RB, false), Mark::Cap("R1"));
         assert_eq!(mark(Glyphs::PlayStation, Btn::Start, false), Mark::Cap("Options"));
+        assert_eq!(mark(Glyphs::PlayStation, Btn::L3, false), Mark::Cap("L3"));
     }
 
     #[test]
