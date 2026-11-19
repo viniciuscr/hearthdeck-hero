@@ -116,6 +116,34 @@ impl PersonalLibrary {
         };
         list.iter().any(|item| item.id == id && (item.provider.is_empty() || item.provider == provider)).then_some(Membership::In)
     }
+    /// The membership this file implies for a title **regardless of provider**: a
+    /// list entry from a sync carries no provider, and the ledger keeps it under
+    /// an empty one.
+    pub fn membership_any(&self, kind: &str, id: &str) -> Option<Membership> {
+        if let Some(decision) = self.decision(kind, "", id) {
+            return Some(decision.state);
+        }
+        let list = match kind {
+            WATCHLIST => &self.watchlist,
+            FAVOURITES => &self.favourites,
+            _ => return None,
+        };
+        list.iter().any(|item| item.id == id).then_some(Membership::In)
+    }
+
+    /// Takes a title out of a list by its id, whatever kind or provider the entry
+    /// was kept as. A sync removal knows the id, not the entry.
+    pub fn remove_any(&mut self, kind: &str, id: &str) -> bool {
+        let list = match kind {
+            WATCHLIST => &mut self.watchlist,
+            FAVOURITES => &mut self.favourites,
+            _ => return false,
+        };
+        let before = list.len();
+        list.retain(|item| item.id != id);
+        list.len() != before
+    }
+
     /// Adds a title to the watchlist, or refreshes the snapshot of one already
     /// there without moving it. `true` when it was not in the list before.
     pub fn add_watchlist(&mut self, item: &MovieItem) -> bool {

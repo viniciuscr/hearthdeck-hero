@@ -5,6 +5,7 @@
 //! outbox, and never overwrites a position the person set here since the last pull.
 //! The provider's snapshot is saved last, and only if every write landed.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -12,10 +13,13 @@ use chrono::{DateTime, Utc};
 
 use heronite_data::paths::AppPaths;
 use heronite_watch_core::http::UreqTransport;
+use heronite_watch_core::personal::{ListDecision, Membership, FAVOURITES, WATCHLIST};
 use heronite_watch_core::provider::Ctx;
-use heronite_watch_core::pull::{Pulled, RemotePosition, RemoteWatch, WatchSync};
+use heronite_watch_core::pull::{Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
+use heronite_watch_core::sync_rules::{reconcile, Action, Local, Remote, Seen};
+use heronite_watch_core::title::IMPORTED_ADDON;
 use heronite_watch_core::tracker::{TrackedTitle, TrackedView};
-use heronite_watch_core::types::{MovieProgress, Origin};
+use heronite_watch_core::types::{MovieItem, MovieProgress, Origin};
 use heronite_watch_simkl::pull::SimklPull;
 use heronite_watch_state::import as cursor;
 use heronite_watch_state::placeholders::{self, Placeholder};
@@ -42,6 +46,11 @@ pub struct Report {
     pub blocked: usize,
     /// The change query said nothing moved: no pull, no writes.
     pub unchanged: bool,
+    /// List membership applied here: added, removed, and what a local change
+    /// still owes the providers (`lists_push`, the send side).
+    pub lists_added: usize,
+    pub lists_removed: usize,
+    pub lists_push: usize,
 }
 
 impl Report {
@@ -180,19 +189,28 @@ pub fn run_with(app: &AppPaths, sync: &dyn WatchSync, ctx: &Ctx<'_>) -> Result<R
     }
 
     let pulled = sync.pull(ctx, since.as_ref())?;
-    let report = apply(app, provider, &pulled, stored.last_pull_at)?;
+    let (report, seen) = apply(app, provider, &pulled, stored.last_pull_at, &stored.list_ids)?;
     // Last, and only now: a failed apply leaves the cursor where it was, so the
     // next run asks for the same window again.
     cursor::update(app, provider, |cursor| {
         cursor.snapshot = now;
+        // What the lists hold *now*: the base the next removal is found against.
+        cursor.list_ids = seen;
         cursor.last_pull_at = Some(Utc::now());
         Ok(())
     })?;
     Ok(report)
 }
 
-/// Writes what the pull brought into `movies.json`, with provenance.
-fn apply(app: &AppPaths, provider: &str, pulled: &Pulled, last_pull_at: Option<DateTime<Utc>>) -> Result<Report> {
+/// Writes what the pull brought into `movies.json` and `watch-personal.json`,
+/// with provenance, and says what each list holds now.
+fn apply(
+    app: &AppPaths,
+    provider: &str,
+    pulled: &Pulled,
+    last_pull_at: Option<DateTime<Utc>>,
+    last_seen: &BTreeMap<String, Vec<String>>,
+) -> Result<(Report, BTreeMap<String, Vec<String>>)> {
     let now = Utc::now();
     let mut report = Report { skipped: pulled.skipped, ..Report::default() };
 
@@ -214,8 +232,13 @@ fn apply(app: &AppPaths, provider: &str, pulled: &Pulled, last_pull_at: Option<D
             positions.push(position);
         }
     }
+    let (added, removed, push, seen) = apply_lists(app, provider, pulled, last_seen, now)?;
+    report.lists_added = added;
+    report.lists_removed = removed;
+    report.lists_push = push;
+
     if watches.is_empty() && positions.is_empty() {
-        return Ok(report);
+        return Ok((report, seen));
     }
 
     let mut watched = 0usize;
@@ -295,7 +318,117 @@ fn apply(app: &AppPaths, provider: &str, pulled: &Pulled, last_pull_at: Option<D
     report.watched = watched;
     report.positions = placed;
     report.blocked += held;
-    Ok(report)
+    Ok((report, seen))
+}
+
+/// Reconciles each list against the ledger with the three-way table
+/// (`docs/WATCH-SYNC-RULES.md`): the local decision, what the last tick saw the
+/// provider holding, and what it holds now. Absence alone never removes.
+fn apply_lists(
+    app: &AppPaths,
+    provider: &str,
+    pulled: &Pulled,
+    last_seen: &BTreeMap<String, Vec<String>>,
+    now: DateTime<Utc>,
+) -> Result<(usize, usize, usize, BTreeMap<String, Vec<String>>)> {
+    let mut library = heronite_watch_state::personal::read(app);
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    let mut push = 0usize;
+
+    // What the provider says each list holds now.
+    let mut remote: BTreeMap<String, Vec<&RemoteMembership>> = BTreeMap::new();
+    for membership in &pulled.memberships {
+        if membership.member {
+            remote.entry(membership.list.clone()).or_default().push(membership);
+        }
+    }
+    // Both kinds, always: a local entry the provider has never mentioned is a
+    // change to push, so the loop cannot depend on what was reported.
+    let mut held_now: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for kind in [WATCHLIST, FAVOURITES] {
+        let there: Vec<&RemoteMembership> = remote.get(kind).cloned().unwrap_or_default();
+        let was: Vec<String> = last_seen.get(kind).cloned().unwrap_or_default();
+
+        let mut now_ids: Vec<String> = there.iter().filter_map(|m| m.title.imdb.clone()).collect();
+        now_ids.sort();
+        now_ids.dedup();
+
+        // Everything either side knows about, plus what the local list holds (a
+        // local add with nothing remote must be pushed, not dropped).
+        let mut universe: BTreeSet<String> = now_ids.iter().cloned().collect();
+        universe.extend(was.iter().cloned());
+        for item in local_items(&library, kind) {
+            universe.insert(item.id.clone());
+        }
+
+        for imdb in universe {
+            let local = match library.membership_any(kind, &imdb) {
+                Some(Membership::In) => Local::In,
+                Some(Membership::Out) => Local::Out,
+                None => Local::Unset,
+            };
+            let seen = if was.iter().any(|id| id == &imdb) { Seen::In } else { Seen::Absent };
+            let is = if now_ids.iter().any(|id| id == &imdb) { Remote::In } else { Remote::Absent };
+            let title = there.iter().find(|m| m.title.imdb.as_deref() == Some(imdb.as_str())).map(|m| m.title.clone());
+
+            let decision = |state: Membership| ListDecision {
+                state,
+                changed_at: now,
+                origin: Origin::Imported,
+                imported_from: Some(provider.to_owned()),
+            };
+            match reconcile(local, seen, is) {
+                Action::AddLocal => {
+                    let Some(title) = title else { continue };
+                    library.add_watchlist(&list_item(&title));
+                    library.decide(kind, "", &imdb, decision(Membership::In));
+                    added += 1;
+                }
+                Action::RemoveLocal => {
+                    // By id: the entry a sync removes may have been kept with
+                    // another kind or no provider at all.
+                    if library.remove_any(kind, &imdb) {
+                        removed += 1;
+                    }
+                    library.decide(kind, "", &imdb, decision(Membership::Out));
+                }
+                // A local decision the provider has not been told about yet: the
+                // send side is the next slice.
+                Action::PushAdd | Action::PushRemove => push += 1,
+                // Both moved: the local state wins until the send side exists.
+                Action::Conflict | Action::None => {}
+            }
+        }
+        held_now.insert(kind.to_owned(), now_ids);
+    }
+
+    if added + removed > 0 {
+        heronite_watch_state::personal::write(app, &library)?;
+    }
+    Ok((added, removed, push, held_now))
+}
+
+/// The items a local list holds.
+fn local_items<'a>(library: &'a heronite_watch_core::personal::PersonalLibrary, kind: &str) -> &'a [MovieItem] {
+    match kind {
+        FAVOURITES => &library.favourites,
+        _ => &library.watchlist,
+    }
+}
+
+/// A list entry for a title, marked as imported: it is a title we may not have,
+/// so it travels as a placeholder and the tiles treat it as unavailable.
+fn list_item(title: &TrackedTitle) -> MovieItem {
+    MovieItem {
+        id: title.imdb.clone().unwrap_or_default(),
+        kind: if title.kind == "series" { "series".into() } else { "movie".into() },
+        name: title.title.clone(),
+        year: title.year.clone(),
+        provider: String::new(),
+        addon: IMPORTED_ADDON.to_owned(),
+        ..MovieItem::default()
+    }
 }
 
 /// The library kind and the view a remote fact carries.
@@ -375,9 +508,9 @@ mod tests {
         let app = app(root.path());
         record(&app, "tt1", 6_000_000);
         record(&app, "tt2", 6_000_000);
-        let pulled = Pulled { watches: vec![watch("tt1")], positions: vec![position("tt2", 40.0)], skipped: 2 };
+        let pulled = Pulled { watches: vec![watch("tt1")], positions: vec![position("tt2", 40.0)], skipped: 2, ..Pulled::default() };
 
-        let report = apply(&app, "simkl", &pulled, None).unwrap();
+        let report = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap().0;
         assert_eq!((report.watched, report.positions, report.skipped), (1, 1, 2), "{report:?}");
         let watched = stored(&app, "tt1");
         assert!(watched.finished);
@@ -399,7 +532,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let report = apply(&app, "simkl", &Pulled { watches: vec![watch("tt1")], ..Default::default() }, None).unwrap();
+        let report = apply(&app, "simkl", &Pulled { watches: vec![watch("tt1")], ..Default::default() }, None, &BTreeMap::new()).unwrap().0;
         assert_eq!(report.watched, 0);
         assert_eq!(report.blocked, 1);
         assert!(!stored(&app, "tt1").finished);
@@ -415,7 +548,9 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let report = apply(&app, "simkl", &Pulled { positions: vec![position("tt1", 30.0)], ..Default::default() }, None).unwrap();
+        let report = apply(&app, "simkl", &Pulled { positions: vec![position("tt1", 30.0)], ..Default::default() }, None, &BTreeMap::new())
+            .unwrap()
+            .0;
         assert_eq!(report.positions, 0);
         assert_eq!(report.blocked, 1);
         assert!(stored(&app, "tt1").finished);
@@ -425,7 +560,7 @@ mod tests {
     fn a_title_the_library_does_not_have_becomes_a_placeholder() {
         let root = tempfile::tempdir().unwrap();
         let app = app(root.path());
-        let report = apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None).unwrap();
+        let report = apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None, &BTreeMap::new()).unwrap().0;
         assert_eq!(report.no_local, 1);
         assert!(store::read_movies(&app).progress.is_empty(), "no watch record is invented");
         let placeholders = placeholders::read(&app).items;
@@ -438,11 +573,11 @@ mod tests {
     fn a_placeholder_leaves_when_the_library_gains_the_title() {
         let root = tempfile::tempdir().unwrap();
         let app = app(root.path());
-        apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None).unwrap();
+        apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None, &BTreeMap::new()).unwrap();
         assert_eq!(placeholders::read(&app).items.len(), 1);
 
         record(&app, "tt9", 6_000_000);
-        apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None).unwrap();
+        apply(&app, "simkl", &Pulled { watches: vec![watch("tt9")], ..Default::default() }, None, &BTreeMap::new()).unwrap();
         assert!(placeholders::read(&app).items.is_empty(), "the library has it now");
     }
 
@@ -456,7 +591,7 @@ mod tests {
             TrackEvent { seq: 0, at: Utc::now(), title: title("tt1"), view: TrackedView::Movie, watch: TrackedWatch::Watched },
         )
         .unwrap();
-        let report = apply(&app, "simkl", &Pulled { watches: vec![watch("tt1")], ..Default::default() }, None).unwrap();
+        let report = apply(&app, "simkl", &Pulled { watches: vec![watch("tt1")], ..Default::default() }, None, &BTreeMap::new()).unwrap().0;
         assert_eq!(report.blocked, 1, "{report:?}");
         assert!(!stored(&app, "tt1").finished);
     }
@@ -472,7 +607,9 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let report = apply(&app, "simkl", &Pulled { positions: vec![position("tt1", 40.0)], ..Default::default() }, None).unwrap();
+        let report = apply(&app, "simkl", &Pulled { positions: vec![position("tt1", 40.0)], ..Default::default() }, None, &BTreeMap::new())
+            .unwrap()
+            .0;
         assert_eq!(report.blocked, 1, "{report:?}");
         assert_eq!(stored(&app, "tt1").position_ms, 0);
     }
@@ -489,10 +626,66 @@ mod tests {
         })
         .unwrap();
         let last_pull = Utc::now() - chrono::Duration::hours(3);
-        let report =
-            apply(&app, "simkl", &Pulled { positions: vec![position("tt1", 40.0)], ..Default::default() }, Some(last_pull)).unwrap();
+        let report = apply(
+            &app,
+            "simkl",
+            &Pulled { positions: vec![position("tt1", 40.0)], ..Default::default() },
+            Some(last_pull),
+            &BTreeMap::new(),
+        )
+        .unwrap()
+        .0;
         assert_eq!(report.blocked, 1);
         assert_eq!(stored(&app, "tt1").position_ms, 4_800_000);
+    }
+
+    fn membership(imdb: &str) -> RemoteMembership {
+        RemoteMembership { title: title(imdb), list: "watchlist".into(), member: true }
+    }
+
+    fn watchlist(app: &AppPaths) -> Vec<String> {
+        heronite_watch_state::personal::read(app).watchlist.iter().map(|item| item.id.clone()).collect()
+    }
+
+    fn keep_local(app: &AppPaths, imdb: &str) {
+        let mut library = heronite_watch_state::personal::read(app);
+        library.add_watchlist(&MovieItem { id: imdb.into(), kind: "movie".into(), name: "A Film".into(), ..MovieItem::default() });
+        heronite_watch_state::personal::write(app, &library).unwrap();
+    }
+
+    #[test]
+    fn a_title_added_on_the_phone_enters_the_watchlist() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        let pulled = Pulled { memberships: vec![membership("tt9")], ..Default::default() };
+        let (report, seen) = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+        assert_eq!(report.lists_added, 1, "{report:?}");
+        assert_eq!(watchlist(&app), ["tt9"]);
+        assert_eq!(seen.get("watchlist"), Some(&vec!["tt9".to_owned()]), "the tick remembers what it saw");
+    }
+
+    #[test]
+    fn a_title_removed_on_the_phone_leaves_the_watchlist() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        keep_local(&app, "tt1");
+        let seen = BTreeMap::from([("watchlist".to_owned(), vec!["tt1".to_owned()])]);
+
+        let (report, after) = apply(&app, "simkl", &Pulled::default(), None, &seen).unwrap();
+        assert_eq!(report.lists_removed, 1, "{report:?}");
+        assert!(watchlist(&app).is_empty(), "gone here too");
+        assert!(after.get("watchlist").is_none_or(|ids| ids.is_empty()));
+    }
+
+    #[test]
+    fn a_title_added_here_and_absent_there_is_pushed_not_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        keep_local(&app, "tt1");
+
+        let (report, _) = apply(&app, "simkl", &Pulled::default(), None, &BTreeMap::new()).unwrap();
+        assert_eq!(report.lists_push, 1, "{report:?}");
+        assert_eq!(watchlist(&app), ["tt1"], "absence is not a removal");
     }
 
     struct FakeSync {

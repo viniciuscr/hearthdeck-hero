@@ -12,7 +12,7 @@ use serde_json::Value;
 use url::Url;
 
 use heronite_watch_core::provider::Ctx;
-use heronite_watch_core::pull::{Pulled, RemotePosition, RemoteWatch, WatchSync};
+use heronite_watch_core::pull::{Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
 use heronite_watch_core::tracker::{TrackedTitle, TrackedView};
 
 use crate::auth::{client_id_of, tokens_of};
@@ -58,9 +58,16 @@ impl WatchSync for SimklPull {
         let body = ctx.http.get_bearer(&url, &token).context("Simkl all-items")?;
         let answer: AllItems = serde_json::from_slice(&body).context("Simkl all-items")?;
         for movie in answer.movies {
-            match movie.watched() {
-                Some(watch) => pulled.watches.push(watch),
-                None => pulled.skipped += 1,
+            match movie.status.as_str() {
+                // A plan-to-watch row is list membership, not a watch.
+                "plantowatch" => match movie.membership() {
+                    Some(membership) => pulled.memberships.push(membership),
+                    None => pulled.skipped += 1,
+                },
+                _ => match movie.watched() {
+                    Some(watch) => pulled.watches.push(watch),
+                    None => pulled.skipped += 1,
+                },
             }
         }
         // A show-level fact says nothing about which episode: episode rows come
@@ -131,6 +138,12 @@ impl MovieRow {
         }
         let (title, view) = self.movie.into_title_and_view()?;
         Some(RemoteWatch { title, view, at: at(self.last_watched_at.as_deref()) })
+    }
+
+    /// A plan-to-watch film as a watchlist membership.
+    fn membership(self) -> Option<RemoteMembership> {
+        let (title, _) = self.movie.into_title_and_view()?;
+        Some(RemoteMembership { title, list: "watchlist".into(), member: true })
     }
 }
 
@@ -330,8 +343,11 @@ mod tests {
         assert_eq!(watch.title.imdb.as_deref(), Some("tt1375666"));
         assert_eq!(watch.view, TrackedView::Movie);
         assert!(watch.at.is_some(), "the provider's own stamp");
-        // plantowatch, the id-less film, and the show-level fact
-        assert_eq!(pulled.skipped, 3, "{pulled:?}");
+        // the id-less film and the show-level fact
+        assert_eq!(pulled.skipped, 2, "{pulled:?}");
+        assert_eq!(pulled.memberships.len(), 1, "plantowatch is a list, not a watch");
+        assert_eq!(pulled.memberships[0].list, "watchlist");
+        assert_eq!(pulled.memberships[0].title.imdb.as_deref(), Some("tt1160419"));
     }
 
     #[test]
