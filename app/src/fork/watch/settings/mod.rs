@@ -60,6 +60,9 @@ pub struct State {
     /// sentence ("Brought in 3 titles · 2 hours ago").
     pub import_simkl: bool,
     pub import_state: Option<SharedString>,
+    /// Whether this visit already asked the pull to catch up: the page draws many
+    /// times, and the cursor's own schedule decides whether a tick does anything.
+    pub imports_ticked: bool,
     /// Whether this visit already asked the trackers to catch up: the page
     /// renders many times, and a drain per frame would be a drain per frame.
     pub trackers_drained: bool,
@@ -105,6 +108,7 @@ impl State {
             tracker_unmatched: pending.unmatched,
             import_simkl: heronite_watch::import::enabled(&ctx.app).contains(&"simkl"),
             import_state: import_sentence(&ctx.app),
+            imports_ticked: false,
             trackers_drained: false,
             metadata_open: None,
             recap: recap::Recency::default(),
@@ -423,6 +427,14 @@ pub fn render_sources(d: &mut SettingsPage, _window: &mut Window, cx: &mut Conte
         d.watch.trackers_drained = true;
         if !d.watch.trackers.is_empty() {
             drain_trackers(d, cx);
+        }
+    }
+    // And the pull catches up, on its own schedule: a visit that arrives before
+    // the interval costs nothing.
+    if !d.watch.imports_ticked {
+        d.watch.imports_ticked = true;
+        if d.watch.import_simkl {
+            tick_imports(d, cx);
         }
     }
     let settings = heronite_watch::settings::read(&d.ctx.app);
@@ -1040,6 +1052,24 @@ fn import_sentence(app: &heronite_data::paths::AppPaths) -> Option<SharedString>
         None if last.unchanged || last.watched + last.positions == 0 => tr!("Nothing new the last time it asked.").into(),
         None => tr!("Brought in {n} titles.", n = last.watched + last.positions).into(),
     })
+}
+
+/// Asks the pull to catch up in the background: the cursor's `next_at` decides
+/// whether it does anything, so this is safe on every visit.
+fn tick_imports(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
+    let app = d.ctx.app.clone();
+    cx.spawn(async move |this, cx| {
+        let ran = cx.background_spawn(async move { heronite_watch::import::tick(&app) }).await;
+        this.update(cx, |d, cx| {
+            if let Some((provider, Err(error))) = ran.first() {
+                log::warn!("import {provider}: {error:#}");
+            }
+            d.watch.import_state = import_sentence(&d.ctx.app);
+            cx.notify();
+        })
+        .ok();
+    })
+    .detach();
 }
 
 /// Turning the pull on runs it once, right away; turning it off leaves what came

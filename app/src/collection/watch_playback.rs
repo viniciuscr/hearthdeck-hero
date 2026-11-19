@@ -540,6 +540,26 @@ impl CollectionView {
 
     /// Hands the tracker outbox to the trackers, off the UI thread: the mark is
     /// saved here and sent when the network lets it.
+    /// Asks the pull to catch up after a session: the cursor's own schedule decides
+    /// whether it runs, so this is one request at most, and never on the UI thread.
+    fn watch_tick_imports(&mut self, cx: &mut Context<Self>) {
+        if heronite_watch::import::enabled(&self.app_paths).is_empty() {
+            return;
+        }
+        let app = self.app_paths.clone();
+        cx.spawn(async move |this, cx| {
+            let ran = cx.background_spawn(async move { heronite_watch::import::tick(&app) }).await;
+            this.update(cx, |_, cx| {
+                if let Some((provider, Err(error))) = ran.first() {
+                    log::warn!("import {provider}: {error:#}");
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(super) fn watch_drain_trackers(&self, cx: &mut Context<Self>) {
         let app = self.app_paths.clone();
         cx.spawn(async move |_, cx| {
@@ -689,7 +709,10 @@ impl CollectionView {
         self.refresh_focus();
         match result {
             // What the session left in the tracker outbox goes out now.
-            Ok(Ok(_)) => self.watch_drain_trackers(cx),
+            Ok(Ok(_)) => {
+                self.watch_drain_trackers(cx);
+                self.watch_tick_imports(cx);
+            }
             Ok(Err(error)) => {
                 log::warn!("watch playback: {error:#}");
                 self.show_toast(tr!("Could not play: {error}", error = format!("{error:#}")), true, cx);
