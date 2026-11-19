@@ -337,7 +337,7 @@ fn apply(
                 // fact: a placeholder draws the title, and an episode record is what
                 // makes its episodes read as watched when the page opens. Without
                 // it a whole imported series was invisible.
-                log::info!("{provider}: {} is not in the library; kept as a placeholder", watch.title.title);
+                log::info!("{provider}: {} has no record here yet; kept as a placeholder too", watch.title.title);
                 missing.push((imdb.to_owned(), kind, watch.title.title.clone(), watch.title.year.clone()));
                 if let TrackedView::Episode { season, number } = view {
                     let mut record = MovieProgress {
@@ -361,7 +361,7 @@ fn apply(
                             ..EpisodeProgress::default()
                         },
                     );
-                    log::info!("{provider}: {} S{season}E{number} watched (its own record: the library lacks the show)", watch.title.title);
+                    log::info!("{provider}: {} S{season}E{number} watched (its first record here)", watch.title.title);
                     movies.progress.push(record);
                     watched += 1;
                 }

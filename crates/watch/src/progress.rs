@@ -19,7 +19,20 @@ use heronite_watch_state::store;
 /// The stored record of `provider`'s `id`, if there is one. A series keeps its
 /// episode in `video_id`.
 pub fn local(app: &AppPaths, provider: &str, id: &str) -> Option<MovieProgress> {
-    store::progress_for(&store::read_movies(app), provider, id).cloned()
+    let movies = store::read_movies(app);
+    record_for(&movies, provider, id).cloned()
+}
+
+/// The record for a title: the one its provider wrote, or the one another writer
+/// made for the same title.
+///
+/// Progress is per title, not per provider — an import creates its own record when
+/// nothing here has played the title yet, and a page asking for the Stremio record
+/// must still see those episodes. Without this fallback an imported series reads as
+/// never watched.
+fn record_for<'a>(movies: &'a store::MoviesFile, provider: &str, id: &str) -> Option<&'a MovieProgress> {
+    store::progress_for(movies, provider, id)
+        .or_else(|| movies.progress.iter().find(|record| record.id == id || record.imdb.as_deref() == Some(id)))
 }
 
 /// What a mark is about: the film, or one episode of a series.
@@ -59,7 +72,9 @@ pub fn set_watched(app: &AppPaths, mark: &Mark<'_>, watched: bool) -> Result<()>
     // One per-path lock for every writer — this mark, a playback, and the import —
     // so a mark pressed while a session is being saved cannot be overwritten.
     store::update_movies(app, |movies| {
-        let mut progress = store::progress_for(movies, mark.provider, mark.id).cloned().unwrap_or_else(|| MovieProgress {
+        // The same lookup the screens use: a mark updates the title's record even
+        // when another writer made it, instead of keeping two.
+        let mut progress = record_for(movies, mark.provider, mark.id).cloned().unwrap_or_else(|| MovieProgress {
             provider: mark.provider.to_owned(),
             id: mark.id.to_owned(),
             position_ms: 0,
@@ -153,6 +168,33 @@ mod tests {
             let _ = log::set_logger(&Captured).map(|()| log::set_max_level(log::LevelFilter::Info));
         });
         &LINES
+    }
+
+    #[test]
+    fn an_imported_record_is_what_the_page_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let at = Utc::now();
+        store::update_movies(&app, |movies| {
+            let mut record = MovieProgress {
+                provider: "imported".into(),
+                id: "tt9".into(),
+                imdb: Some("tt9".into()),
+                updated_at: at,
+                ..MovieProgress::default()
+            };
+            record.episodes.insert(
+                "tt9:1:2".into(),
+                EpisodeProgress { season: Some(1), number: Some(2), finished: true, updated_at: at, ..EpisodeProgress::default() },
+            );
+            movies.progress.push(record);
+            Ok(())
+        })
+        .unwrap();
+
+        // The page asks for the media provider's record; the import wrote another.
+        let seen = local(&app, "stremio", "tt9").expect("the title's record, whoever wrote it");
+        assert!(seen.episode("tt9:1:2", 1, 2).is_some_and(|episode| episode.finished), "and its episodes are visible");
     }
 
     #[test]
