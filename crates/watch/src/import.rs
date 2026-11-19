@@ -173,6 +173,10 @@ pub fn set_enabled(app: &AppPaths, provider: &str, on: bool) -> Result<()> {
     settings.import_providers.retain(|id| id != provider);
     if on {
         settings.import_providers.push(provider.to_owned());
+        // On means "bring what happened", not "resume where a previous pull
+        // stopped": the whole history is fetched once, then the schedule keeps its
+        // deltas. It is also the fix for anything a past pull got wrong.
+        cursor::reset_baseline(app, provider)?;
     }
     heronite_watch_state::settings::write(app, &settings)
 }
@@ -893,6 +897,24 @@ mod tests {
         let _ = run(&app, &sync).unwrap();
         assert!(sync.since.lock().unwrap().is_none(), "an old cursor must not narrow the pull to a delta");
         assert_eq!(cursor::read(&app, "simkl").schema, CURSOR_SCHEMA, "and the cursor is stamped");
+    }
+
+    #[test]
+    fn switching_the_import_on_asks_for_the_whole_history() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        // A cursor that would otherwise make the next pull a delta.
+        cursor::update(&app, "simkl", |cursor| {
+            cursor.schema = CURSOR_SCHEMA;
+            cursor.snapshot = serde_json::json!({"all": "2026-01-01T00:00:00Z"});
+            Ok(())
+        })
+        .unwrap();
+
+        set_enabled(&app, "simkl", true).unwrap();
+        let sync = Recording { pulled: Pulled::default(), since: Default::default() };
+        let _ = run(&app, &sync).unwrap();
+        assert!(sync.since.lock().unwrap().is_none(), "on means the whole history, not a window");
     }
 
     struct FakeSync {

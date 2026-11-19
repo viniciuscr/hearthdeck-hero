@@ -125,6 +125,21 @@ pub fn update<R>(app: &AppPaths, provider: &str, f: impl FnOnce(&mut Cursor) -> 
 }
 
 /// Forgets one provider's cursor (sign-out, or "pull it all again").
+/// Makes the next pull a **baseline**: the snapshot is dropped and the schema
+/// reset, so the provider is asked for its whole history instead of a delta.
+///
+/// What switching the import on means — a person turns it on to get what happened,
+/// not to resume a window — and the recovery a support conversation asks for when
+/// something was missed. The last-seen list membership is kept: dropping it would
+/// make every current list entry look new and re-add them.
+pub fn reset_baseline(app: &AppPaths, provider: &str) -> Result<()> {
+    update(app, provider, |cursor| {
+        cursor.schema = 0;
+        cursor.snapshot = Value::Null;
+        Ok(())
+    })
+}
+
 pub fn clear(app: &AppPaths, provider: &str) -> Result<()> {
     let path = path(app, provider);
     if path.exists() {
