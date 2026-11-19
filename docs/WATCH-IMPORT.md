@@ -78,7 +78,7 @@ Local files (`~/.config/hearthdeck/`, mode 0600, atomic writes via `json_store`)
 | File | Holds | Lifetime |
 |---|---|---|
 | `movies.json` | `MovieProgress` per `provider:id`: `position_ms`, `duration_ms`, `updated_at`, `finished`, `video_id`, `imdb`, `episodes{}` of `EpisodeProgress` (`finished`, `season`, `number`) | truth: what playback resumes from |
-| `watch-personal.json` | `PersonalLibrary`: `watchlist`, `favourites` (full `MovieItem`s), `lists` (reserved) | user data |
+| `watch-personal.json` | `PersonalLibrary`: `watchlist`, `favourites` (full `ShelfTitle` snapshots), `lists` (reserved) | user data |
 | `watch-sessions.json` | `WatchSession` per playback run | append-only log; may be deleted |
 | `watch-tracking.json` | outbox: `events[]`, `notices[]`, per-tracker `Failure` (attempts, `next_at`), `MAX_EVENTS = 500` | disposable once delivered |
 | `watch-settings.json` | `catalog_sources`, `metadata_sources`, `home_rails`, `stream_providers`, `trackers` | settings |
@@ -93,7 +93,7 @@ event at a time to each enabled tracker, with 1/5/30-minute backoff and `Unmatch
 as permanent. Playback never touches the network on its own thread.
 
 Reads today: `heronite_watch::progress::local(app, provider, id)` and the rails
-(`crates/watch/src/collection.rs`): provider rails (Stremio's own catalog id is
+(`crates/watch/src/library.rs`): provider rails (Stremio's own catalog id is
 `continue-watching`; `continue:<provider>` is the *settings* id that selects it),
 catalog rails, and a `personal` rail carrying watchlist+favourites. Note the
 wording: `tracking::queue` folds a new event into the newest state per title, and
@@ -298,7 +298,7 @@ Remote items are keyed by external ids; local records by `provider:id`.
 canonical(title) = imdb (tt…) → provider:id
 ```
 
-`MovieProgress.imdb` already stores the IMDb id; `MovieItem.id` is the provider's
+`MovieProgress.imdb` already stores the IMDb id; `ShelfTitle.id` is the provider's
 id (IMDb for Stremio/Cinemeta). There is **no local tmdb id**, so a tmdb tier
 would be dead code — review finding. Import maps provider ids through `ids.imdb`
 (which requires `extended=ids_only`, §6) and **counts items with no IMDb id** as a
@@ -385,7 +385,7 @@ provider, list id); an unlinked list stays local. Name matching is never a
 fallback.
 
 The schema change is **not** "a field on the entry": `watchlist` is a
-`Vec<MovieItem>` and removing an entry deletes it, so `out` would have nowhere to
+`Vec<ShelfTitle>` and removing an entry deletes it, so `out` would have nowhere to
 live. It is a separate small ledger — `listState: { "<provider>:<kind>:<id>":
 { state: "in" | "out", origin, imported_at } }` — migrated from the current vec
 (absent in the ledger = unset). It is the only change that touches the film page's

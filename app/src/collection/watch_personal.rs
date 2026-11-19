@@ -8,7 +8,7 @@
 use gpui_kit::prelude::*;
 use heronite_data::{AppPaths, CollectionGame};
 use heronite_i18n::tr;
-use heronite_watch::personal::{self, MovieItem, PersonalLibrary};
+use heronite_watch::personal::{self, PersonalLibrary, ShelfTitle};
 
 use super::CollectionView;
 
@@ -52,7 +52,7 @@ impl Flag {
     }
 
     /// Flips the flag on disk and says where it stands afterwards.
-    fn flip(self, app: &AppPaths, item: &MovieItem) -> anyhow::Result<bool> {
+    fn flip(self, app: &AppPaths, item: &ShelfTitle) -> anyhow::Result<bool> {
         match self {
             Self::Watchlist => personal::toggle_watchlist(app, item),
             Self::Favourite => personal::toggle_favourite(app, item),
@@ -71,7 +71,11 @@ impl CollectionView {
     }
 
     /// Where one title stands on both flags, in the film page's row order.
-    pub(super) fn watch_personal_states(&mut self, item: &MovieItem) -> [(Flag, bool); 2] {
+    ///
+    /// Identity is the title (kind and id), so a snapshot kept from one provider
+    /// reads as kept when another provider's card asks — the same rule the
+    /// write path uses, which is why a toggle cannot add a second entry.
+    pub(super) fn watch_personal_states(&mut self, item: &ShelfTitle) -> [(Flag, bool); 2] {
         let shelf = self.watch_personal();
         [(Flag::Watchlist, shelf.watchlisted(item)), (Flag::Favourite, shelf.favourited(item))]
     }
@@ -108,8 +112,8 @@ mod tests {
         AppPaths { config: dir.join("config"), cache: dir.join("cache") }
     }
 
-    fn matrix() -> MovieItem {
-        MovieItem {
+    fn matrix() -> ShelfTitle {
+        ShelfTitle {
             provider: "stremio".into(),
             kind: "movie".into(),
             id: "tt0133093".into(),

@@ -30,7 +30,7 @@ use heronite_watch_core::catalog::{
     CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
 };
 use heronite_watch_core::provider::{Credentials, Secret};
-use heronite_watch_core::types::MovieItem;
+use heronite_watch_core::title::{Art, ProviderId, Title, TitleKey};
 
 /// TMDB's API root.
 pub const API: &str = "https://api.themoviedb.org/3";
@@ -391,23 +391,18 @@ fn fetched(ctx: &CatalogCtx<'_>, key: &str, kind: &str, id: u64) -> (u64, Option
     }
 }
 
-/// One discover result as a Watch item, keyed by its IMDb id.
-fn item(found: &Found, imdb: &str, kind: &str) -> MovieItem {
+/// One discover result as a title, keyed by its IMDb id.
+fn item(found: &Found, imdb: &str, kind: &str) -> Title {
     let date = found.release_date.as_deref().or(found.first_air_date.as_deref()).unwrap_or_default();
     let year = date.get(..4).filter(|year| year.chars().all(|c| c.is_ascii_digit())).map(str::to_owned);
     let image = |path: &Option<String>, width: &str| path.as_ref().map(|path| format!("{IMAGE}/{width}{path}"));
-    MovieItem {
-        id: imdb.to_owned(),
-        kind: kind.to_owned(),
-        name: found.title.clone().or(found.name.clone()).unwrap_or_default(),
-        year,
-        poster: image(&found.poster_path, "w500"),
-        background: image(&found.backdrop_path, "w1280"),
-        description: found.overview.clone(),
-        provider: PLAYS_WITH.to_owned(),
-        addon: DESCRIPTOR.id.to_owned(),
-        ..MovieItem::default()
-    }
+    let name = found.title.clone().or(found.name.clone()).unwrap_or_default();
+    let provider = ProviderId::declared(PLAYS_WITH);
+    let mut title = Title::new(TitleKey::of_source(kind, imdb, &provider), &name).plays(provider);
+    title.release = year;
+    title.art = Art { poster: image(&found.poster_path, "w500"), background: image(&found.backdrop_path, "w1280"), logo: None };
+    title.description = found.overview.clone();
+    title
 }
 
 /// The key's shape in the credential store.
@@ -584,14 +579,13 @@ mod tests {
         let page = Tmdb::new().catalog(&ctx_with(&http, &credentials), &CatalogRequest::first("movie")).unwrap();
         assert_eq!(page.items.len(), 1, "the title without an IMDb id cannot be played, so it is left out");
         let matrix = &page.items[0];
-        assert_eq!(matrix.id, "tt0133093");
+        assert_eq!(matrix.key.id.as_str(), "tt0133093");
         assert_eq!(matrix.name, "The Matrix");
-        assert_eq!(matrix.year.as_deref(), Some("1999"));
-        assert_eq!(matrix.kind, "movie");
-        assert_eq!(matrix.provider, "stremio", "TMDB describes; Stremio plays");
-        assert_eq!(matrix.addon, "tmdb");
-        assert_eq!(matrix.poster.as_deref(), Some("https://image.tmdb.org/t/p/w500/matrix.jpg"));
-        assert_eq!(matrix.background.as_deref(), Some("https://image.tmdb.org/t/p/w1280/matrix-bg.jpg"));
+        assert_eq!(matrix.release.as_deref(), Some("1999"));
+        assert_eq!(matrix.key.kind, heronite_watch_core::title::TitleKind::Movie);
+        assert!(matrix.played_by(&ProviderId::declared(PLAYS_WITH)), "TMDB describes; Stremio plays");
+        assert_eq!(matrix.art.poster.as_deref(), Some("https://image.tmdb.org/t/p/w500/matrix.jpg"));
+        assert_eq!(matrix.art.background.as_deref(), Some("https://image.tmdb.org/t/p/w1280/matrix-bg.jpg"));
         assert!(page.more, "page 1 of 3 has more");
     }
 

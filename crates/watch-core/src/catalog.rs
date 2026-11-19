@@ -11,7 +11,7 @@
 
 use crate::http::Transport;
 use crate::provider::Credentials;
-use crate::types::MovieItem;
+use crate::title::Title;
 use crate::Result;
 
 /// Which page of which catalog: what the Movies and Series tabs ask for.
@@ -91,7 +91,7 @@ pub struct CatalogDescriptor {
 /// One page of a catalog, and whether more follows it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CatalogPage {
-    pub items: Vec<MovieItem>,
+    pub items: Vec<Title>,
     /// The source's own answer to "is there another page"; an empty page is the
     /// end even when it says otherwise.
     pub more: bool,

@@ -89,20 +89,21 @@ Rules:
 ## 3. The model (`heronite-watch-core`)
 
 ```rust
-/// A title as a personal rail remembers it: the card's fields and the key the rest
-/// of Watch resolves it by. Deliberately `MovieItem` — one card model, not two.
-pub type PersonalTitle = MovieItem;           // provider, kind, id, name, year, poster, background, …
+// A title as a personal rail remembers it: the card's fields and the key the rest
+// of Watch resolves it by. Deliberately `ShelfTitle` — one card model, not two
+// (`docs/WATCH-TITLES.md` §3.1); the provider is provenance, so kind and id are
+// the identity.
 
 /// What the person owns: one file, one struct.
 pub struct PersonalLibrary {
-    pub watchlist: Vec<MovieItem>,
-    pub favourites: Vec<MovieItem>,
+    pub watchlist: Vec<ShelfTitle>,
+    pub favourites: Vec<ShelfTitle>,
     pub lists: Vec<PersonalList>,             // reserved: a local list is written the same way
 }
 
 /// A local list. `remote` is reserved for TMDB's list id, so the account slice
 /// does not force a migration.
-pub struct PersonalList { pub id: String, pub name: String, pub items: Vec<MovieItem>, pub remote: Option<String> }
+pub struct PersonalList { pub id: String, pub name: String, pub items: Vec<ShelfTitle>, pub remote: Option<String> }
 
 /// A rail a provider declares for the Collections tab.
 pub struct CollectionDescriptor {
@@ -119,7 +120,7 @@ pub enum CollectionKind {
     /// "Sci-Fi" in Cinemeta and "Science Fiction" in TMDB).
     Rule { source: String, request: CatalogRequest },
     /// A franchise's parts, or any fixed list a provider hands over.
-    Items(Vec<MovieItem>),
+    Items(Vec<Title>),
 }
 
 pub trait WatchCollectionSource: Send + Sync {
@@ -203,8 +204,8 @@ The page draws a small enum, named `ShelfEntry` so neither `Shelf` (the tab) nor
 `Rail` (the provider contract) is reused:
 
 ```rust
-pub enum ShelfEntry { Continue(…), Personal { title: String, items: Vec<MovieItem> },
-                      Provider { source: String, descriptor: CollectionDescriptor, items: Vec<MovieItem> },
+pub enum ShelfEntry { Continue(…), Personal { title: String, items: Vec<ShelfTitle> },
+                      Provider { source: String, descriptor: CollectionDescriptor, items: Vec<Title> },
                       Failed { title: String } }
 ```
 
@@ -311,7 +312,7 @@ isolates their failures. That difference is deliberate and stated here.
 2. The contract carries the source, the media kind and a `CatalogCtx`; a provider
    without a key fails its listing rather than declaring nothing.
 3. Freshness is a per-rail file with a time, not the app's catalogue epoch; one
-   writer owns the projection; `PersonalTitle` *is* `MovieItem`; the page enum is
+   writer owns the projection; `PersonalTitle` *is* `ShelfTitle`; the page enum is
    `ShelfEntry`; the seam is three arms and a new F-015; `X` keeps its existing
    meaning; and the tab is called **Shelf**, with *collection* kept for a rail.
 
@@ -337,7 +338,7 @@ Landed, each its own commit:
 
 **Slice 3b is landed.** What the implementation settles, for the next slice:
 
-- **Where a rail is resolved.** In `heronite_watch::collection::items`, i.e. the
+- **Where a rail is resolved.** In `heronite_watch::library`, i.e. the
   library refresh: the tab never asks a provider anything, and `enabled(app)` —
   declaring a rail — is free by contract (`descriptors` makes no request). The
   mark the refresh leaves (`collection:<id>` in `extra.watchCatalog`) is the rail's

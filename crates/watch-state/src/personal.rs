@@ -76,15 +76,15 @@ fn warn_once(path: &Path, error: &anyhow::Error) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use heronite_watch_core::types::MovieItem;
+    use heronite_watch_core::personal::ShelfTitle;
     use serde_json::Value;
 
     fn app(dir: &Path) -> AppPaths {
         AppPaths { config: dir.join("config"), cache: dir.join("cache") }
     }
 
-    fn item(kind: &str, id: &str) -> MovieItem {
-        MovieItem { provider: "stremio".into(), kind: kind.into(), id: id.into(), name: id.into(), ..MovieItem::default() }
+    fn item(kind: &str, id: &str) -> ShelfTitle {
+        ShelfTitle { provider: "stremio".into(), kind: kind.into(), id: id.into(), name: id.into(), ..ShelfTitle::default() }
     }
 
     #[test]

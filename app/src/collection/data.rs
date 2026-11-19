@@ -38,7 +38,7 @@ fn card_vm_with(g: &CollectionGame, playing: bool, caption: Option<Caption>, cop
             tint: None,
         }),
         installed: g.installed || copies.iter().any(|c| c.installed),
-        imported: imported(g),
+        imported: crate::fork::watch::sources::imported(g),
         playing,
         hidden: g.hidden,
         favourite: g.favourite,
@@ -444,13 +444,6 @@ pub(super) fn parse_day(text: &str) -> Option<chrono::NaiveDate> {
 pub(super) fn played_ago(last_played: &str) -> Option<String> {
     let days = days_since(last_played).or_else(|| Some((chrono::Local::now().date_naive() - parse_day(last_played)?).num_days().max(0)))?;
     Some(days_ago(days))
-}
-
-/// Whether `g` is a Watch placeholder: imported from a provider and playable by
-/// no source here. The library marks it (and `is_installed: false`) when the
-/// import writes it.
-fn imported(g: &CollectionGame) -> bool {
-    g.game.extra.as_ref().and_then(|extra| extra.get("imported")).and_then(serde_json::Value::as_bool).unwrap_or(false)
 }
 
 #[cfg(test)]

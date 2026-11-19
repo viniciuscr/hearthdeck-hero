@@ -9,7 +9,8 @@ use url::Url;
 use heronite_watch_addon::addon::{AddonClient, StreamAnswer};
 use heronite_watch_core::auth::AuthKey;
 use heronite_watch_core::provider::{Ctx, Rail, RailDescriptor, ResolvedStream, StreamOrigin, WatchProvider};
-use heronite_watch_core::types::{MovieItem, MovieProgress, StreamChoice};
+use heronite_watch_core::title::Title;
+use heronite_watch_core::types::{MovieProgress, StreamChoice};
 
 use crate::account::addon_collection;
 use crate::catalog::from_library;
@@ -45,7 +46,7 @@ fn key(ctx: &Ctx<'_>) -> Result<Option<AuthKey>> {
 }
 
 /// The linked account's films and series, in Continue Watching order.
-fn continue_watching(ctx: &Ctx<'_>, endpoints: &Endpoints) -> Result<Vec<MovieItem>> {
+fn continue_watching(ctx: &Ctx<'_>, endpoints: &Endpoints) -> Result<Vec<Title>> {
     let Some(key) = key(ctx)? else {
         return Ok(Vec::new());
     };

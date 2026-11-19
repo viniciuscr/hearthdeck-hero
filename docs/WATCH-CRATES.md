@@ -154,7 +154,7 @@ the app uses.
 | `heronite_watch::store` | `read_auth`, `write_auth`, `clear_auth`, `read_tmdb_key`, `write_tmdb_key`, `clear_tmdb_key`, `read_simkl_client_id`, `write_simkl_client_id`, `clear_simkl_client_id` |
 | `heronite_watch::simkl_sign_in` | `start`, `poll`, `session`, `sign_out`, `configured`, `adopt_client_id_file`, `key_rejected`, `DeviceCode`, `Step`, `Session`, `Tokens`, `SLOW_DOWN` |
 | `heronite_watch::registry` | `providers`, `find`, `ACCOUNTS` (a provider that is only an account, e.g. Simkl) |
-| `heronite_watch::collection` | `ROOT`, `library` (the providers' account rails, then one browsing rail per enabled catalogue source and kind) |
+| `heronite_watch::library` | `ROOT`, `library` (the projection the app loads), `Titles` (the model, insertion-ordered), `Parts` + `Titles::from_parts` (the pure build), `Titles::from_projection` and `title_of_game` (the read-back adapter) |
 | `heronite_watch::playback` | `streams`, `play`, `PlaybackRequest` (with the episode's `video_id`) |
 | `heronite_watch::progress` | `local` (a title's record from `movies.json`, no provider), `set_watched` with `Mark`/`MarkTarget` (a mark by hand), `WatchedState` |
 | `heronite_watch::trackers` | `available`, `enabled`, `pending`, `record_playback`, `record_manual`, `drain`, `backfill`, `Report`, `Pending` |

@@ -13,13 +13,13 @@ use chrono::{DateTime, Utc};
 
 use heronite_data::paths::AppPaths;
 use heronite_watch_core::http::UreqTransport;
+use heronite_watch_core::personal::ShelfTitle;
 use heronite_watch_core::personal::{ListDecision, Membership, FAVOURITES, WATCHLIST};
 use heronite_watch_core::provider::Ctx;
 use heronite_watch_core::pull::{Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
 use heronite_watch_core::sync_rules::{reconcile, Action, Local, Remote, Seen};
-use heronite_watch_core::title::IMPORTED_ADDON;
 use heronite_watch_core::tracker::{Delivery, ListChange, TrackedTitle, TrackedView};
-use heronite_watch_core::types::{EpisodeProgress, MovieItem, MovieProgress, Origin};
+use heronite_watch_core::types::{EpisodeProgress, MovieProgress, Origin};
 use heronite_watch_simkl::pull::SimklPull;
 use heronite_watch_state::import as cursor;
 use heronite_watch_state::placeholders::{self, Placeholder};
@@ -650,29 +650,27 @@ fn local_tracked(library: &heronite_watch_core::personal::PersonalLibrary, kind:
         imdb: Some(item.id.clone()),
         kind: item.kind.clone(),
         title: item.name.clone(),
-        year: item.year.clone(),
+        year: item.release.clone(),
     })
 }
 
 /// The items a local list holds.
-fn local_items<'a>(library: &'a heronite_watch_core::personal::PersonalLibrary, kind: &str) -> &'a [MovieItem] {
+fn local_items<'a>(library: &'a heronite_watch_core::personal::PersonalLibrary, kind: &str) -> &'a [ShelfTitle] {
     match kind {
         FAVOURITES => &library.favourites,
         _ => &library.watchlist,
     }
 }
 
-/// A list entry for a title, marked as imported: it is a title we may not have,
-/// so it travels as a placeholder and the tiles treat it as unavailable.
-fn list_item(title: &TrackedTitle) -> MovieItem {
-    MovieItem {
+/// A list entry for a title we may not have: the snapshot the shelf keeps.
+fn list_item(title: &TrackedTitle) -> ShelfTitle {
+    ShelfTitle {
         id: title.imdb.clone().unwrap_or_default(),
         kind: if title.kind == "series" { "series".into() } else { "movie".into() },
         name: title.title.clone(),
-        year: title.year.clone(),
+        release: title.year.clone(),
         provider: String::new(),
-        addon: IMPORTED_ADDON.to_owned(),
-        ..MovieItem::default()
+        ..ShelfTitle::default()
     }
 }
 
@@ -1010,7 +1008,7 @@ mod tests {
 
     fn keep_local(app: &AppPaths, imdb: &str) {
         let mut library = heronite_watch_state::personal::read(app);
-        library.add_watchlist(&MovieItem { id: imdb.into(), kind: "movie".into(), name: "A Film".into(), ..MovieItem::default() });
+        library.add_watchlist(&ShelfTitle { id: imdb.into(), kind: "movie".into(), name: "A Film".into(), ..ShelfTitle::default() });
         heronite_watch_state::personal::write(app, &library).unwrap();
     }
 

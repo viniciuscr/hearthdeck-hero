@@ -8,7 +8,8 @@ use std::fmt;
 use url::Url;
 
 use crate::http::Transport;
-use crate::types::{MovieItem, MovieProgress, StreamChoice};
+use crate::title::Title;
+use crate::types::{MovieProgress, StreamChoice};
 use crate::Result;
 
 /// One home rail a provider contributes, in display order.
@@ -24,7 +25,7 @@ pub struct RailDescriptor {
 #[derive(Clone, Debug)]
 pub struct Rail {
     pub catalog: RailDescriptor,
-    pub items: Vec<MovieItem>,
+    pub items: Vec<Title>,
 }
 
 /// What a provider is given: the transport, and its own credentials.

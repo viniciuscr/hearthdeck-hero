@@ -420,7 +420,7 @@ impl CollectionView {
     fn active_data_paths(&self) -> DataPaths {
         match self.space {
             Space::Games => self.data_paths.clone(),
-            Space::Watch => DataPaths::at(self.app_paths.cache.join(heronite_watch::collection::ROOT)),
+            Space::Watch => DataPaths::at(self.app_paths.cache.join(heronite_watch::library::ROOT)),
         }
     }
 

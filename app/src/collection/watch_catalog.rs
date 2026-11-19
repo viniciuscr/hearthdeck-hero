@@ -441,7 +441,7 @@ impl CollectionView {
                     Ok((page, added)) => {
                         let items = page.items;
                         let mut done = !page.more;
-                        feed.ids.extend(items.iter().map(|item| item.id.clone()));
+                        feed.ids.extend(items.iter().map(|item| item.key.id.as_str().to_owned()));
                         if let Some(query) = feed.looking_up.take() {
                             // A search is one page: Cinemeta does not paginate it.
                             done = true;

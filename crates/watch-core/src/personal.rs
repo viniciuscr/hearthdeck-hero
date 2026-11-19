@@ -2,12 +2,12 @@
 //!
 //! This is **user data**, not cache: it lives in `config/watch-personal.json`
 //! (`heronite-watch-state::personal`), survives every library refresh, and is
-//! hand-editable. A title is remembered as the card needs it — a `MovieItem`, the
-//! same shape the screens already draw — so a rail can render while the palette
-//! projection no longer holds that title.
+//! hand-editable. A title is remembered as the card needs it — a [`ShelfTitle`],
+//! the fields the person saw — so a rail can render while the palette projection
+//! no longer holds that title.
 //!
-//! Identity is the pair the rest of Watch uses: `provider`, `kind`, `id`. A film and
-//! a series may share an id, so kind is part of it.
+//! Identity is the pair the rest of Watch uses: `kind`, `id`. A film and a series
+//! may share an id, so kind is part of it; the provider is provenance.
 
 use std::collections::BTreeMap;
 
@@ -15,7 +15,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::types::{MovieItem, Origin};
+use crate::title::Art;
+use crate::types::Origin;
 
 /// Whether a title is in a list, as the last decision said.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,16 +45,79 @@ pub struct ListDecision {
 pub const WATCHLIST: &str = "watchlist";
 pub const FAVOURITES: &str = "favourites";
 
+/// A title the person kept: the card's fields, as they were when it was kept.
+///
+/// This is the one persisted item shape (`watch-personal.json`), frozen so a
+/// downgrade still reads it: the wire names are the old ones (`year`, and the art
+/// flat at the top level), and the provider is *provenance* — who played it when
+/// it was kept — not part of the identity.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShelfTitle {
+    /// The provider that played it when it was kept. Provenance, not identity.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider: String,
+    /// `movie` or `series`, the word the library stores.
+    #[serde(default)]
+    pub kind: String,
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// The library's `year` on the wire; a series' `2011–2019`.
+    #[serde(default, rename = "year", skip_serializing_if = "Option::is_none")]
+    pub release: Option<String>,
+    /// Flat on the wire (`poster`, `background`, `logo`), where the old item
+    /// wrote them.
+    #[serde(flatten)]
+    pub art: Art,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+}
+
+impl ShelfTitle {
+    /// Refreshes this snapshot from a newer press on the same title: the newer
+    /// value wins where it has one, and what it does not know is kept. Pressing a
+    /// flag on an imported placeholder must not wipe the poster a real card gave
+    /// the shelf, and pressing it on a real card must update what the person saw.
+    pub fn merge(&mut self, other: &ShelfTitle) {
+        if !other.provider.is_empty() {
+            self.provider.clone_from(&other.provider);
+        }
+        if !other.name.is_empty() {
+            self.name.clone_from(&other.name);
+        }
+        if other.release.is_some() {
+            self.release.clone_from(&other.release);
+        }
+        if other.description.is_some() {
+            self.description.clone_from(&other.description);
+        }
+        if !other.genres.is_empty() {
+            self.genres.clone_from(&other.genres);
+        }
+        if other.art.poster.is_some() {
+            self.art.poster.clone_from(&other.art.poster);
+        }
+        if other.art.background.is_some() {
+            self.art.background.clone_from(&other.art.background);
+        }
+        if other.art.logo.is_some() {
+            self.art.logo.clone_from(&other.art.logo);
+        }
+    }
+}
+
 /// The person's own shelf: two flags and their lists.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonalLibrary {
     /// Titles meant to be watched, in the order they were added.
     #[serde(default)]
-    pub watchlist: Vec<MovieItem>,
+    pub watchlist: Vec<ShelfTitle>,
     /// Titles the person likes.
     #[serde(default)]
-    pub favourites: Vec<MovieItem>,
+    pub favourites: Vec<ShelfTitle>,
     /// Named lists, reserved for the "Add to a list…" pass.
     #[serde(default)]
     pub lists: Vec<PersonalList>,
@@ -74,7 +138,7 @@ pub struct PersonalList {
     pub id: String,
     pub name: String,
     #[serde(default)]
-    pub items: Vec<MovieItem>,
+    pub items: Vec<ShelfTitle>,
     #[serde(default)]
     pub remote: Option<String>,
     #[serde(flatten)]
@@ -82,8 +146,11 @@ pub struct PersonalList {
 }
 
 /// Whether two items are the same title: the pair every Lookup in Watch uses.
-pub fn same_title(a: &MovieItem, b: &MovieItem) -> bool {
-    a.provider == b.provider && a.kind == b.kind && a.id == b.id
+/// Whether two snapshots are the same title: kind and id. The provider is
+/// *provenance* — who played it when it was kept — and refreshes in place, so
+/// keeping a title from a second source does not add a second entry.
+pub fn same_title(a: &ShelfTitle, b: &ShelfTitle) -> bool {
+    a.kind == b.kind && a.id == b.id
 }
 
 impl PersonalLibrary {
@@ -106,7 +173,10 @@ impl PersonalLibrary {
     /// plain vecs (a file written before the ledger existed). `None` for a title
     /// that is in neither.
     pub fn membership(&self, kind: &str, provider: &str, id: &str) -> Option<Membership> {
-        if let Some(decision) = self.decision(kind, provider, id) {
+        // The ledger first: this provider's decision, then the one a sync wrote
+        // (under no provider). Then the lists, which are canonical — a snapshot's
+        // provider is provenance.
+        if let Some(decision) = self.decision(kind, provider, id).or_else(|| self.decision(kind, "", id)) {
             return Some(decision.state);
         }
         let list = match kind {
@@ -114,7 +184,7 @@ impl PersonalLibrary {
             FAVOURITES => &self.favourites,
             _ => return None,
         };
-        list.iter().any(|item| item.id == id && (item.provider.is_empty() || item.provider == provider)).then_some(Membership::In)
+        list.iter().any(|item| item.id == id).then_some(Membership::In)
     }
     /// The membership this file implies for a title **regardless of provider**: a
     /// list entry from a sync carries no provider, and the ledger keeps it under
@@ -146,16 +216,16 @@ impl PersonalLibrary {
 
     /// Adds a title to the watchlist, or refreshes the snapshot of one already
     /// there without moving it. `true` when it was not in the list before.
-    pub fn add_watchlist(&mut self, item: &MovieItem) -> bool {
+    pub fn add_watchlist(&mut self, item: &ShelfTitle) -> bool {
         keep(&mut self.watchlist, item)
     }
 
-    pub fn remove_watchlist(&mut self, item: &MovieItem) -> bool {
+    pub fn remove_watchlist(&mut self, item: &ShelfTitle) -> bool {
         drop(&mut self.watchlist, item)
     }
 
     /// Adds or removes, and says where it stands afterwards: `true` = in.
-    pub fn toggle_watchlist(&mut self, item: &MovieItem) -> bool {
+    pub fn toggle_watchlist(&mut self, item: &ShelfTitle) -> bool {
         if self.remove_watchlist(item) {
             false
         } else {
@@ -164,19 +234,19 @@ impl PersonalLibrary {
         }
     }
 
-    pub fn watchlisted(&self, item: &MovieItem) -> bool {
+    pub fn watchlisted(&self, item: &ShelfTitle) -> bool {
         self.watchlist.iter().any(|kept| same_title(kept, item))
     }
 
-    pub fn add_favourite(&mut self, item: &MovieItem) -> bool {
+    pub fn add_favourite(&mut self, item: &ShelfTitle) -> bool {
         keep(&mut self.favourites, item)
     }
 
-    pub fn remove_favourite(&mut self, item: &MovieItem) -> bool {
+    pub fn remove_favourite(&mut self, item: &ShelfTitle) -> bool {
         drop(&mut self.favourites, item)
     }
 
-    pub fn toggle_favourite(&mut self, item: &MovieItem) -> bool {
+    pub fn toggle_favourite(&mut self, item: &ShelfTitle) -> bool {
         if self.remove_favourite(item) {
             false
         } else {
@@ -185,7 +255,7 @@ impl PersonalLibrary {
         }
     }
 
-    pub fn favourited(&self, item: &MovieItem) -> bool {
+    pub fn favourited(&self, item: &ShelfTitle) -> bool {
         self.favourites.iter().any(|kept| same_title(kept, item))
     }
 
@@ -194,7 +264,7 @@ impl PersonalLibrary {
     }
 
     /// Adds to a named list; `false` when there is no such list.
-    pub fn add_to_list(&mut self, id: &str, item: &MovieItem) -> bool {
+    pub fn add_to_list(&mut self, id: &str, item: &ShelfTitle) -> bool {
         match self.lists.iter_mut().find(|list| list.id == id) {
             Some(list) => {
                 keep(&mut list.items, item);
@@ -204,7 +274,7 @@ impl PersonalLibrary {
         }
     }
 
-    pub fn remove_from_list(&mut self, id: &str, item: &MovieItem) -> bool {
+    pub fn remove_from_list(&mut self, id: &str, item: &ShelfTitle) -> bool {
         match self.lists.iter_mut().find(|list| list.id == id) {
             Some(list) => drop(&mut list.items, item),
             None => false,
@@ -213,10 +283,14 @@ impl PersonalLibrary {
 }
 
 /// Appends, or refreshes in place so the rail's order is the person's.
-fn keep(items: &mut Vec<MovieItem>, item: &MovieItem) -> bool {
+///
+/// Refreshing fills what the new snapshot is missing from the kept one, never the
+/// reverse: the same title may be pressed on a card that knows less than the
+/// shelf does.
+fn keep(items: &mut Vec<ShelfTitle>, item: &ShelfTitle) -> bool {
     match items.iter().position(|kept| same_title(kept, item)) {
         Some(index) => {
-            items[index] = item.clone();
+            items[index].merge(item);
             false
         }
         None => {
@@ -227,7 +301,7 @@ fn keep(items: &mut Vec<MovieItem>, item: &MovieItem) -> bool {
 }
 
 /// Removes, and says whether it was there.
-fn drop(items: &mut Vec<MovieItem>, item: &MovieItem) -> bool {
+fn drop(items: &mut Vec<ShelfTitle>, item: &ShelfTitle) -> bool {
     match items.iter().position(|kept| same_title(kept, item)) {
         Some(index) => {
             items.remove(index);
@@ -241,8 +315,27 @@ fn drop(items: &mut Vec<MovieItem>, item: &MovieItem) -> bool {
 mod tests {
     use super::*;
 
-    fn item(provider: &str, kind: &str, id: &str) -> MovieItem {
-        MovieItem { provider: provider.into(), kind: kind.into(), id: id.into(), name: id.into(), ..MovieItem::default() }
+    fn item(provider: &str, kind: &str, id: &str) -> ShelfTitle {
+        ShelfTitle { provider: provider.into(), kind: kind.into(), id: id.into(), name: id.into(), ..ShelfTitle::default() }
+    }
+
+    #[test]
+    fn an_old_shelf_entry_loads_and_keeps_its_wire_names() {
+        // What the previous build wrote: the flat item, with the keys the
+        // screens have always read.
+        let old = r#"{"provider":"stremio","kind":"movie","id":"tt1","name":"A Film",
+                      "year":"1999","poster":"https://img/p.jpg","background":null,
+                      "description":"A plot","genres":["Drama"],"top":true,"catalog":null,
+                      "last_watched":"2026-11-12T20:00:00Z","minutes_played":42.0,"addon":"cinemeta"}"#;
+        let shelf: ShelfTitle = serde_json::from_str(old).expect("an old entry still loads");
+        assert_eq!(shelf.release.as_deref(), Some("1999"));
+        assert_eq!(shelf.art.poster.as_deref(), Some("https://img/p.jpg"));
+        assert_eq!(shelf.genres, ["Drama"]);
+
+        let written = serde_json::to_string(&shelf).expect("a snapshot writes");
+        assert!(written.contains("\"year\":\"1999\""), "the old build reads its own key: {written}");
+        assert!(written.contains("\"poster\":\"https://img/p.jpg\""), "art stays flat: {written}");
+        assert!(!written.contains("\"top\""), "what the snapshot does not keep is dropped: {written}");
     }
 
     #[test]
@@ -283,11 +376,30 @@ mod tests {
     }
 
     #[test]
+    fn a_title_kept_from_one_provider_is_one_entry_whichever_one_asks() {
+        let mut library = PersonalLibrary::default();
+        library.add_watchlist(&item("stremio", "movie", "tt1"));
+        library.add_favourite(&item("stremio", "series", "tt2"));
+
+        assert!(library.watchlisted(&item("youtube", "movie", "tt1")), "the same title, another provider");
+        assert!(library.favourited(&item("youtube", "series", "tt2")));
+        assert!(!library.watchlisted(&item("stremio", "series", "tt1")), "kind is part of the identity");
+
+        // Keeping it from the second source refreshes the snapshot in place: the
+        // rail draws one card, and the provenance follows the press.
+        assert!(!library.add_watchlist(&item("youtube", "movie", "tt1")), "already kept");
+        assert_eq!(library.watchlist.len(), 1, "no duplicate");
+        assert_eq!(library.watchlist[0].provider, "youtube", "the snapshot says who played it last");
+        assert!(library.remove_watchlist(&item("youtube", "movie", "tt1")), "and it can be removed");
+        assert!(library.watchlist.is_empty());
+    }
+
+    #[test]
     fn a_film_and_a_series_may_share_an_id() {
         let mut library = PersonalLibrary::default();
         library.add_watchlist(&item("stremio", "movie", "tt1"));
         assert!(!library.watchlisted(&item("stremio", "series", "tt1")), "kind is part of the identity");
-        assert!(!library.watchlisted(&item("other", "movie", "tt1")), "and so is the provider");
+        assert!(library.watchlisted(&item("other", "movie", "tt1")), "the provider is provenance, not identity");
     }
 
     #[test]

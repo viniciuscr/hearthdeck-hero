@@ -1,11 +1,11 @@
 # Watch titles — the transition plan
 
-Status: **plan for review** (2026-11-19, second revision). Phase 1 is partly
-implemented; nothing else is. Two independent reviews of the first revision
-found factual errors (the deviation footprint, the wire keys, the phase order)
-and three model holes (`TitleId` was IMDb-only, `Sources` carried an
-unenforceable invariant, and the projection's read-back path was missing). This
-revision fixes them; §11 records what the reviews changed.
+Status: **implemented** (2026-11-19). **P1–P5, P6a and P7 are done**; only P6b —
+the `PlayCopy` branch — remains, and it is gated on a second stream provider
+shipping. Everything from the model to the file projection speaks `Title`, a
+title played by two providers is one card with both sources recorded, and the
+gates and the register review are clean. This revision also records what the two reviews of the
+first draft changed (§11).
 
 Companion to `docs/WATCH.md` (the space), `docs/WATCH-IMPORT.md` (sync) and
 `docs/WATCH-CRATES.md` (the crate boundary). `docs/FORK.md` owns the deviation
@@ -47,18 +47,19 @@ Every line this transition touches in upstream's files, and nothing else:
 
 | Seam | Files | Footprint | Why it cannot be ours |
 |---|---|---|---|
-| the placeholder flag (`F-019`) | `app/src/collection/{vm,data,card,list_row}.rs`, `console/tile.rs`, `console/layouts/carousel.rs`, `console/layouts/spotlight/row.rs` | one `CardVm` field (+4 lines with its test fixture), one assignment, a 3-line helper `data.rs` duplicates from `sources.rs` (+8 lines), **five** one-line grey conditions | the card model and the grey rule are upstream's renderer; "a placeholder is always dimmed, whatever the theme says" has no other expression |
+| the placeholder flag (`F-019`) | `app/src/collection/{vm,data,card,list_row}.rs`, `console/tile.rs`, `console/layouts/carousel.rs`, `console/layouts/spotlight/row.rs` | one `CardVm` field (+4 lines with its test fixture), one assignment, **five** one-line grey conditions — seven files, +12/−6 lines | the card model and the grey rule are upstream's renderer; "a placeholder is always dimmed, whatever the theme says" has no other expression |
 | a provider's display name (`F-007`) | `crates/data/src/library.rs` (`source_label`) | **one line per stream provider** ("Stremio" is there) — an English literal the i18n coverage gate cannot see | `source_label` is upstream's table; an unknown source falls back to "Local" |
 | "Play with \<provider\>" (`F-020`) | `app/src/collection/copies.rs` → `GameAction::PlayCopy` | one branch, when a second provider ships | `PlayCopy` ends in the store client's launch (`app/src/collection/game_actions.rs:424`), which cannot start a Watch stream |
+| the module rename (`F-006`, `F-008`) | `app/src/collection/{load,mod}.rs`, `console/sources.rs` | one line each for the rename, plus two lines in the watchlist rail (`game.runner == item.provider` dropped, so a shelf entry matches its title on any card) | the app dispatches through that module, and the rail is upstream's; both files are already registered seams |
 
-P5 **reduces** the first: the duplicated helper goes and `data.rs` keeps only
-its assignment (8 added lines → 1). The second cannot shrink below one line per
-provider. The third is deferred — confirmed necessary, because `PlayCopy` never
-reaches Watch today.
+P5 **reduced** the first seam: the duplicated helper is gone, and `data.rs` is
+now one line that calls `sources::imported` (+19/−6 became +12/−6). The second
+cannot shrink below one line per provider. The third is deferred — confirmed
+necessary, because `PlayCopy` never reaches Watch today.
 
 No upstream change is requested for any of them: each is a fork-side patch with
-a `Fork-Seam` trailer and a `docs/FORK.md` row. Today's footprint is 7 files:
-+19/−6 lines, one field and five conditions.
+a `Fork-Seam` trailer and a `docs/FORK.md` row. Today's footprint is 7 files,
++12/−6 lines: one field, one assignment and five conditions.
 
 ## 3. The model
 
@@ -81,7 +82,7 @@ pub enum RailMark {
     Collection(String),                       // a rail the person turned on
 }
 
-pub struct Watched { pub at: Option<String>, pub minutes: f64 }
+pub struct Watched { pub at: Option<DateTime<Utc>>, pub minutes: f64 }
 
 pub struct Title {
     pub key: TitleKey,
@@ -103,7 +104,8 @@ pub struct Title {
 - **Identity is `(kind, id space, id)`.** A stream provider is a *source*, never
   identity. The id space is part of the key because the second provider is
   YouTube, whose titles have video ids and often no `tt` id at all — the code
-  already assumes this (`watch_playback.rs:638` keeps `imdb` only for `tt…`).
+  already assumes this (`app/src/collection/watch_playback.rs:680` keeps `imdb`
+  only for `tt…`).
   Matching a Stremio title to a YouTube one is a **lookup** (name + release),
   recorded by the adapter, not a merge of identities; the day that matters,
   `Title` grows `alternates: BTreeMap<IdSpace, String>`.
@@ -127,27 +129,32 @@ pub struct Title {
   is a `metadata::Episode` inside a series, with per-episode state in
   `movies.json`. `TitleKind` stays two, because `type:movie`/`type:series` tab
   sources, `stremioType` and the writer's keys all mean the two.
-- **`runtime` is dropped.** Nothing reads `MovieItem::runtime`; the film page
-  takes it from `TitleDetails`.
+- **`runtime` is not on a title.** Nothing reads it; the film page takes it from
+  `TitleDetails`. The `MovieItem` wire record still carries the field, which
+  nothing now writes or reads — a leftover, not a decision.
 - **A catalogue source is not a stream provider.** A catalogue page lists
   titles; the providers that can resolve a stream for a title's id play it —
   today Stremio alone, which is why a Cinemeta or TMDB item is playable by
   Stremio and a YouTube track would not be. `RailMark::Feed::source` names the
   catalogue; `providers` names who plays.
-- **`ProviderId` comes from the registry**, not from a raw string: the only
-  constructors are the providers `registry::providers()` returns, so
-  `"imported"` stops being a pseudo-provider and a typo cannot become an owner.
+- **`ProviderId` has two doors.** `new` validates wire input (a blank id is
+  refused); `declared` takes a crate's own constant (`Stremio`'s `ID`, a
+  source's `PLAYS_WITH`) and is debug-asserted non-empty. A typo in a constant
+  is a bug, not a runtime state — and the registry stays the authority for which
+  ids exist.
 
 ### 3.1 The one persisted shape
 
 `watch-personal.json` is user data a downgrade must still read, so the shelf
-keeps a frozen snapshot — a **new** type, `ShelfTitle` in
-`watch-core::personal`: kind, id, name, release, art, description, genres, and
-the provider as *provenance*. It is a remembered card, not a library record:
-carrying `providers` or `rails` would only store what the next refresh is about
-to correct. Its serde accepts the old `MovieItem` names, so a file written
-before the transition still loads. `watch-imported.json`'s `Placeholder` is its
-own shape and does not change at all.
+keeps a frozen snapshot — `ShelfTitle` in `watch-core::personal`: kind, id,
+name, release, art, description, genres, and the provider as *provenance*. It is
+a remembered card, not a library record: carrying `providers` or `rails` would
+only store what the next refresh is about to correct. Its wire names are the old
+ones — `year`, and the art flat at the top level — so a file written before the
+transition still loads, and a downgrade still reads what this build writes.
+`watch-imported.json`'s `Placeholder` is its own shape and does not change at
+all. `MovieItem` survives only as the projection's wire record, between
+`record_of` and `title_of_game`.
 
 ## 4. Vocabulary map
 
@@ -180,15 +187,24 @@ and never merged with the games' library.
 `art_square`, `art_background`, `art_logo`, `description`, `is_installed`,
 `install.platform: "movie"`, and `extra.{stremioType, stremioTop,
 watchCatalog, provider, watchId, imported}`. A downgrade reads the same file.
+`timestamps.lastPlayed` is normalized to `…T…Z` with milliseconds (§9.9).
 
-**The keys are not the identity.** They are `app_name = {owner}:{id}`,
+**The projection takes titles.** `refresh`, `append`, `replace` and `write_root`
+take `&[Title]` and `titles(root)` returns them. One encode — `record_of(&Title)`
+— is the only place the keys are written; the decode exists twice by necessity,
+because the writer reads the raw files (`stored_item`) while the app reads a
+loaded `Library` (`title_of_game`), and the two are held together by a test that
+pits them against each other on one root. `MovieItem` remains as that wire
+record — the Heroic shape — and nothing else builds one.
+
+**5.1a The keys are not the identity.** They are `app_name = {owner}:{id}`,
 `local_meta = app_name`, `metadata = {owner}:{app_name}` (so
 `stremio:stremio:tt1` — the double prefix is frozen on purpose), and
 `timestamps = app_name`. The id carry the **kind nowhere**: a film and a series
-sharing an id collide in every one of those maps. `assemble` masks this today by
-keeping the first of the pair (`watch/src/collection.rs:182-193`); P4 must keep
-a rule for it and a test, because a `Titles` keyed by `(kind, id)` would
-otherwise hand the writer two titles and let the second overwrite the first.
+sharing an id collide in every one of those maps. The library used to mask this
+by keeping the first of the pair; `Titles` now merges them, so P4 must keep a
+rule for the collision and a test, because two titles with one wire key would
+otherwise overwrite each other.
 
 **`is_installed` means "a stream provider here can play it"**, documented in
 code at the write site. A placeholder is `false` with `extra.imported: true`.
@@ -196,37 +212,47 @@ code at the write site. A placeholder is `false` with `extra.imported: true`.
 ### 5.1 The round trip is permanent
 
 `Titles → projection → Titles` is not a one-way street: `append`, `replace` and
-`refresh` read the file back through `stored()`, and `kept()`/`replace()` parse
+`refresh` read the file back through `titles()`, and `kept()`/`replace()` parse
 `extra.watchCatalog` (the `collection:` prefix decides retention;
 `replace` decides page membership). So the plan names the seam rather than
 pretending it disappears:
 
-- `Title::of_game(&CollectionGame) -> Title` reconstructs a title from a
+- `title_of_game(&CollectionGame) -> Title` reconstructs a title from a
   projection record; `Titles::from_projection` rebuilds a library from a root.
-- It is lossy in exactly two places: one record per title means `providers`
-  comes back with one entry, and one `watchCatalog` means `rails` comes back
-  with one mark. Both are stated, not accidental.
+  The adapter lives in `heronite-watch`, not beside `Title`: `CollectionGame` is
+  upstream's type and `watch-core` may not depend on `heronite-data`.
+- It is lossy in exactly four places: one record per title means `providers`
+  comes back with one entry; one `watchCatalog` means `rails` comes back with one
+  mark; the projection records no `addon`, so a feed mark comes back with an
+  empty `source`; and the record stores the id without its **space** — a
+  playable record re-derives it from its provider, so only a *placeholder* with a
+  non-IMDb id comes back canonical. All four are stated, not accidental.
 - **`extra.watchCatalog` must stay a single string that `kept()` and `replace()`
-  can parse.** A `Vec<RailMark>` is reconstructed from it plus `extra`'s
-  `addon`; adding a second key would be a new frozen key and is out of scope.
+  can parse.** A `Vec<RailMark>` is reconstructed from it (`RailMark::as_wire`/
+  `from_wire`); adding a second key would be a new frozen key and is out of
+  scope.
 - A provider that fails leaves the file untouched
-  (`watch/src/collection.rs:33-36`), so the round trip is also the recovery
+  (`watch/src/library.rs:223-225`), so the round trip is also the recovery
   path: `Titles::from_projection` is what re-reads a library nobody just built.
 
 ### 5.2 One record per title, then per provider
 
-Today: one record per title, chosen by registry order. P6, once a second
-provider ships: one record per playable provider, linked in
-`local_library/copies.json` so the Collection collapses them to one card
-(`group_copies` defaults to on, `crates/data/src/ui_state.rs:207`) with its
-copies badge and "Play with \<provider\>".
+Before P6: one record per title, chosen by registry order. **Now (P6a):** one
+record per playable provider, linked in `local_library/copies.json` so the
+Collection collapses them to one card (`group_copies` defaults to on,
+`crates/data/src/ui_state.rs:207`) with its copies badge. The grid collapsing is
+upstream's; the "Play with \<provider\>" action is still P6b, because with a
+single provider there is no second copy to press.
 
-The copies write path has prerequisites, all in P6's acceptance: Watch records
-carry none of the ids `copies::groups` links by (`ids()` looks for `igdb:`/
-`steam:`), so grouping is only ever by the links we write; the writer must own
-`links` while never overriding a person's `apart`, `preferred` or ungroup;
-`totalPlayed` is written on one copy only, or the totals double-count; and the
-root the writer writes must be the one the screens read
+The copies write path honours the prerequisites: Watch records carry none of the
+ids `copies::groups` links by (`ids()` looks for `igdb:`/`steam:`), so grouping
+is only ever by the links we write; the writer adds links but never overrides a
+person's `apart`, `preferred` or other links; and the root the writer writes is
+the one the screens read. The fold back is by `TitleKey`, so it joins records
+whose id is the same *in the same space*: a title known only in a provider's own
+id space re-derives that space from the record's provider and groups with itself,
+while two providers that know one title under different spaces stay two titles
+until a lookup joins them (§9.3).
 (`active_data_paths()`), not a second copy.
 
 ## 6. Phases
@@ -245,56 +271,114 @@ per field, placeholder, kinds, id spaces.
 
 **P2 — the library and the boundary (ours).** `crates/watch/src/library.rs`,
 renamed from `collection.rs`: `Titles` keyed by `TitleKey`, insertion-ordered
-(the rails' order is the grid's order — `BTreeMap` would sort by id), built
-through a pure `Titles::from_parts(rails, shelf, placeholders)`; plus
-`Title::of_item` and `Title::of_game` (§5.1), which are the two adapters the
-rest of the plan leans on. Acceptance: the titles equal the `MovieItem` set the
-old path produces (ids, order, availability); two rails carrying one title give
-one title; the round trip is lossless except for the two documented losses. No
+(the rails' order is the grid's order — a map would sort by id), built through
+`Titles::from_parts(Parts { rails, collections, shelf, placeholders })`; plus the
+two adapters, `Title::of_item` in `watch-core` and `title_of_game` in
+`heronite-watch` (where `CollectionGame` is visible), and the wire codec
+`RailMark::{as_wire, from_wire}`. Acceptance: the titles equal the `MovieItem`
+set the old path produced (ids, order, availability, first mark — pinned by a
+golden test), and **the production `items()` builds that same `Titles`**, so the
+test is not a parallel implementation; two rails carrying one title give one
+title; the round trip is lossless except for the four documented losses. No
 network in tests. **This comes before P3 on purpose**: the projection and the
 catalogue pages still speak `MovieItem`, so providers cannot switch first
 without a back-adapter — the thing this phase retires.
 
-**P3 — providers emit titles.** `watch-stremio`, `watch-tmdb`,
-`watch-catalogs`, `watch-addon` and `watch-core::personal` speak `Title`: no
-`String` kind, no empty-provider-means-Stremio default, no `owner()`, one
-`IMPORTED` const. The shelf moves to `ShelfTitle`, old names aliased.
-Acceptance: provider fixtures parse to the same titles; the boundary adapters
-from P2 are deleted; an old shelf file still loads; `watch-imported.json`'s
-shape is untouched.
+**P3 — providers emit titles (two slices).**
 
-**P4 — the projection (ours).** `crates/watch-state/src/collection.rs` takes
-`Titles` and writes the frozen keys, keeping the film/series collision rule
-(§5) and the single `watchCatalog` string. The personal ledger keeps its
-`kind:provider:id` key (landed in `085ad29e`/`297d62a7`), but its **reads**
-become canonical through `membership_any`: a title watchlisted from one provider
-must read as watchlisted from another, and a sync entry stored under the empty
-provider must do the same. Acceptance: the app renders identically for a normal
-title and for a placeholder; the keys are asserted against a golden record; a
-downgrade build reads the file; a film and a series sharing an id follow the
-stated rule; the shelf answers across providers.
+**P3a — the sources (done).** `watch-addon`'s `MetaPreview::into_title` and
+`AddonClient::catalog` (which now answers previews), `watch-catalogs`' Cinemeta,
+`watch-tmdb`'s `item`, and Stremio's `from_library`/`continue_watching` build
+`Title`s; `Rail.items` and `CatalogPage.items` carry them. The catalogue source
+stamps the provider that plays its titles (`PLAYS_WITH`), the feed mark comes
+from the source's own id, and `ProviderId::declared` is the only trusted
+constructor. The assembly merges two observations instead of dropping the second
+(and `top` is `any`, so a Top placement survives). `items()` now builds the
+library through `Titles::from_parts` — the duplicate `assemble`/`mark_collections`
+path is gone — and the projection writes the titles themselves, marking one with
+no provider as the writer's placeholder (`addon: "imported"`, which is what
+`is_installed: false` and F-019's grey rule read).
+Acceptance met: the sources' tests assert titles, the watch crate's tests assert
+the rails/order/marks and the placeholder's projection, and
+`cargo test --workspace` is green.
 
-**P5 — the screens read titles (ours).** `app/src/fork/watch/sources.rs` becomes
-the single reader, `Title::of_game`; the film page, filters, panel and playback
-consult it instead of `extra` keys; `TitleRef` (`watch-core::metadata`) takes a
-`TitleKey` instead of `(provider, id, kind)`, so details are cached per title.
-The duplicate `imported()` helper in upstream's `data.rs` goes; the VM field and
-the five conditions stay (`F-019`). Acceptance: the film page, marks, trailer
-hint, personal flags and the watchlist rail are identical; `sources.rs` plus the
-writer are the only files that read `extra`; the shared-file diff shrinks to one
-line in `data.rs`.
+**P3b — the shelf (done).** `watch-core::personal` holds `ShelfTitle`, the frozen
+snapshot of §3.1: its wire names are the old ones (`year`, art flattened), so an
+old `watch-personal.json` loads and a downgrade reads it; `Title::of_shelf` adapts
+one; `watch::personal`, `watch::import`, `watch-state::personal` and the app's
+film page and toggles follow. `watch-imported.json`'s shape is untouched.
+Acceptance met: the shelf's own test reads a file the previous build wrote and
+checks the keys it writes back.
 
-**P6 — the multi-source projection** (only once a second stream provider ships).
-One record per playable provider, `copies.json` links merged with the person's
-own `links`/`apart`/`preferred`, and the `copies_actions` → `PlayCopy` branch
-(`F-020`). Acceptance: two providers give one card with the copies badge; "Play
-with" opens that provider's streams; grouping off gives one card per provider; a
-refresh keeps the person's grouping; playtime is not double-counted; the film
-page and the watchlist rail agree across providers.
+**P4 — the projection (done).** `crates/watch-state/src/collection.rs` takes
+`&[Title]` everywhere — `refresh`/`append`/`replace`/`write_root` in,
+`titles(root)` out — with one encode (`record_of`) and one raw decode
+(`stored_item`), and `title_of_game` held to the latter by a parity test.
+`item_of` is gone; `MovieItem` survives as the record. The frozen
+keys, the single `watchCatalog` string and the double-prefixed metadata key are
+unchanged, `lastPlayed` is normalized, and a placeholder round-trips as one
+(written `is_installed: false` with `extra.imported: true`, read back with no
+provider). The film/series collision is explicit and tested: the wire key carries
+no kind, so the first title wins. The shelf's **reads** are canonical —
+`watchlisted`/`favourited` through `same_title`, and `membership_any` for the
+ledger — so a title kept from one provider reads as
+kept when another provider's card asks; the ledger key stays `kind:provider:id`
+(landed in `085ad29e`/`297d62a7`).
 
-**P7 — close-out.** The gates (§10), the register review, this document, and the
-companions that still describe `MovieItem` — each updated by the phase that
-changes what it describes, not in one sweep.
+**P5 — the screens read titles (done).** `app/src/fork/watch/sources.rs` is the
+one reader of the projection's keys: it gains `title(game)` (the typed view,
+`title_of_game`) and builds the shelf snapshot with `Title::to_shelf`, replacing
+the hand-written field mapping (`PersonalFields`/`personal_snapshot` are gone).
+The cheap accessors (`id`, `kind`, `imported`, `rail_marker`, `year`) remain the
+fast views of the same record, documented as such. The duplicate `imported()`
+helper in upstream's `data.rs` is gone — the assignment calls
+`sources::imported`, which is what shrank `F-019` from +19/−6 to +12/−6.
+
+**`TitleRef` is deliberately left as it is.** The plan said P5 would make it a
+`TitleKey`, and the code says no: a metadata source is selected *by provider*
+(`MetaDescriptor::covers`, `crates/watch-core/src/metadata.rs:67`) and the details cache
+is namespaced by it (`watch-state/src/details.rs:60`). Today every descriptor's
+`applies_to` is empty, so `covers` accepts everything and the provider's only
+live effect is the cache namespace — but the seam exists for the day a source
+answers for one provider and not another, and collapsing it now would remove that
+before anything needs it. Changing it would touch six crates for a cache-layout
+preference. Recorded here as a decision, not an omission.
+
+**P6 — the multi-source projection (two slices).**
+
+**P6a — the projection (done).** `write_root` writes one record per playable
+provider and links them in `local_library/copies.json`, read-modify-write: a pair
+the person ungrouped stays ungrouped, their `preferred` list and other links are
+kept, and a title that gains a provider replaces its smaller link instead of
+adding a second. `stored`/`titles` folds the records back into one title, so the
+projection round-trips a two-provider title as one title with both sources. The
+watch state is written **once per title**, on one copy: upstream's copies total
+sums every copy of a group and renders "N in all" on the grouped card, so
+repeating the minutes would double it. Acceptance met for the file layer: two
+providers give two records, one link, one title back, one timestamp; an ungrouped
+pair is not relinked.
+
+**P6b — the player (gated on a real second provider).** The `copies_actions` →
+`PlayCopy` branch (`F-020`), so "Play with \<provider\>" opens that provider's
+streams instead of the store client's launch. It is reserved, not built: with one
+provider there is no copy menu to exercise, and an untested upstream edit is a
+merge cost without a benefit. When a second provider ships, its acceptance is:
+two providers give one card with the copies badge; "Play with" opens that
+provider's streams; grouping off gives one card per provider; a refresh keeps the
+person's grouping; the film page and the watchlist rail agree across providers.
+
+**P7 — close-out (done).** The gates ran clean: `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace` (i18n coverage included, and run on its own), and
+`cargo check -p heronite`. The register review over this work's diff found four
+upstream-owned files and **all four are registered**: `load.rs`/`mod.rs` (the
+module rename, F-006), `console/sources.rs` (the watchlist rail, F-008/F-016)
+and `data.rs` (the flag's assignment, F-019, now +12/−6). Everything else it
+touches is `crates/watch*`, `app/src/fork/watch/**` or the two fork-only app
+modules, which the register does not list because they are additions.
+`F-019`'s file list and line count were re-measured over the seven files with
+`git diff eecd5c2a --numstat` **on the working tree** — where the helper removal
+shows, +12/−6. Committed at `fork/main` it is still +19/−6 until this lands.
 
 ## 7. What we deliberately do not do
 
@@ -305,9 +389,11 @@ changes what it describes, not in one sweep.
   `Titles` in `watch::library`, never a second `Library`. The module rename does
   move the app-facing `heronite_watch::collection` path, so P2 updates
   `docs/WATCH-CRATES.md`'s table with it.
-- **Keep a second identity type.** `TitleRef`, `same_title` and the wire keys are
-  all derived from `TitleKey`; no `(provider, kind, id)` tuple survives in the
-  domain.
+- **Keep a second identity type.** The store's `TitleKey` is the identity; the
+  wire keys are derived from it (and carry no kind), `same_title` is `(kind, id)`
+  over the shelf's snapshots, and no `(provider, kind, id)` tuple is used as one.
+  `TitleRef` stays a *provider-scoped descriptor* for metadata sources (§P5), not
+  a second identity.
 - **Change what `installed` means for games.** The repurpose is confined to the
   watch library writer.
 - **Move the film page onto upstream.** It is already ours and stays there.
@@ -318,7 +404,7 @@ changes what it describes, not in one sweep.
 
 | Risk | Mitigation |
 |---|---|
-| Shared-file edits accumulate | the budget in §2 (7 files, +19/−6); each registered; P5 shrinks one |
+| Shared-file edits accumulate | the budget in §2 (7 files, +12/−6); each registered; P5 shrank one |
 | The projection's read-back path is forgotten | §5.1 names it; P2's acceptance tests the round trip |
 | A rail mark is lost through the single `watchCatalog` | §5.1; the persisted mark is the one `kept`/`replace` parse; P4 asserts it |
 | A film and a series share an id on the wire | §5: the keys carry no kind; P4 keeps an explicit first-wins rule and a test |
@@ -353,6 +439,13 @@ changes what it describes, not in one sweep.
    projection is what costs upstream lines and shelf identity.
 8. **No serde on `Title`**: `ShelfTitle` and `Placeholder` are the only
    persisted item shapes.
+9. **`Watched.at` is a `DateTime<Utc>`**, not the provider's string: "later
+   wins" needs an instant, and the provider already holds one
+   (`watch-stremio/src/datastore.rs:51`). The writer prints it back as
+   `…T…Z` with milliseconds, because upstream orders the wire strings
+   lexicographically (`crates/data/src/copies.rs:374`,
+   `carry_over.rs:214`) and a `+00:00` offset would sort beside `Z` rather than
+   after it.
 
 ## 10. Gates
 

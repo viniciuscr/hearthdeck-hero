@@ -266,7 +266,7 @@ fn stremio_browses_nothing_but_its_own_continue_watching() {
 
     assert_eq!(rails.len(), 1, "browsing is the catalogue sources' job, not the provider's");
     assert_eq!(rails[0].catalog.id, "continue-watching");
-    let ids: Vec<&str> = rails[0].items.iter().map(|item| item.id.as_str()).collect();
+    let ids: Vec<&str> = rails[0].items.iter().map(|title| title.key.id.as_str()).collect();
     assert_eq!(ids, ["tt26657236"]);
     assert!(!rails[0].items[0].top, "a library record is not a top catalogue item");
 }

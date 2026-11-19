@@ -9,9 +9,8 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use heronite_data::paths::AppPaths;
-pub use heronite_watch_core::types::MovieItem;
 
-pub use heronite_watch_core::personal::{same_title, PersonalLibrary, PersonalList};
+pub use heronite_watch_core::personal::{same_title, PersonalLibrary, PersonalList, ShelfTitle};
 
 /// The shelf as stored: empty when the file is missing or unreadable.
 pub fn read(app: &AppPaths) -> PersonalLibrary {
@@ -23,12 +22,12 @@ pub fn write(app: &AppPaths, library: &PersonalLibrary) -> Result<()> {
 }
 
 /// Adds or removes the title, and says where it stands afterwards: `true` = in.
-pub fn toggle_watchlist(app: &AppPaths, item: &MovieItem) -> Result<bool> {
+pub fn toggle_watchlist(app: &AppPaths, item: &ShelfTitle) -> Result<bool> {
     change(app, |library| library.toggle_watchlist(item))
 }
 
 /// The same for favourites — a separate flag, not a second watchlist.
-pub fn toggle_favourite(app: &AppPaths, item: &MovieItem) -> Result<bool> {
+pub fn toggle_favourite(app: &AppPaths, item: &ShelfTitle) -> Result<bool> {
     change(app, |library| library.toggle_favourite(item))
 }
 
@@ -47,8 +46,8 @@ fn change(app: &AppPaths, edit: impl FnOnce(&mut PersonalLibrary) -> bool) -> Re
 mod tests {
     use super::*;
 
-    fn item(kind: &str, id: &str) -> MovieItem {
-        MovieItem { provider: "stremio".into(), kind: kind.into(), id: id.into(), name: id.into(), ..MovieItem::default() }
+    fn item(kind: &str, id: &str) -> ShelfTitle {
+        ShelfTitle { provider: "stremio".into(), kind: kind.into(), id: id.into(), name: id.into(), ..ShelfTitle::default() }
     }
 
     fn app(dir: &std::path::Path) -> AppPaths {

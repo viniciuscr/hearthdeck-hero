@@ -6,9 +6,9 @@
 //! background thread. No GPUI.
 
 pub mod catalog;
-pub mod collection;
 pub mod collections;
 pub mod import;
+pub mod library;
 pub mod metadata;
 pub mod personal;
 pub mod playback;
@@ -52,6 +52,7 @@ pub mod settings {
 
 /// The item types the screens show.
 pub mod types {
+    pub use heronite_watch_core::title::{Art, Title, IMPORTED_ADDON};
     pub use heronite_watch_core::types::StreamChoice;
 }
 

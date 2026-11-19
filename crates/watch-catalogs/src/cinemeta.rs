@@ -10,7 +10,7 @@ use heronite_watch_addon::addon::{AddonClient, Catalog};
 use heronite_watch_core::catalog::{
     CatalogCtx, CatalogDescriptor, CatalogFilter, CatalogPage, CatalogRequest, CatalogSort, CatalogSourceDescriptor, WatchCatalogSource,
 };
-use heronite_watch_core::types::MovieItem;
+use heronite_watch_core::title::{ProviderId, Title};
 use serde_json::Value;
 
 /// Where Cinemeta lives: its manifest. The source keeps its own copy, so it
@@ -81,15 +81,9 @@ impl WatchCatalogSource for Cinemeta {
             },
             named => named,
         };
-        let items: Vec<MovieItem> = addon
-            .catalog(&request.kind, catalog, &extra)?
-            .into_iter()
-            .map(|mut movie| {
-                movie.provider = PLAYS_WITH.into();
-                movie.addon = DESCRIPTOR.id.into();
-                movie
-            })
-            .collect();
+        let provider = ProviderId::declared(PLAYS_WITH);
+        let items: Vec<Title> =
+            addon.catalog(&request.kind, catalog, &extra)?.into_iter().map(|preview| preview.into_title(&provider)).collect();
         // Cinemeta does not say how many a catalog holds: an empty page is the
         // end, and one request more finds it.
         let more = !items.is_empty();
@@ -221,8 +215,7 @@ mod tests {
         request.skip = 50;
         let page = Cinemeta::builtin().catalog(&ctx, &request).unwrap();
         assert_eq!(page.items.len(), 1);
-        assert_eq!(page.items[0].provider, "stremio", "Cinemeta describes; Stremio plays");
-        assert_eq!(page.items[0].addon, "cinemeta", "and says which catalogue it came from");
+        assert!(page.items[0].played_by(&ProviderId::declared(PLAYS_WITH)), "Cinemeta describes; Stremio plays");
         assert_eq!(page.consumed, 1);
         assert!(page.more, "a page with items says another may follow");
         let asked = http.seen.lock().unwrap().clone();

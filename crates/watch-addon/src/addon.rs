@@ -11,7 +11,8 @@ use url::Url;
 
 use heronite_watch_core::http::{http_status, redacted, Transport};
 use heronite_watch_core::metadata::{Episode, TitleDetails};
-use heronite_watch_core::types::{MovieItem, StreamChoice};
+use heronite_watch_core::title::{Art, ProviderId, Title, TitleKey};
+use heronite_watch_core::types::StreamChoice;
 
 /// Addons serialize optional lists as `null`, and `serde(default)` only
 /// covers a missing field; make `null` mean the same.
@@ -84,21 +85,17 @@ pub struct MetaPreview {
 }
 
 impl MetaPreview {
-    pub fn into_item(self, addon: &str) -> MovieItem {
-        MovieItem {
-            id: self.id,
-            kind: self.kind,
-            name: self.name,
-            year: text(self.year),
-            poster: self.poster,
-            background: self.background,
-            logo: self.logo,
-            description: self.description,
-            runtime: self.runtime,
-            genres: self.genres,
-            addon: addon.to_owned(),
-            ..MovieItem::default()
-        }
+    /// The title a catalogue preview describes, played by `provider`.
+    ///
+    /// The rail that lists it is the source's to record (`catalog` is one of
+    /// many feeds); the protocol type only says what the title is.
+    pub fn into_title(self, provider: &ProviderId) -> Title {
+        let mut title = Title::new(TitleKey::of_source(&self.kind, &self.id, provider), &self.name).plays(provider.clone());
+        title.release = text(self.year);
+        title.art = Art { poster: self.poster, background: self.background, logo: self.logo };
+        title.description = self.description;
+        title.genres = self.genres;
+        title
     }
 }
 
@@ -345,16 +342,17 @@ impl<'a> AddonClient<'a> {
         Ok(manifest)
     }
 
-    /// A page of a catalog. Extras (`skip`, `search`, `genre`) go into the
-    /// path, as Stremio's protocol has them —
+    /// A page of a catalog, as the protocol describes it — the source decides
+    /// which provider plays its titles and turns the previews into titles.
+    /// Extras (`skip`, `search`, `genre`) go into the path, as Stremio's
+    /// protocol has them —
     /// `catalog/{type}/{id}/skip=100&genre=Sci-Fi.json`; the query string is
     /// ignored by Cinemeta, and by the catalogs it redirects to.
-    pub fn catalog(&self, kind: &str, id: &str, extra: &[(&str, &str)]) -> Result<Vec<MovieItem>> {
+    pub fn catalog(&self, kind: &str, id: &str, extra: &[(&str, &str)]) -> Result<Vec<MetaPreview>> {
         let body = self.http.get(&self.catalog_url(kind, id, extra)?)?;
         let value: Value = serde_json::from_slice(&body).context("addon catalog")?;
         let metas = value.get("metas").ok_or_else(|| anyhow!("addon catalog answered without metas"))?;
-        let previews: Vec<MetaPreview> = serde_json::from_value(metas.clone()).context("addon catalog metas")?;
-        Ok(previews.into_iter().map(|preview| preview.into_item(&self.id)).collect())
+        serde_json::from_value(metas.clone()).context("addon catalog metas")
     }
 
     /// The URL [`catalog`](Self::catalog) asks.

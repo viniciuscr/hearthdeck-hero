@@ -321,10 +321,10 @@ impl CollectionView {
             let games: Vec<&CollectionGame> = items
                 .iter()
                 .filter_map(|item| {
+                    // A shelf entry is the title, not the snapshot's provider: the
+                    // same film kept from one source draws on whichever card has it.
                     all.iter().copied().find(|game| {
-                        crate::fork::watch::sources::id(game) == item.id
-                            && crate::fork::watch::sources::kind(game) == item.kind
-                            && game.runner == item.provider
+                        crate::fork::watch::sources::id(game) == item.id && crate::fork::watch::sources::kind(game) == item.kind
                     })
                 })
                 .collect();

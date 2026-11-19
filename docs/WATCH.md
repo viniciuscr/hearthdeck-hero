@@ -401,7 +401,7 @@ the rules that apply while building it.
 > for this revision.
 
 > **Revision 2026-11-11 — the Watch space is the Collection.**
-> The separate page was removed. `crates/watch::collection` writes Stremio
+> The separate page was removed. `crates/watch::library` writes Stremio
 > films and series into a synthetic Heroic-format root, and `CollectionView`
 > loads it under `Space::Watch`. The same grid, Focus panel, shelves, filters,
 > game page and console layout render it; only the `Library` behind them

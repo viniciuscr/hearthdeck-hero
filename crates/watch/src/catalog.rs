@@ -73,8 +73,8 @@ pub fn page_with(http: &dyn Transport, app: &AppPaths, source: &str, request: &C
     let ctx = CatalogCtx { http, credentials: &credentials, cache: Some(&ids) };
     let mut page = source_of(source)?.catalog(&ctx, request)?;
     let key = feed_key(source, request);
-    for item in &mut page.items {
-        item.catalog = Some(key.clone());
+    for title in &mut page.items {
+        title.rails = vec![heronite_watch_core::title::RailMark::feed(source, &key)];
     }
     Ok(page)
 }
@@ -161,8 +161,9 @@ mod tests {
         let page = page_with(&fake, &app(dir.path()), "cinemeta", &request).unwrap();
         assert_eq!(page.items.len(), 2);
         assert!(page.more, "a full page says another may follow");
+        let stremio = heronite_watch_core::title::ProviderId::declared("stremio");
         assert!(
-            page.items.iter().all(|item| item.catalog.is_some()) && page.items.iter().all(|item| item.provider == "stremio"),
+            page.items.iter().all(|title| !title.rails.is_empty()) && page.items.iter().all(|title| title.played_by(&stremio)),
             "a page's items carry their feed and name who plays them"
         );
         let seen = fake.seen.lock().unwrap().clone();
@@ -233,14 +234,13 @@ mod tests {
         let (page, _) = more_with(&fake, &app, "cinemeta", &CatalogRequest::first("movie")).unwrap();
         assert_eq!(page.items.len(), 2);
         // A rails item (no feed) has to survive the replacement.
-        let rails = heronite_watch_core::types::MovieItem {
-            id: "tt0000001".into(),
-            kind: "movie".into(),
-            name: "Rail Film".into(),
-            top: true,
-            ..Default::default()
-        };
-        collection::append(&root, &[rails]).unwrap();
+        let provider = heronite_watch_core::title::ProviderId::declared("stremio");
+        let rail_film = heronite_watch_core::title::Title::new(
+            heronite_watch_core::title::TitleKey::of_source("movie", "tt0000001", &provider),
+            "Rail Film",
+        )
+        .plays(provider);
+        collection::append(&root, &[rail_film]).unwrap();
 
         let mut rated = CatalogRequest::first("movie");
         rated.sort = CatalogSort::Rating;

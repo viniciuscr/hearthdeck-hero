@@ -8,7 +8,7 @@ use anyhow::Result;
 use heronite_data::paths::AppPaths;
 use heronite_watch_core::catalog::CatalogCtx;
 use heronite_watch_core::http::{Transport, UreqTransport};
-use heronite_watch_core::types::MovieItem;
+use heronite_watch_core::title::Title;
 use heronite_watch_state::catalog_cache::CatalogIds;
 use heronite_watch_state::store::StoreCredentials;
 
@@ -69,13 +69,13 @@ pub fn enabled(app: &AppPaths) -> Vec<(String, CollectionDescriptor)> {
 }
 
 /// One rail's titles: its rule, asked of the source that declared it.
-pub fn rail(app: &AppPaths, source: &str, descriptor: &CollectionDescriptor) -> Result<Vec<MovieItem>> {
+pub fn rail(app: &AppPaths, source: &str, descriptor: &CollectionDescriptor) -> Result<Vec<Title>> {
     let http = UreqTransport::new();
     rail_with(&http, app, source, descriptor)
 }
 
 /// [`rail`] with an injected transport, for tests.
-pub fn rail_with(http: &dyn Transport, app: &AppPaths, source: &str, descriptor: &CollectionDescriptor) -> Result<Vec<MovieItem>> {
+pub fn rail_with(http: &dyn Transport, app: &AppPaths, source: &str, descriptor: &CollectionDescriptor) -> Result<Vec<Title>> {
     Ok(crate::catalog::page_with(http, app, source, &descriptor.rule)?.items)
 }
 
@@ -152,11 +152,11 @@ mod tests {
 
         let items = rail_with(&fake, &app, &source, &rail).unwrap();
         assert_eq!(items.len(), 1, "the page's title, kept because TMDB holds an IMDb id for it");
-        assert_eq!(items[0].id, "tt0133093", "the id the rest of Watch resolves a title by");
+        assert_eq!(items[0].key.id.as_str(), "tt0133093", "the id the rest of Watch resolves a title by");
         assert_eq!(items[0].name, "The Matrix");
-        assert_eq!(items[0].kind, "movie");
-        assert_eq!(items[0].provider, "stremio", "TMDB describes; Stremio plays");
-        assert!(items[0].catalog.is_some(), "a page's items carry the feed they came from");
+        assert_eq!(items[0].key.kind.as_str(), "movie");
+        assert!(items[0].played_by(&heronite_watch_core::title::ProviderId::declared("stremio")), "TMDB describes; Stremio plays");
+        assert!(!items[0].rails.is_empty(), "a page's items carry the feed they came from");
 
         let asked = fake.seen.lock().unwrap().clone();
         let discover = asked.iter().find(|url| url.contains("/discover/movie")).expect("the rule is a discover page");
