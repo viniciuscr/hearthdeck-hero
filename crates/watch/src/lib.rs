@@ -8,6 +8,7 @@
 pub mod catalog;
 pub mod collection;
 pub mod collections;
+pub mod import;
 pub mod metadata;
 pub mod personal;
 pub mod playback;
