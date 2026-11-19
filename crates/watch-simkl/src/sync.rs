@@ -87,8 +87,9 @@ impl<'a> Sync<'a> {
     /// this sends — a person removing a title from their list on simkl.com gets the
     /// same result.
     ///
-    /// Favourites and custom lists are a paid, beta surface (`403 premium_only`),
-    /// so they answer `Unmatched` here instead of failing on every attempt.
+    /// Favourites are the heart on simkl.com and a Pro surface: a free account's
+    /// `403 premium_only` is reported as `Unmatched`, never as a broken session.
+    /// Custom lists are not wired: their read side needs the account's user id.
     fn list(&self, change: &ListChange) -> Result<Delivery> {
         let ids = self.ids(&change.title);
         let bucket = if change.title.kind == "series" { "shows" } else { "movies" };
@@ -258,7 +259,9 @@ fn episode_number(view: &TrackedView) -> u32 {
 /// midnight US Eastern; the header is the only honest source for it.
 fn retry_after(answer: &Answer) -> Option<chrono::Duration> {
     let seconds: i64 = answer.header("retry-after")?.trim().parse().ok()?;
-    (seconds > 0).then(|| chrono::Duration::seconds(seconds))
+    // Bounded to a day: a broken or hostile header must not park an event for a
+    // year, and Simkl's own reset is at most a day away.
+    (1..=86_400).contains(&seconds).then(|| chrono::Duration::seconds(seconds))
 }
 
 fn error_code(body: &[u8]) -> Option<String> {

@@ -4177,6 +4177,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "heronite-watch-core",
+ "log",
  "serde",
  "serde_json",
  "tempfile",

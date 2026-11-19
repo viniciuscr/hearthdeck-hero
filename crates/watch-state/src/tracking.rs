@@ -65,6 +65,10 @@ pub struct TrackingFile {
     /// `events`.
     #[serde(default)]
     pub pushed: Vec<PushedRecord>,
+    /// When each tracker was last backfilled: switching one on sends what happened
+    /// since then, never the whole history again.
+    #[serde(default)]
+    pub backfilled: BTreeMap<String, DateTime<Utc>>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -191,7 +195,7 @@ pub fn done_for(queued: &mut QueuedEvent, tracker: &str) {
 
 /// The tracker has it.
 pub fn delivered(queued: &mut QueuedEvent, tracker: &str) {
-    queued.trackers.insert(tracker.to_owned(), TrackerState { done: true, failure: None });
+    done_for(queued, tracker);
 }
 
 /// A temporary fault: kept, with the next attempt's time.
@@ -199,7 +203,10 @@ pub fn retry(queued: &mut QueuedEvent, tracker: &str, error: &str, after: Option
     let attempts = queued.trackers.get(tracker).and_then(|state| state.failure.as_ref()).map_or(1, |failure| failure.attempts + 1);
     // The provider's own wait wins: a daily quota does not reset on our ladder.
     let wait = after.unwrap_or_else(|| retry_delay(attempts));
-    let failure = Failure { attempts, next_at: now + wait, error: error.to_owned(), permanent: false };
+    // A hostile or broken `Retry-After` must not overflow the clock: falling back
+    // to the ladder is better than panicking in the drain.
+    let next_at = now.checked_add_signed(wait).unwrap_or_else(|| now + retry_delay(attempts));
+    let failure = Failure { attempts, next_at, error: error.to_owned(), permanent: false };
     queued.trackers.insert(tracker.to_owned(), TrackerState { done: false, failure: Some(failure) });
 }
 

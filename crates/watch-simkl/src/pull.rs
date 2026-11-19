@@ -52,7 +52,9 @@ impl WatchSync for SimklPull {
         let mut pulled = Pulled::default();
 
         let since = since.and_then(|since| since.get("all")).and_then(Value::as_str);
-        for answer in self.all_items(ctx, &client_id, &token, since)? {
+        let (answers, unreachable) = self.all_items(ctx, &client_id, &token, since)?;
+        pulled.skipped += unreachable;
+        for answer in answers {
             for movie in answer.movies {
                 match movie.status.as_str() {
                     // A plan-to-watch row is list membership, not a watch.
@@ -67,7 +69,8 @@ impl WatchSync for SimklPull {
                 }
             }
             for show in answer.shows.into_iter().chain(answer.anime) {
-                let (episodes, missing) = show.watched_episodes();
+                let (membership, episodes, missing) = show.into_parts();
+                pulled.memberships.extend(membership);
                 pulled.watches.extend(episodes);
                 pulled.skipped += missing;
             }
@@ -96,29 +99,35 @@ impl SimklPull {
     /// Every row of the library, splitting the request when Simkl says it is too
     /// big — by media type first, then by status. That is the guide's own ladder,
     /// and the reason a pull can finish on a library of any size.
-    fn all_items(&self, ctx: &Ctx<'_>, client_id: &str, token: &str, since: Option<&str>) -> Result<Vec<AllItems>> {
+    fn all_items(&self, ctx: &Ctx<'_>, client_id: &str, token: &str, since: Option<&str>) -> Result<(Vec<AllItems>, usize)> {
         match self.items_at(ctx, client_id, token, "/sync/all-items", since)? {
-            Size::Fits(answer) => return Ok(vec![answer]),
+            Size::Fits(answer) => return Ok((vec![answer], 0)),
             Size::TooBig => {}
         }
         let mut answers = Vec::new();
+        let mut missed = 0;
         for kind in ["movies", "shows", "anime"] {
             match self.items_at(ctx, client_id, token, &format!("/sync/all-items/{kind}"), since)? {
                 Size::Fits(answer) => answers.push(answer),
                 Size::TooBig => {
                     for status in ["watching", "plantowatch", "hold", "completed", "dropped"] {
-                        // A single status still too big is counted as empty: the
-                        // alternative is giving up on the whole library.
-                        if let Size::Fits(answer) =
-                            self.items_at(ctx, client_id, token, &format!("/sync/all-items/{kind}/{status}"), since)?
-                        {
-                            answers.push(answer);
+                        // The last rung: what is still too big is *reported*, never
+                        // silently treated as empty — a partial library that says
+                        // nothing is worse than a number a screen can show.
+                        match self.items_at(ctx, client_id, token, &format!("/sync/all-items/{kind}/{status}"), since)? {
+                            Size::Fits(answer) => answers.push(answer),
+                            Size::TooBig => {
+                                log::warn!(
+                                    "Simkl still refuses /sync/all-items/{kind}/{status} as too big: that bucket is missing from this pull"
+                                );
+                                missed += 1;
+                            }
                         }
                     }
                 }
             }
         }
-        Ok(answers)
+        Ok((answers, missed))
     }
 
     fn items_at(&self, ctx: &Ctx<'_>, client_id: &str, token: &str, path: &str, since: Option<&str>) -> Result<Size> {
@@ -196,6 +205,8 @@ struct AllItems {
 /// One show in the pull, with the episodes Simkl lists under it.
 #[derive(Deserialize)]
 struct ShowRow {
+    #[serde(default)]
+    status: String,
     show: Media,
     #[serde(default)]
     seasons: Vec<SeasonRow>,
@@ -203,8 +214,9 @@ struct ShowRow {
 
 #[derive(Deserialize, Default)]
 struct SeasonRow {
+    /// Absent when Simkl did not say: an episode with no season cannot be placed.
     #[serde(default)]
-    number: u32,
+    number: Option<u32>,
     #[serde(default)]
     episodes: Vec<EpisodeRow>,
 }
@@ -212,7 +224,7 @@ struct SeasonRow {
 #[derive(Deserialize, Default)]
 struct EpisodeRow {
     #[serde(default)]
-    number: u32,
+    number: Option<u32>,
     /// Present when `episode_watched_at` was asked for, and only on an episode the
     /// person watched.
     #[serde(default)]
@@ -220,36 +232,53 @@ struct EpisodeRow {
 }
 
 impl ShowRow {
-    /// The watched episodes of one show, each its own fact.
+    /// What one show contributes: its watchlist membership when it is on the list,
+    /// one fact per watched episode, and the rows that could not be placed.
     ///
     /// With `episode_watched_at=yes` Simkl shares the show's last-watched stamp
-    /// across its episodes: honest enough for the one-time baseline and the reason
+    /// across its episodes: honest enough for the one-time baseline, and the reason
     /// a delta asks for it too — an episode that moved carries its own date.
-    fn watched_episodes(self) -> (Vec<RemoteWatch>, usize) {
-        let ShowRow { show, seasons } = self;
-        let (mut title, _) = match show.into_title_and_view() {
-            Some((title, _)) => (title, ()),
+    ///
+    /// An episode nobody watched is **not** a skipped row: it is simply not a fact.
+    fn into_parts(self) -> (Option<RemoteMembership>, Vec<RemoteWatch>, usize) {
+        let ShowRow { status, show, seasons } = self;
+        let Some(title) = series_title(show) else {
             // Without a title anybody can be shown, its episodes are not facts we
             // can place: counted, not guessed.
-            None => return (Vec::new(), seasons.iter().map(|season| season.episodes.len()).sum()),
+            return (None, Vec::new(), seasons.iter().map(|season| season.episodes.len()).sum());
         };
-        title.kind = "series".into();
+        let membership =
+            (status == "plantowatch").then(|| RemoteMembership { title: title.clone(), list: "watchlist".into(), member: true });
         let mut watches = Vec::new();
         let mut missing = 0;
         for season in seasons {
+            let Some(season_number) = season.number else {
+                missing += season.episodes.len();
+                continue;
+            };
             for episode in season.episodes {
-                match at(episode.watched_at.as_deref()) {
-                    Some(stamp) => watches.push(RemoteWatch {
+                match (episode.number, at(episode.watched_at.as_deref())) {
+                    (Some(number), Some(stamp)) => watches.push(RemoteWatch {
                         title: title.clone(),
-                        view: TrackedView::Episode { season: season.number, number: episode.number },
+                        view: TrackedView::Episode { season: season_number, number },
                         at: Some(stamp),
                     }),
-                    None => missing += 1,
+                    // A stamp without a number cannot be placed.
+                    (None, Some(_)) => missing += 1,
+                    // No stamp: never watched, or the provider did not say, so there
+                    // is nothing for a history to carry.
+                    (_, None) => {}
                 }
             }
         }
-        (watches, missing)
+        (membership, watches, missing)
     }
+}
+
+/// A show's title, with the kind a tracker needs.
+fn series_title(media: Media) -> Option<TrackedTitle> {
+    let imdb = media.ids.imdb?.trim().to_owned();
+    (!imdb.is_empty()).then(|| TrackedTitle { imdb: Some(imdb), kind: "series".into(), title: media.title, year: None })
 }
 
 #[derive(Deserialize)]
@@ -372,7 +401,8 @@ mod tests {
                       {"status":"completed","movie":{"title":"No ids"}}
                     ],
                     "shows":[{"status":"watching","last_watched_at":"2026-01-03T20:00:00Z","show":{"title":"A Show","ids":{"imdb":"tt0944947"}},
-                      "seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2026-01-03T20:00:00Z"},{"number":2},{"number":3,"watched_at":"2026-01-03T20:00:00Z"}]}]}],
+                      "seasons":[{"number":1,"episodes":[{"number":1,"watched_at":"2026-01-03T20:00:00Z"},{"number":2},{"number":3,"watched_at":"2026-01-03T20:00:00Z"}]}]},
+                     {"status":"plantowatch","show":{"title":"Another Show","ids":{"imdb":"tt2468"}},"seasons":[]}],
                     "anime":[]
                 }"#,
             );
@@ -568,11 +598,13 @@ mod tests {
         assert_eq!(pulled.watches[2].view, TrackedView::Episode { season: 1, number: 3 });
         assert_eq!(pulled.watches[1].title.kind, "series");
         assert_eq!(pulled.watches[1].title.imdb.as_deref(), Some("tt0944947"));
-        // the id-less film and the show-level fact
-        assert_eq!(pulled.skipped, 2, "{pulled:?}");
-        assert_eq!(pulled.memberships.len(), 1, "plantowatch is a list, not a watch");
+        // the id-less film; the unwatched episode is not a skipped row
+        assert_eq!(pulled.skipped, 1, "{pulled:?}");
+        assert_eq!(pulled.memberships.len(), 2, "the film and the series on the list");
         assert_eq!(pulled.memberships[0].list, "watchlist");
         assert_eq!(pulled.memberships[0].title.imdb.as_deref(), Some("tt1160419"));
+        assert_eq!(pulled.memberships[1].title.kind, "series", "a show can be on the list too");
+        assert_eq!(pulled.memberships[1].title.imdb.as_deref(), Some("tt2468"));
     }
 
     #[test]

@@ -559,12 +559,18 @@ impl CollectionView {
     /// Asks the pull to catch up after a session: the cursor's own schedule decides
     /// whether it runs, so this is one request at most, and never on the UI thread.
     fn watch_tick_imports(&mut self, cx: &mut Context<Self>) {
-        if heronite_watch::import::enabled(&self.app_paths).is_empty() {
-            return;
-        }
         let app = self.app_paths.clone();
         cx.spawn(async move |this, cx| {
-            let ran = cx.background_spawn(async move { heronite_watch::import::tick(&app) }).await;
+            let ran = cx
+                .background_spawn(async move {
+                    // Read off the UI thread: this can run from a render, and a file
+                    // read there is a frame spent on a disk.
+                    if heronite_watch::import::enabled(&app).is_empty() {
+                        return Vec::new();
+                    }
+                    heronite_watch::import::tick(&app)
+                })
+                .await;
             this.update(cx, |_, cx| {
                 if let Some((provider, Err(error))) = ran.first() {
                     log::warn!("import {provider}: {error:#}");

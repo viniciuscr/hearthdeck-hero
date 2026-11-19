@@ -6,6 +6,7 @@ license.workspace = true
 description = "Simkl as a Watch account: the application's client id and the device (PIN) sign-in"
 
 [dependencies]
+log.workspace = true
 heronite-watch-core = { path = "../watch-core" }
 anyhow.workspace = true
 serde.workspace = true

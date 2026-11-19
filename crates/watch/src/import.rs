@@ -309,7 +309,10 @@ fn apply(
                         .iter()
                         .find(|(_, episode)| episode.season == Some(season) && episode.number == Some(number))
                         .map(|(key, _)| key.clone())
-                        .unwrap_or_else(|| format!("{season}:{number}"));
+                        // The same shape every other writer uses (`tt1:1:2`), so a
+                        // later local play of this episode finds this entry instead
+                        // of adding a second one.
+                        .unwrap_or_else(|| format!("{imdb}:{season}:{number}"));
                     let episode = record.episodes.entry(key).or_default();
                     if episode.unwatched || episode.finished {
                         held += 1;
@@ -318,7 +321,9 @@ fn apply(
                     episode.season = Some(season);
                     episode.number = Some(number);
                     episode.finished = true;
-                    episode.updated_at = watch.at.unwrap_or(now);
+                    // Ours, like the film path: when this machine learned it. The
+                    // provider's own clock lives in `remote_updated_at`.
+                    episode.updated_at = now;
                     episode.origin = Origin::Imported;
                     episode.imported_from = Some(provider.to_owned());
                     episode.imported_at = Some(now);
@@ -728,6 +733,8 @@ mod tests {
         assert_eq!(report.watched, 1, "{report:?}");
 
         let stored = stored(&app, "tt9");
+        let key = stored.episodes.keys().next().expect("one episode");
+        assert_eq!(key, "tt9:2:4", "the key other writers use");
         let entry = stored.episodes.values().next().expect("one episode");
         assert_eq!((entry.season, entry.number), (Some(2), Some(4)), "which episode it was");
         assert!(entry.finished, "watched elsewhere, watched here");

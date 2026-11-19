@@ -252,21 +252,33 @@ pub fn backfill_for(app: &AppPaths, tracker: &str) -> Result<usize> {
     }
     let sessions = sessions::read(app).sessions;
     let queued = tracking::update(app, |file| {
+        // Only what happened since the last backfill for this tracker: a switch off
+        // and on again must not re-send the whole history.
+        let since = file.backfilled.get(tracker).copied();
         let mut queued = 0;
-        let mut seqs = Vec::new();
+        let mut appended = Vec::new();
         for session in sessions.iter().filter(|session| session.finished) {
+            if since.is_some_and(|since| session.ended_at <= since) {
+                continue;
+            }
             let Some(event) = event_of_session(session) else { continue };
-            // `queue` assigns the seq, and may fold into an event still waiting.
-            seqs.push(tracking::queue(file, event).seq);
+            let before = file.events.len();
+            let event = tracking::queue(file, event);
+            // A *fold* keeps the event owed to whoever still owed it, so only an
+            // appended event may be marked "had" for the other trackers.
+            if file.events.len() > before {
+                appended.push(event.seq);
+            }
             queued += 1;
         }
-        for seq in seqs {
-            if let Some(queued) = queued_mut(file, seq) {
+        for seq in appended {
+            if let Some(entry) = queued_mut(file, seq) {
                 for other in on.iter().filter(|id| id.as_str() != tracker) {
-                    tracking::done_for(queued, other);
+                    tracking::done_for(entry, other);
                 }
             }
         }
+        file.backfilled.insert(tracker.to_owned(), Utc::now());
         Ok(queued)
     })?;
     Ok(queued)
@@ -565,6 +577,11 @@ mod tests {
         let file = tracking::read(&app);
         assert_eq!(file.events.len(), 1);
         assert!(tracking::due(&file.events[0], "simkl", Utc::now()), "it is the one being told");
+
+        // A switch off and on again is not a second history: the marker says what
+        // this tracker was already told.
+        assert_eq!(backfill_for(&app, "simkl").unwrap(), 0, "nothing new since then");
+        assert_eq!(tracking::read(&app).events.len(), 1);
     }
 
     #[test]
