@@ -589,5 +589,8 @@
   "“{into}” already exists. Merge “{from}” into it?": "« {into} » existe déjà. Y fusionner « {from} » ?",
   "“{into}” already exists. Merge “{from}” into it? Its {n} game joins “{into}”.": "« {into} » existe déjà. Y fusionner « {from} » ? Son {n} jeu rejoint « {into} ».",
   "“{into}” already exists. Merge “{from}” into it? Its {n} games join “{into}”.": "« {into} » existe déjà. Y fusionner « {from} » ? Ses {n} jeux rejoignent « {into} ».",
-  "“{name}” now holds the current filters": "« {name} » contient maintenant les filtres actuels"
+  "“{name}” now holds the current filters": "« {name} » contient maintenant les filtres actuels",
+  "{n} show a crop on the desktop": "{n} sont recadrés sur le bureau",
+  "{n} shows another picture on the desktop": "{n} affiche une autre image sur le bureau",
+  "{n} show another picture on the desktop": "{n} affichent une autre image sur le bureau"
 }
