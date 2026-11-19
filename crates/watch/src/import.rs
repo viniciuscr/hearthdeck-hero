@@ -23,6 +23,7 @@ use heronite_watch_core::types::{EpisodeProgress, MovieItem, MovieProgress, Orig
 use heronite_watch_simkl::pull::SimklPull;
 use heronite_watch_state::import as cursor;
 use heronite_watch_state::placeholders::{self, Placeholder};
+use heronite_watch_state::sessions::{self, WatchSession};
 use heronite_watch_state::store;
 use heronite_watch_state::store::StoreCredentials;
 
@@ -325,6 +326,12 @@ fn apply(
     // the movies lock is released (a different file).
     let mut missing: Vec<(String, String, String, Option<String>)> = Vec::new();
     let mut present: Vec<(String, String)> = Vec::new();
+    // A pull is a playback this machine missed. Each watched title also becomes a
+    // session, so the recap and anything else reading sessions sees it like a watch
+    // made here. `covered` is what a session already holds: a re-pull adds none.
+    let mut covered: std::collections::HashSet<(String, Option<String>)> =
+        sessions::read(app).sessions.iter().map(|session| (session.id.clone(), session.video_id.clone())).collect();
+    let mut played: Vec<WatchSession> = Vec::new();
 
     store::update_movies(app, |movies| {
         for watch in &watches {
@@ -341,7 +348,7 @@ fn apply(
                 missing.push((imdb.to_owned(), kind, watch.title.title.clone(), watch.title.year.clone()));
                 if let TrackedView::Episode { season, number } = view {
                     let mut record = MovieProgress {
-                        provider: IMPORTED_ADDON.to_owned(),
+                        provider: media_provider(),
                         id: imdb.to_owned(),
                         imdb: Some(imdb.to_owned()),
                         updated_at: now,
@@ -363,6 +370,7 @@ fn apply(
                     );
                     log::info!("{provider}: {} S{season}E{number} watched (its first record here)", watch.title.title);
                     movies.progress.push(record);
+                    note_played(&mut covered, &mut played, watch, now);
                     watched += 1;
                 }
                 continue;
@@ -378,12 +386,14 @@ fn apply(
                 TrackedView::Movie => {
                     if record.finished {
                         log::info!("{provider}: {} left alone (already watched here)", watch.title.title);
+                        note_played(&mut covered, &mut played, watch, now);
                         held += 1;
                         continue;
                     }
                     record.finished = true;
                     stamp(record, provider, now, watch.at);
                     log::info!("{provider}: {} watched", watch.title.title);
+                    note_played(&mut covered, &mut played, watch, now);
                     watched += 1;
                 }
                 TrackedView::Episode { season, number } => {
@@ -401,6 +411,9 @@ fn apply(
                         .unwrap_or_else(|| format!("{imdb}:{season}:{number}"));
                     let episode = record.episodes.entry(key).or_default();
                     if episode.unwatched || episode.finished {
+                        if episode.finished && !episode.unwatched {
+                            note_played(&mut covered, &mut played, watch, now);
+                        }
                         held += 1;
                         continue;
                     }
@@ -415,6 +428,7 @@ fn apply(
                     episode.imported_at = Some(now);
                     episode.remote_updated_at = watch.at;
                     log::info!("{provider}: {} S{season}E{number} watched", watch.title.title);
+                    note_played(&mut covered, &mut played, watch, now);
                     watched += 1;
                 }
             }
@@ -452,6 +466,12 @@ fn apply(
 
     // A title no source here has becomes a library entry of its own: it appears
     // where titles appear, greyed, and leaves when the library gains it.
+    for session in played {
+        if let Err(error) = sessions::append(app, session) {
+            log::warn!("import: keeping a session of what was imported: {error:#}");
+        }
+    }
+
     for (imdb, kind, title, year) in missing {
         placeholders::upsert(app, Placeholder { imdb, kind, title, year, provider: provider.to_owned(), first_seen: Some(now) })?;
         report.no_local += 1;
@@ -562,6 +582,65 @@ fn apply_lists(
         heronite_watch_state::personal::write(app, &library)?;
     }
     Ok((added, removed, pushes, held_now))
+}
+
+/// The id the media provider uses: a record or session written here belongs to it,
+/// exactly as if the title had been played in this app.
+fn media_provider() -> String {
+    crate::registry::providers().first().map(|provider| provider.id().to_owned()).unwrap_or_default()
+}
+
+/// The episode key every writer uses (`tt1:1:2`); `None` for a film.
+fn video_id_of(view: &TrackedView, imdb: &str) -> Option<String> {
+    match view {
+        TrackedView::Movie => None,
+        TrackedView::Episode { season, number } => Some(format!("{imdb}:{season}:{number}")),
+    }
+}
+
+/// A watched fact as the session a playback would have written.
+fn session_of(watch: &RemoteWatch, now: DateTime<Utc>) -> WatchSession {
+    let imdb = watch.title.imdb.clone().unwrap_or_default();
+    let at = watch.at.unwrap_or(now);
+    let (video_id, season, number, title) = match watch.view {
+        TrackedView::Movie => (None, None, None, watch.title.title.clone()),
+        TrackedView::Episode { season, number } => {
+            (Some(format!("{imdb}:{season}:{number}")), Some(season), Some(number), format!("S{season}E{number} · {}", watch.title.title))
+        }
+    };
+    WatchSession {
+        provider: media_provider(),
+        kind: if watch.title.kind == "series" { "series".into() } else { "movie".into() },
+        id: imdb,
+        video_id,
+        season,
+        number,
+        name: watch.title.title.clone(),
+        year: watch.title.year.clone(),
+        title,
+        started_at: at,
+        ended_at: at,
+        // How long it ran is the provider's business and it does not say: the
+        // session records that it happened, which is what a recap counts.
+        elapsed_seconds: 0.0,
+        position_from_ms: 0,
+        position_to_ms: 0,
+        duration_ms: 0,
+        finished: true,
+    }
+}
+
+/// Records the session for a watched fact, once: `covered` is what is already there.
+fn note_played(
+    covered: &mut std::collections::HashSet<(String, Option<String>)>,
+    played: &mut Vec<WatchSession>,
+    watch: &RemoteWatch,
+    now: DateTime<Utc>,
+) {
+    let imdb = watch.title.imdb.clone().unwrap_or_default();
+    if covered.insert((imdb.clone(), video_id_of(&watch.view, &imdb))) {
+        played.push(session_of(watch, now));
+    }
 }
 
 /// A local list entry as a tracker's title: what a push is about when the
@@ -807,6 +886,34 @@ mod tests {
 
     fn episode(imdb: &str, season: u32, number: u32) -> RemoteWatch {
         RemoteWatch { title: title(imdb), view: TrackedView::Episode { season, number }, at: Some(Utc::now()) }
+    }
+
+    #[test]
+    fn an_imported_episode_is_a_session_as_if_played_here() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        let pulled = Pulled { watches: vec![episode("tt9", 2, 4)], ..Default::default() };
+        let _ = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+
+        let sessions = heronite_watch_state::sessions::read(&app).sessions;
+        assert_eq!(sessions.len(), 1, "a session, like any playback writes");
+        let session = &sessions[0];
+        assert!(session.finished);
+        assert_eq!(session.id, "tt9");
+        assert_eq!(session.video_id.as_deref(), Some("tt9:2:4"), "numbered like every other writer");
+        let media = crate::registry::providers().first().map(|provider| provider.id()).unwrap_or("");
+        assert_eq!(session.provider, media, "the media provider's, not a world of its own");
+    }
+
+    #[test]
+    fn a_second_pull_adds_no_second_session() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        let pulled = Pulled { watches: vec![episode("tt9", 2, 4)], ..Default::default() };
+        let _ = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+        let _ = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+
+        assert_eq!(heronite_watch_state::sessions::read(&app).sessions.len(), 1, "counted once");
     }
 
     #[test]
