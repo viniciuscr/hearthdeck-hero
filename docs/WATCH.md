@@ -413,7 +413,7 @@ the rules that apply while building it.
 > same `Library` through `crates/watch`. Future providers (YouTube, HBO Max,
 > Prime Video, Netflix) are adapters that produce the same records; they must
 > not require changes to the Collection or console screens. The provider name
-> travels in `GameInfo.runner` / `source` and in `WatchItem.provider`.
+> travels in `GameInfo.runner` / `source` and in `MovieItem.provider`.
 
 > **Revision 2026-11-11 — Watch settings and migration** (superseded by
 > 2026-11-16: the backup and the one-time replacement are gone — `validate`

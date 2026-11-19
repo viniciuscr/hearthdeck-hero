@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use url::Url;
 
-use heronite_watch_core::http::Transport;
+use heronite_watch_core::http::{Answer, Transport};
 use heronite_watch_core::tracker::{Delivery, ListChange, TrackEvent, TrackedTitle, TrackedView, TrackedWatch, WatchTracker};
 
 /// Simkl's API root.
@@ -157,12 +157,14 @@ impl<'a> Sync<'a> {
     /// One answer, read the way a tracker should: a refusal is permanent, a
     /// rate limit or a server fault is not, and an expired token stops the run.
     fn classify(&self, url: &Url, body: &Value) -> Result<Delivery> {
-        let (status, answer) = self.http.post_json_bearer(url, self.token, body).context("Simkl")?;
-        let code = error_code(&answer);
+        // The whole answer: a 429 carries the wait it wants in `Retry-After`.
+        let answer = self.http.post_json_full(url, Some(self.token), body).context("Simkl")?;
+        let status = answer.status;
+        let code = error_code(&answer.body);
         match status {
             200 | 201 => {
-                let answer: Answer = serde_json::from_slice(&answer).unwrap_or_default();
-                if answer.not_found.any() {
+                let written: Written = serde_json::from_slice(&answer.body).unwrap_or_default();
+                if written.not_found.any() {
                     Ok(Delivery::Unmatched("Simkl could not match this title".into()))
                 } else {
                     Ok(Delivery::Delivered)
@@ -175,14 +177,15 @@ impl<'a> Sync<'a> {
             // The docs print both spellings; the lock is a sub-second condition,
             // not a quota.
             400 if code.as_deref().is_some_and(|code| code.eq_ignore_ascii_case("RATE_LIMIT")) => {
-                Ok(Delivery::Retry("Simkl is rate limiting requests".into()))
+                Ok(Delivery::Retry { reason: "Simkl is rate limiting requests".into(), after: None })
             }
             400 => Ok(Delivery::Unmatched(
                 code.map_or_else(|| "Simkl refused the write".into(), |code| format!("Simkl refused the write ({code})")),
             )),
             404 => Ok(Delivery::Unmatched("Simkl does not know this title".into())),
-            429 => Ok(Delivery::Retry("Simkl is rate limiting requests".into())),
-            status => Ok(Delivery::Retry(format!("Simkl answered HTTP {status}"))),
+            // The daily quota or the per-second window: the header is the truth.
+            429 => Ok(Delivery::Retry { reason: "Simkl's daily quota is used up".into(), after: retry_after(&answer) }),
+            status => Ok(Delivery::Retry { reason: format!("Simkl answered HTTP {status}"), after: None }),
         }
     }
 }
@@ -243,14 +246,22 @@ fn episode_number(view: &TrackedView) -> u32 {
     }
 }
 
+/// The wait a 429 named, when it named one. Simkl resets the daily quota at
+/// midnight US Eastern; the header is the only honest source for it.
+fn retry_after(answer: &Answer) -> Option<chrono::Duration> {
+    let seconds: i64 = answer.header("retry-after")?.trim().parse().ok()?;
+    (seconds > 0).then(|| chrono::Duration::seconds(seconds))
+}
+
 fn error_code(body: &[u8]) -> Option<String> {
     let answer: Value = serde_json::from_slice(body).ok()?;
     let code = answer.get("error")?.as_str()?.trim();
     (!code.is_empty()).then(|| code.to_owned())
 }
 
+/// What a successful write answers with: the titles Simkl could not match.
 #[derive(Deserialize, Default)]
-struct Answer {
+struct Written {
     #[serde(default)]
     not_found: NotFound,
 }
@@ -282,13 +293,26 @@ mod tests {
     struct Fake {
         status: u16,
         answer: String,
+        headers: Mutex<Vec<(String, String)>>,
         seen: Mutex<Vec<String>>,
         tokens: Mutex<Vec<String>>,
     }
 
     impl Fake {
         fn new(status: u16, answer: &str) -> Self {
-            Self { status, answer: answer.into(), seen: Mutex::new(Vec::new()), tokens: Mutex::new(Vec::new()) }
+            Self {
+                status,
+                answer: answer.into(),
+                headers: Mutex::new(Vec::new()),
+                seen: Mutex::new(Vec::new()),
+                tokens: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// Answers with this header: `Retry-After` on a quota refusal.
+        fn naming(self, name: &str, value: &str) -> Self {
+            self.headers.lock().unwrap().push((name.to_owned(), value.to_owned()));
+            self
         }
 
         fn delivered() -> Self {
@@ -311,6 +335,13 @@ mod tests {
             self.seen.lock().unwrap().push(format!("POST {url} {body}"));
             self.tokens.lock().unwrap().push(token.to_owned());
             Ok((self.status, self.answer.as_bytes().to_vec()))
+        }
+        fn post_json_full(&self, url: &Url, token: Option<&str>, body: &Value) -> Result<Answer> {
+            self.seen.lock().unwrap().push(format!("POST {url} {body}"));
+            if let Some(token) = token {
+                self.tokens.lock().unwrap().push(token.to_owned());
+            }
+            Ok(Answer { status: self.status, headers: self.headers.lock().unwrap().clone(), body: self.answer.as_bytes().to_vec() })
         }
     }
 
@@ -339,6 +370,19 @@ mod tests {
         let posts = fake.posts();
         assert!(posts.iter().any(|post| post.contains("/sync/history/remove") && post.contains(r#""shows""#)), "{posts:?}");
         assert!(!posts.iter().any(|post| post.contains("plantowatch")), "{posts:?}");
+    }
+
+    #[test]
+    fn a_quota_refusal_carries_the_wait_it_named() {
+        let fake = Fake::new(429, r#"{"error":"user_limit_exceeded"}"#).naming("retry-after", "3600");
+        let delivery = SimklTracker::new(&fake, "client-1", "tok").deliver(&movie(TrackedWatch::Watched)).unwrap();
+        match delivery {
+            Delivery::Retry { reason, after } => {
+                assert!(reason.contains("quota"), "{reason}");
+                assert_eq!(after, Some(chrono::Duration::seconds(3600)), "the header decides the wait");
+            }
+            other => panic!("a 429 is a retry, not {other:?}"),
+        }
     }
 
     #[test]
@@ -453,9 +497,9 @@ mod tests {
             "already there is what we wanted"
         );
         let limited = Fake::new(429, r#"{}"#);
-        assert!(matches!(sync(&limited).deliver(&movie(TrackedWatch::Watched)).unwrap(), Delivery::Retry(_)));
+        assert!(matches!(sync(&limited).deliver(&movie(TrackedWatch::Watched)).unwrap(), Delivery::Retry { .. }));
         let fault = Fake::new(503, r#"{}"#);
-        assert!(matches!(sync(&fault).deliver(&movie(TrackedWatch::Watched)).unwrap(), Delivery::Retry(_)));
+        assert!(matches!(sync(&fault).deliver(&movie(TrackedWatch::Watched)).unwrap(), Delivery::Retry { .. }));
         let malformed = Fake::new(400, r#"{"error":"invalid_request"}"#);
         assert!(matches!(sync(&malformed).deliver(&movie(TrackedWatch::Watched)).unwrap(), Delivery::Unmatched(_)));
     }

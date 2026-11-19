@@ -122,6 +122,13 @@ implementation rules live in `docs/WATCH.md`.
 | F-018 | `.github/workflows/fork-release.yml` (the build step's `env`) | the release build carries the fork's application credentials — TMDB's API key from the `TMDB_API_KEY` secret (`HEARTHDECK_TMDB_API_KEY`) and Simkl's client id from `SIMKL_CLIENT_ID` (`HEARTHDECK_SIMKL_CLIENT_ID`) — because neither provider has an anonymous login and both authenticate the *application* | active |
 | F-017 | `crates/backup/src/catalog.rs` (one rule in `classify_config`) | Watch's provider credentials (`<provider>-auth.json`) are `Part::Logins` instead of `Settings`: a backup may exclude them, and the cloud sync never uploads logins. Watch's history, shelves and settings stay `Settings`, so a restore keeps them | active |
 | F-016 | `app/src/console/theme_rows/{,commands,host}.rs`, `app/src/console/themes.rs`, `app/src/collection/console/{mod,sources}.rs`, `app/src/collection/console/layouts/{cinema,carousel,dashboard,grid,xbox,spotlight}`, `app/src/collection/console/{hero.rs,game/{mod,hero,sheet}.rs}`, `app/src/pages/settings/{console_mode/{editors.rs,preview/layouts.rs},controls/mod.rs}`, `crates/i18n/locales/*` | themes are **presented per space**: `space_theme::validate` runs on every load and change (removes only what a space cannot draw) and `present` runs when a theme is taken (adds the tabs and rails Watch needs, never renames). Watch edits its own tabs, shelves and hero — the sources, shelf kinds and hero lines are the space's — and the desktop editor only ever writes the Games prefs (`File: app/src/console/theme_rows/host.rs`, `ThemeState::new`) | active |
+| F-019 | `app/src/collection/{vm,data,card,list_row}.rs`, `app/src/collection/console/tile.rs` | a Watch placeholder is dimmed **whatever the theme's "grey uninstalled" says**: one `CardVm.imported` field and its assignment, a helper `data.rs` duplicates from `app/src/fork/watch/sources.rs`, and three one-line grey conditions (`card.rs`, `list_row.rs`, `console/tile.rs`). The duplicate helper goes in P5; `docs/WATCH-TITLES.md` owns the transition and its upstream budget | active |
+
+F-019 is the Watch titles transition's only new deviation so far. F-020 (one
+branch in `app/src/collection/copies.rs`, so "Play with \<provider\>" reaches
+the Watch picker for a copies group) is reserved by `docs/WATCH-TITLES.md` §2
+and is registered when that phase lands, i.e. when a second stream provider
+ships.
 
 ### Conflict log
 

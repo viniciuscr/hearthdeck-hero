@@ -100,7 +100,7 @@ pub fn run(app: &AppPaths, sync: &dyn WatchSync) -> Result<Report> {
         for (tracker, delivery) in crate::trackers::deliver_list(app, &change) {
             match delivery {
                 Delivery::Delivered => report.lists_delivered += 1,
-                Delivery::Retry(reason) => log::warn!("{tracker} list change: {reason}"),
+                Delivery::Retry { reason, .. } => log::warn!("{tracker} list change: {reason}"),
                 Delivery::Unmatched(reason) => log::info!("{tracker} list change: {reason}"),
             }
         }

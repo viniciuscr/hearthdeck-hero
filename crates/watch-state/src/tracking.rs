@@ -188,9 +188,11 @@ pub fn delivered(queued: &mut QueuedEvent, tracker: &str) {
 }
 
 /// A temporary fault: kept, with the next attempt's time.
-pub fn retry(queued: &mut QueuedEvent, tracker: &str, error: &str, now: DateTime<Utc>) {
+pub fn retry(queued: &mut QueuedEvent, tracker: &str, error: &str, after: Option<Duration>, now: DateTime<Utc>) {
     let attempts = queued.trackers.get(tracker).and_then(|state| state.failure.as_ref()).map_or(1, |failure| failure.attempts + 1);
-    let failure = Failure { attempts, next_at: now + retry_delay(attempts), error: error.to_owned(), permanent: false };
+    // The provider's own wait wins: a daily quota does not reset on our ladder.
+    let wait = after.unwrap_or_else(|| retry_delay(attempts));
+    let failure = Failure { attempts, next_at: now + wait, error: error.to_owned(), permanent: false };
     queued.trackers.insert(tracker.to_owned(), TrackerState { done: false, failure: Some(failure) });
 }
 
@@ -366,7 +368,7 @@ mod tests {
         let mut file = read(&app);
         let seq = file.events[0].event.seq;
 
-        retry(&mut file.events[0], "simkl", "connection reset", now);
+        retry(&mut file.events[0], "simkl", "connection reset", None, now);
         assert!(!due(&file.events[0], "simkl", now), "not before its time");
         assert_eq!(file.events[0].trackers["simkl"].failure.as_ref().unwrap().attempts, 1);
         assert!(due(&file.events[0], "simkl", now + retry_delay(1)));
@@ -385,6 +387,20 @@ mod tests {
     }
 
     #[test]
+    fn a_provider_wait_wins_over_the_ladder() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let now = Utc::now();
+        enqueue(&app, event(TrackedView::Movie, TrackedWatch::Watched)).unwrap();
+        let mut file = read(&app);
+
+        retry(&mut file.events[0], "simkl", "daily quota", Some(Duration::minutes(42)), now);
+        assert!(!due(&file.events[0], "simkl", now + Duration::minutes(41)), "the header's wait, not ours");
+        assert!(due(&file.events[0], "simkl", now + Duration::minutes(42)));
+        assert_eq!(file.events[0].trackers["simkl"].failure.as_ref().unwrap().attempts, 1);
+    }
+
+    #[test]
     fn a_refusal_is_a_notice_and_a_fault_is_the_sync_state() {
         let dir = tempfile::tempdir().unwrap();
         let app = app(dir.path());
@@ -400,7 +416,7 @@ mod tests {
         queue(&mut file, event(TrackedView::Episode { season: 1, number: 4 }, TrackedWatch::Watched));
         let seq = file.events[1].event.seq;
         if let Some(queued) = file.events.iter_mut().find(|queued| queued.event.seq == seq) {
-            retry(queued, "simkl", "connection reset", now);
+            retry(queued, "simkl", "connection reset", None, now);
         }
         assert_eq!(last_error(&file, &enabled(&["simkl"])).as_deref(), Some("connection reset"));
 

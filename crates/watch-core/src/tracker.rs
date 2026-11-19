@@ -112,8 +112,9 @@ pub enum Delivery {
     /// asking again cannot help. The message is shown, never retried.
     Unmatched(String),
     /// Temporary (a network fault, a 429, a 5xx): the outbox keeps it and asks
-    /// again later.
-    Retry(String),
+    /// again later. `after` is the wait the provider named (`Retry-After`), when
+    /// it named one: a daily quota resets on its own clock, not on our ladder.
+    Retry { reason: String, after: Option<chrono::Duration> },
 }
 
 /// A service that keeps a person's watch history in step.

@@ -44,7 +44,7 @@ app
 | Crate | Responsibility | May depend on | Must not |
 |---|---|---|---|
 | `heronite-watch` | provider registry (and the accounts registry), `available()`, browse → synthetic `Library`, the single post-session progress write, TMDB's and Simkl's sign-in, the trackers' outbox orchestration, the app's import surface | `heronite-watch-{core,state,player,stremio,tmdb,simkl,catalogs,metadata}`, `heronite-data` | GPUI, provider protocol code, file formats of its own |
-| `heronite-watch-core` | `WatchItem`, `StreamChoice`, `WatchProgress`, `PosterShape`, `AuthKey`, `WatchProvider`, `WatchCatalogSource`, `Ctx`, `CatalogCtx`, `Transport`, `Credentials`, `Throttle`, `finished` | serde, serde_json, anyhow, url, chrono, ureq | `heronite-*`, files, processes, provider names |
+| `heronite-watch-core` | `Title` (the item), `StreamChoice`, `MovieProgress`, `PosterShape`, `AuthKey`, `WatchProvider`, `WatchCatalogSource`, `Ctx`, `CatalogCtx`, `Transport`, `Credentials`, `Throttle`, `finished` | serde, serde_json, anyhow, url, chrono, ureq | `heronite-*`, files, processes, provider names |
 | `heronite-watch-addon` | Stremio addon protocol: manifest, catalog, meta, stream, `AddonClient`, size and seeders parsing | `heronite-watch-core` | account, datastore, endpoints, Cinemeta constants |
 | `heronite-watch-player` | mpv discovery, argument construction, IPC supervision, `PlaybackOutcome`, stream-origin policy | `heronite-data` (`proc`), url, serde_json, anyhow | protocol or provider types |
 | `heronite-watch-state` | `store` (movies, per-provider credentials), `sessions` (`watch-sessions.json`, one record per playback), `tracking` (the tracker outbox) and `collection` (the Heroic-format projection) | `heronite-watch-core`, `heronite-data` | network, providers, GPUI |
@@ -58,9 +58,13 @@ app
 A provider crate takes everything it needs from `Ctx`; it never opens a file or
 spawns a process. That is what keeps a provider testable on fixtures alone.
 
-The item and progress types keep their present names (`MovieItem`,
-`MovieProgress`); they become `WatchItem` and `WatchProgress` when a second
-provider needs to tell films from live channels.
+The item type is `Title` (`heronite-watch-core::title`): a film or a series,
+identified by `(kind, id)`, carrying the stream providers that can play it as a
+set — never as identity. The projection in `heronite-watch-state::collection`
+adapts it into the Collection shapes upstream reads; the renderer never sees a
+`Title`. `MovieProgress` keeps its name: a progress record belongs to one title
+and one provider, and outlives a provider's own ids. `docs/WATCH-TITLES.md` owns
+the transition and the `MovieItem` → `Title` rename.
 
 ## Contracts
 

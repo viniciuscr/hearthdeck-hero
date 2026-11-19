@@ -188,7 +188,7 @@ pub fn drain(app: &AppPaths) -> Result<Report> {
     for (id, tracker, event) in work {
         match tracker.deliver(&event) {
             Ok(delivery) => {
-                if let Delivery::Retry(reason) = &delivery {
+                if let Delivery::Retry { reason, .. } = &delivery {
                     failed = Some(reason.clone());
                 }
                 results.push((id, event.seq, delivery));
@@ -199,7 +199,7 @@ pub fn drain(app: &AppPaths) -> Result<Report> {
                 let reason = format!("{error:#}");
                 log::warn!("tracker {id}: {reason}");
                 failed = Some(reason.clone());
-                results.push((id, event.seq, Delivery::Retry(reason)));
+                results.push((id, event.seq, Delivery::Retry { reason, after: None }));
                 break;
             }
         }
@@ -220,9 +220,9 @@ pub fn drain(app: &AppPaths) -> Result<Report> {
                     }
                 }
                 Delivery::Unmatched(reason) => tracking::unmatched(file, seq, id, &reason, now),
-                Delivery::Retry(reason) => {
+                Delivery::Retry { reason, after } => {
                     if let Some(queued) = queued_mut(file, seq) {
-                        tracking::retry(queued, id, &reason, now);
+                        tracking::retry(queued, id, &reason, after, now);
                     }
                 }
             }
@@ -277,7 +277,7 @@ pub fn deliver_list(app: &AppPaths, change: &ListChange) -> Vec<(&'static str, D
             // exactly like a watch event: the change is derived again next tick.
             let delivery = match tracker.sync_list(change) {
                 Ok(delivery) => delivery,
-                Err(error) => Delivery::Retry(format!("{error:#}")),
+                Err(error) => Delivery::Retry { reason: format!("{error:#}"), after: None },
             };
             (id, delivery)
         })

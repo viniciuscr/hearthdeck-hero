@@ -22,6 +22,14 @@ pub trait Transport: Send + Sync {
         Ok((200, self.post_json(url, body)?))
     }
 
+    /// A POST whose answer comes back whole: status, headers and body. `token`,
+    /// when given, is sent as a bearer. A transport that cannot show headers says
+    /// so, and the caller falls back to the body-only call.
+    fn post_json_full(&self, url: &Url, token: Option<&str>, body: &Value) -> Result<Answer> {
+        let _ = (url, token, body);
+        anyhow::bail!("this transport cannot show an answer's headers")
+    }
+
     /// A POST carrying `Authorization: Bearer <token>`, again with the status
     /// returned: a tracker reads what a non-2xx answer says ("already watched",
     /// "rate limited") instead of treating every one as a fault. A transport
@@ -58,6 +66,25 @@ pub trait Transport: Send + Sync {
     fn get_bearer(&self, url: &Url, token: &str) -> Result<Vec<u8>> {
         let _ = (url, token);
         anyhow::bail!("this transport cannot carry an Authorization header")
+    }
+}
+
+/// A whole answer: status, headers and body.
+///
+/// A tracker needs the headers when the refusal itself says when to come back —
+/// `Retry-After` on a daily-quota 429 — and a provider with its own request
+/// headers (Trakt's `trakt-api-version`) needs them on the way out too.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Answer {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Answer {
+    /// The header `name`, case-insensitively — HTTP header names are.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value.as_str())
     }
 }
 
@@ -174,6 +201,24 @@ impl Transport for UreqTransport {
         Ok((status, bytes))
     }
 
+    fn post_json_full(&self, url: &Url, token: Option<&str>, body: &Value) -> Result<Answer> {
+        let text = serde_json::to_string(body)?;
+        let mut request =
+            self.agent.post(url.as_str()).config().timeout_global(Some(self.timeout)).build().header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("authorization", format!("Bearer {token}"));
+        }
+        let mut response = request.send(text.as_str()).map_err(|e| transport_error(url, e))?;
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str().to_owned(), value.to_owned())))
+            .collect();
+        let body = response.body_mut().with_config().limit(self.max_bytes).read_to_vec().map_err(|e| anyhow!("{}", failure(url, e)))?;
+        Ok(Answer { status, headers, body })
+    }
+
     fn post_json(&self, url: &Url, body: &Value) -> Result<Vec<u8>> {
         let (status, bytes) = self.post_json_answer(url, body)?;
         accepted(url, status, bytes)
@@ -260,19 +305,34 @@ mod tests {
     /// One request answered with `status` and a JSON body, over a real socket:
     /// the only way to prove what the client does with a non-2xx answer.
     fn answer_once(status: u16, body: &'static str) -> Url {
+        answer_naming(status, &[], body)
+    }
+
+    /// The same, with headers on the answer: `Retry-After` on a 429.
+    fn answer_naming(status: u16, headers: &'static [(&'static str, &'static str)], body: &'static str) -> Url {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a free port");
         let address = listener.local_addr().expect("the bound address");
         std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().expect("one request");
             let mut request = [0u8; 2048];
             let _ = socket.read(&mut request);
+            let extra: String = headers.iter().map(|(name, value)| format!("{name}: {value}\r\n")).collect();
             let response = format!(
-                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\n{extra}content-length: {}\r\nconnection: close\r\n\r\n{body}",
                 body.len()
             );
             let _ = socket.write_all(response.as_bytes());
         });
         Url::parse(&format!("http://{address}/oauth2/token")).expect("a local url")
+    }
+
+    #[test]
+    fn a_post_can_show_the_headers_it_answered_with() {
+        let url = answer_naming(429, &[("Retry-After", "42")], r#"{"error":"user_limit_exceeded"}"#);
+        let answer = UreqTransport::new().post_json_full(&url, Some("tok"), &serde_json::json!({})).expect("an answer");
+        assert_eq!(answer.status, 429);
+        assert_eq!(answer.header("retry-after"), Some("42"), "the name is matched case-insensitively");
+        assert!(String::from_utf8_lossy(&answer.body).contains("user_limit_exceeded"));
     }
 
     #[test]
