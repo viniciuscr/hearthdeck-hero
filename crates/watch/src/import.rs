@@ -178,7 +178,9 @@ pub fn set_enabled(app: &AppPaths, provider: &str, on: bool) -> Result<()> {
         // deltas. It is also the fix for anything a past pull got wrong.
         cursor::reset_baseline(app, provider)?;
     }
-    heronite_watch_state::settings::write(app, &settings)
+    heronite_watch_state::settings::write(app, &settings)?;
+    log::info!("{provider}: import {} (the next pull fetches the whole history)", if on { "on" } else { "off" });
+    Ok(())
 }
 
 /// What the last pull did, for the settings row.
@@ -197,8 +199,15 @@ pub fn tick(app: &AppPaths) -> Vec<(&'static str, Result<Report>)> {
         }
         let stored = cursor::read(app, sync.id());
         if !due(&stored, Utc::now()) {
+            // A tick that decides not to ask says so: "no logs" must never be the
+            // same trace as "the schedule was silent about skipping".
+            match stored.next_at {
+                Some(at) => log::info!("{}: not due yet, next pull at {}", sync.id(), at.to_rfc3339()),
+                None => log::info!("{}: not due yet", sync.id()),
+            }
             continue;
         }
+        log::info!("{}: pulling now", sync.id());
         let result = run(app, *sync);
         let now = Utc::now();
         // The schedule is kept even when the pull failed: a failure is a schedule
@@ -223,8 +232,16 @@ pub fn run_with(app: &AppPaths, sync: &dyn WatchSync, ctx: &Ctx<'_>) -> Result<R
     }
     let since = (!stale && !stored.snapshot.is_null()).then(|| stored.snapshot.clone());
 
+    match since.as_ref() {
+        Some(stamp) => {
+            log::info!("{provider}: pulling changes since {}", stamp.get("all").and_then(|all| all.as_str()).unwrap_or("the last pull"))
+        }
+        None => log::info!("{provider}: pulling the whole history (a baseline)"),
+    }
+
     if let Some(since) = since.as_ref() {
         if sync.unchanged(since, &now) {
+            log::info!("{provider}: nothing moved since the last pull; not fetching anything");
             // The cheap path: one request, and the pull did not even run.
             cursor::update(app, provider, |cursor| {
                 cursor.last_pull_at = Some(Utc::now());

@@ -136,6 +136,10 @@ pub fn reset_baseline(app: &AppPaths, provider: &str) -> Result<()> {
     update(app, provider, |cursor| {
         cursor.schema = 0;
         cursor.snapshot = Value::Null;
+        // Due now: a reset that the schedule then skips for fifteen minutes is the
+        // same silence as not pulling at all.
+        cursor.next_at = None;
+        cursor.attempts = 0;
         Ok(())
     })
 }
