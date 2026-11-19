@@ -646,7 +646,8 @@ impl CollectionView {
 const TRAILER_BTN: Btn = Btn::L3;
 
 /// The hint bar's L3, when the title has a trailer to watch: the press plays it
-/// in mpv instead of the stream. No trailer, no hint — nothing to offer.
+/// in mpv instead of the stream. No trailer, no hint — the press itself is what
+/// says there is none (`watch_play_trailer`).
 fn trailer_hint(has_trailer: bool) -> Option<Hint> {
     has_trailer.then(|| hint(TRAILER_BTN, tr!("Watch trailer")))
 }

@@ -122,6 +122,7 @@ struct Running {
 }
 
 /// What the page knows about a title's trailer, before asking anyone.
+#[derive(Debug)]
 enum Trailer {
     /// The first trailer's page, for mpv.
     Found(String),
@@ -131,6 +132,24 @@ enum Trailer {
     Unavailable,
     /// Nobody has asked yet: the details are still on their way.
     Unasked,
+}
+
+/// What is known about `key`'s trailer from the details in hand: `item` names
+/// the title `state` describes, which is another one once a cover asks for its
+/// own (nothing is loaded for it yet).
+fn trailer_of(item: Option<&str>, key: &str, state: &TitleState) -> Trailer {
+    if item != Some(key) {
+        return Trailer::Unasked;
+    }
+    match state {
+        TitleState::Ready(details) => match details.trailers.first() {
+            Some(trailer) => Trailer::Found(trailer.url.clone()),
+            None => Trailer::NotFound,
+        },
+        TitleState::Missing => Trailer::NotFound,
+        TitleState::Failed => Trailer::Unavailable,
+        TitleState::Idle | TitleState::Loading => Trailer::Unasked,
+    }
 }
 
 impl CollectionView {
@@ -169,8 +188,13 @@ impl CollectionView {
                 })
                 .await;
             this.update(cx, |this, cx| {
-                // Another title took the page while this one loaded.
+                // Another title took the page while this one loaded: a press
+                // that waited for these details waited for nothing, and must
+                // not play a trailer by itself when they are asked for again.
                 if this.watch.info.item.as_deref() != Some(key.as_str()) {
+                    if this.watch.trailer_pending.as_deref() == Some(key.as_str()) {
+                        this.watch.trailer_pending = None;
+                    }
                     return;
                 }
                 this.watch.info.state = match result {
@@ -187,10 +211,13 @@ impl CollectionView {
                     }
                 };
                 // A trailer pressed on a cover asked for these details: it plays
-                // now, or says there is none.
+                // now, or says why it cannot. A failed answer is said here, so a
+                // press never asks the sources twice in a row.
                 if this.watch.trailer_pending.as_deref() == Some(key.as_str()) {
                     this.watch.trailer_pending = None;
-                    if let Some(game) = this.lib.as_ref().and_then(|lib| lib.get(&key)).cloned() {
+                    if matches!(this.watch.info.state, TitleState::Failed) {
+                        this.show_toast(tr!("Details unavailable right now."), true, cx);
+                    } else if let Some(game) = this.lib.as_ref().and_then(|lib| lib.get(&key)).cloned() {
                         this.watch_play_trailer(&game, cx);
                     }
                 }
@@ -221,18 +248,7 @@ impl CollectionView {
     /// What is known about `key`'s trailer without asking: the details may not
     /// describe this title yet (a cover never opened it).
     fn watch_trailer(&self, key: &str) -> Trailer {
-        if self.watch.info.item.as_deref() != Some(key) {
-            return Trailer::Unasked;
-        }
-        match &self.watch.info.state {
-            TitleState::Ready(details) => match details.trailers.first() {
-                Some(trailer) => Trailer::Found(trailer.url.clone()),
-                None => Trailer::NotFound,
-            },
-            TitleState::Missing => Trailer::NotFound,
-            TitleState::Failed => Trailer::Unavailable,
-            TitleState::Idle | TitleState::Loading => Trailer::Unasked,
-        }
+        trailer_of(self.watch.info.item.as_deref(), key, &self.watch.info.state)
     }
 
     /// Loads the streams of `game` (or of one episode, when `video` names it)
@@ -379,7 +395,11 @@ impl CollectionView {
                 return;
             }
             Trailer::Unavailable => {
-                self.show_toast(tr!("Details unavailable right now."), true, cx);
+                // The sources could not be asked: the press asks again, and
+                // the trailer plays (or the answer is said) with the new one.
+                self.watch.info.state = TitleState::Idle;
+                self.watch.trailer_pending = Some(game.key.clone());
+                self.watch_ensure_details(game, cx);
                 return;
             }
             Trailer::Unasked => {
@@ -966,5 +986,22 @@ mod tests {
         assert_eq!(clamp_selection(&details, Selection { season: 9, episode: 9 }), Selection { season: 1, episode: 2 });
         assert_eq!(clamp_selection(&details, Selection { season: 0, episode: 9 }), Selection { season: 0, episode: 1 });
         assert_eq!(clamp_selection(&TitleDetails::default(), Selection { season: 3, episode: 3 }), Selection::default());
+    }
+
+    fn ready_with(trailer: Option<&str>) -> TitleState {
+        let trailers = trailer.map(|url| heronite_watch::metadata::Trailer { url: url.into(), ..Default::default() }).into_iter().collect();
+        TitleState::Ready(Arc::new(TitleDetails { trailers, ..TitleDetails::default() }))
+    }
+
+    #[test]
+    fn a_trailer_is_known_only_when_the_details_describe_the_title() {
+        let ready = ready_with(Some("https://youtu.be/x"));
+        assert!(matches!(trailer_of(Some("a"), "a", &ready), Trailer::Found(url) if url == "https://youtu.be/x"));
+        assert!(matches!(trailer_of(Some("a"), "b", &ready), Trailer::Unasked), "the details describe another title");
+        assert!(matches!(trailer_of(None, "a", &ready), Trailer::Unasked), "a cover never opened the page");
+        assert!(matches!(trailer_of(Some("a"), "a", &ready_with(None)), Trailer::NotFound), "a title with no trailer");
+        assert!(matches!(trailer_of(Some("a"), "a", &TitleState::Missing), Trailer::NotFound));
+        assert!(matches!(trailer_of(Some("a"), "a", &TitleState::Failed), Trailer::Unavailable));
+        assert!(matches!(trailer_of(Some("a"), "a", &TitleState::Loading), Trailer::Unasked));
     }
 }
