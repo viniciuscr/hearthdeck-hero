@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use url::Url;
 
 use heronite_watch_core::http::Transport;
-use heronite_watch_core::tracker::{Delivery, TrackEvent, TrackedTitle, TrackedView, TrackedWatch, WatchTracker};
+use heronite_watch_core::tracker::{Delivery, ListChange, TrackEvent, TrackedTitle, TrackedView, TrackedWatch, WatchTracker};
 
 /// Simkl's API root.
 pub const API: &str = "https://api.simkl.com";
@@ -77,6 +77,27 @@ impl<'a> Sync<'a> {
             }
         };
         self.classify(&url, &body)
+    }
+
+    /// A watchlist change.
+    ///
+    /// Adding names the destination (`to: plantowatch`). Simkl has **no
+    /// remove-from-the-list-only** call: its own "Remove from list" takes the entry
+    /// *and the title's history* away, via `/sync/history/remove`, so that is what
+    /// this sends — a person removing a title from their list on simkl.com gets the
+    /// same result.
+    ///
+    /// Favourites and custom lists are a paid, beta surface (`403 premium_only`),
+    /// so they answer `Unmatched` here instead of failing on every attempt.
+    fn list(&self, change: &ListChange) -> Result<Delivery> {
+        if change.list != "watchlist" {
+            return Ok(Delivery::Unmatched(format!("Simkl keeps {} behind its paid tier", change.list)));
+        }
+        let ids = self.ids(&change.title);
+        let item = if change.member { json!({ "ids": ids, "to": "plantowatch" }) } else { json!({ "ids": ids }) };
+        let body = if change.title.kind == "series" { json!({ "shows": [item] }) } else { json!({ "movies": [item] }) };
+        let path = if change.member { "/sync/add-to-list" } else { "/sync/history/remove" };
+        self.classify(&self.url(path)?, &body)
     }
 
     /// A half-watched title: Simkl stores it as a paused playback. Below its 80 %
@@ -192,6 +213,10 @@ impl WatchTracker for SimklTracker<'_> {
     fn deliver(&self, event: &TrackEvent) -> Result<Delivery> {
         Sync::new(self.http, &self.client_id, &self.token).deliver(event)
     }
+
+    fn sync_list(&self, change: &ListChange) -> Result<Delivery> {
+        Sync::new(self.http, &self.client_id, &self.token).list(change)
+    }
 }
 
 /// How far in, 1..=79: the paused-playback range. Simkl's own line is 80, above
@@ -287,6 +312,44 @@ mod tests {
             self.tokens.lock().unwrap().push(token.to_owned());
             Ok((self.status, self.answer.as_bytes().to_vec()))
         }
+    }
+
+    fn list_change(kind: &str, list: &str, member: bool) -> ListChange {
+        ListChange {
+            title: TrackedTitle { imdb: Some("tt1".into()), kind: kind.into(), title: "A Film".into(), year: Some("2010".into()) },
+            list: list.into(),
+            member,
+        }
+    }
+
+    #[test]
+    fn adding_to_the_watchlist_names_the_destination() {
+        let fake = Fake::delivered();
+        let delivery = SimklTracker::new(&fake, "client-1", "tok").sync_list(&list_change("movie", "watchlist", true)).unwrap();
+        assert_eq!(delivery, Delivery::Delivered);
+        let posts = fake.posts();
+        assert!(posts.iter().any(|post| post.contains("/sync/add-to-list") && post.contains(r#""to":"plantowatch""#)), "{posts:?}");
+    }
+
+    #[test]
+    fn removing_from_the_watchlist_is_the_history_removal() {
+        let fake = Fake::delivered();
+        let delivery = SimklTracker::new(&fake, "client-1", "tok").sync_list(&list_change("series", "watchlist", false)).unwrap();
+        assert_eq!(delivery, Delivery::Delivered);
+        let posts = fake.posts();
+        assert!(posts.iter().any(|post| post.contains("/sync/history/remove") && post.contains(r#""shows""#)), "{posts:?}");
+        assert!(!posts.iter().any(|post| post.contains("plantowatch")), "{posts:?}");
+    }
+
+    #[test]
+    fn a_paid_list_is_unmatched_without_a_request() {
+        let fake = Fake::delivered();
+        let delivery = SimklTracker::new(&fake, "client-1", "tok").sync_list(&list_change("movie", "favourites", true)).unwrap();
+        match delivery {
+            Delivery::Unmatched(message) => assert!(message.contains("paid"), "{message}"),
+            other => panic!("a paid list is unmatched, not {other:?}"),
+        }
+        assert!(fake.posts().is_empty(), "no request is spent on it");
     }
 
     fn movie(watch: TrackedWatch) -> TrackEvent {

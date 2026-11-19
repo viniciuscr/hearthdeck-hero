@@ -92,6 +92,17 @@ impl TrackEvent {
     }
 }
 
+/// One list membership change to deliver: a title entering or leaving a list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListChange {
+    pub title: TrackedTitle,
+    /// The list kind: `watchlist`, `favourites`.
+    pub list: String,
+    /// `true` to add, `false` to remove.
+    pub member: bool,
+}
+
 /// How one delivery went.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Delivery {
@@ -113,6 +124,14 @@ pub trait WatchTracker: Send + Sync {
     fn name(&self) -> &'static str;
     /// Delivers one event. Blocking: the facade calls it off the UI thread.
     fn deliver(&self, event: &TrackEvent) -> Result<Delivery>;
+
+    /// Delivers one list membership change. A tracker that keeps no lists — or
+    /// not that kind of list — answers [`Delivery::Unmatched`] instead of
+    /// pretending, so the caller can say so once and move on.
+    fn sync_list(&self, change: &ListChange) -> Result<Delivery> {
+        let _ = change;
+        Ok(Delivery::Unmatched("this tracker keeps no lists".into()))
+    }
 }
 
 #[cfg(test)]
