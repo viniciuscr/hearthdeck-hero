@@ -1051,6 +1051,11 @@ fn import_sentence(app: &heronite_data::paths::AppPaths) -> Option<SharedString>
     Some(match &last.error {
         Some(error) => tr!("Could not bring anything in: {error}", error = error.clone()).into(),
         None if last.unchanged || last.watched + last.positions == 0 => tr!("Nothing new the last time it asked.").into(),
+        // What a pull brought, and what it could not place: one sentence, so a
+        // person reading the row knows whether the library is complete.
+        None if last.skipped > 0 => {
+            tr!("Brought in {n} titles · {m} could not be matched.", n = last.watched + last.positions, m = last.skipped).into()
+        }
         None => tr!("Brought in {n} titles.", n = last.watched + last.positions).into(),
     })
 }

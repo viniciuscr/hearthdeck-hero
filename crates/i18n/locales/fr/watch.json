@@ -18,6 +18,7 @@
   "Binge days": "Jours de binge",
   "binge days": "jours de binge",
   "Bring in what I watched in {provider}": "Récupérer ce que j'ai regardé sur {provider}",
+  "Brought in {n} titles · {m} could not be matched.": "{n} titres récupérés · {m} n'ont pas pu être identifiés.",
   "Brought in {n} titles.": "{n} titres récupérés.",
   "Browsing uses this account's key. Signing out keeps the key, so the catalogs keep working.": "La navigation utilise la clé de ce compte. Se déconnecter la conserve, les catalogues continuent de fonctionner.",
   "Budget": "Budget",

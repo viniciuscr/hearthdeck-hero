@@ -58,6 +58,11 @@ pub struct LastImport {
     /// The change query said nothing moved: no pull ran.
     #[serde(default)]
     pub unchanged: bool,
+    /// Rows the pull could not place (no id, no episode number, a bucket Simkl
+    /// refused even after splitting). A screen reads it to say the library is not
+    /// whole.
+    #[serde(default)]
+    pub skipped: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

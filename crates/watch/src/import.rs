@@ -38,8 +38,8 @@ pub struct Report {
     pub positions: usize,
     /// Provider items this build cannot use (no IMDb id, a show-level fact).
     pub skipped: usize,
-    /// Titles the provider knows and the library does not — placeholders are a
-    /// later slice, so these are only counted for now.
+    /// Titles the provider knows and the library does not: they arrive as greyed
+    /// placeholders, and the count is here so a screen can say how many.
     pub no_local: usize,
     /// Things left alone on purpose: unwatched markers, finished records, a
     /// pending push, our own echo, a local position newer than the pull.
@@ -130,14 +130,21 @@ pub fn record_result(cursor: &mut cursor::Cursor, result: &Result<Report>, now: 
                 watched: report.watched,
                 positions: report.positions,
                 unchanged: report.unchanged,
+                skipped: report.skipped,
                 error: None,
             });
         }
         Err(error) => {
             cursor.attempts = cursor.attempts.saturating_add(1);
             cursor.next_at = Some(now + backoff(cursor.attempts));
-            cursor.last =
-                Some(cursor::LastImport { at: now, watched: 0, positions: 0, unchanged: false, error: Some(format!("{error:#}")) });
+            cursor.last = Some(cursor::LastImport {
+                at: now,
+                watched: 0,
+                positions: 0,
+                unchanged: false,
+                skipped: 0,
+                error: Some(format!("{error:#}")),
+            });
         }
     }
 }
