@@ -134,6 +134,42 @@ mod tests {
         AppPaths::for_data(&DataPaths::at(dir.to_path_buf()))
     }
 
+    /// A logger that keeps what our code says, so a test can prove the lines exist.
+    struct Captured;
+    static LINES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    impl log::Log for Captured {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record) {
+            LINES.lock().expect("a log line").push(record.args().to_string());
+        }
+        fn flush(&self) {}
+    }
+
+    fn capture() -> &'static std::sync::Mutex<Vec<String>> {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = log::set_logger(&Captured).map(|()| log::set_max_level(log::LevelFilter::Info));
+        });
+        &LINES
+    }
+
+    #[test]
+    fn a_mark_says_so_in_the_log() {
+        let capture = capture();
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        capture.lock().unwrap().clear();
+
+        set_watched(&app, &mark(MarkTarget::Movie), true).unwrap();
+        let lines = capture.lock().unwrap().clone();
+        assert!(
+            lines.iter().any(|line| line.contains("marked") && line.contains("as watched here")),
+            "a person must be able to see the mark landed: {lines:?}"
+        );
+    }
+
     fn mark<'a>(target: MarkTarget<'a>) -> Mark<'a> {
         Mark {
             provider: "stremio",
