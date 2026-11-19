@@ -144,8 +144,13 @@ history with it. That is what a person clicking it on simkl.com gets — and it 
 why a removal has to be an explicit act here, never something inferred from a
 title merely being absent.
 
-Favourites and custom lists are PRO/VIP beta (`403 premium_only`), so the adapter
-answers *unmatched* without spending a request instead of failing every drain.
+Favourites ride the same loop through the Pro endpoints — `POST /lists/favorites`
+and `/lists/favorites/remove`, "the heart on simkl.com" — and a title from there
+lands on **our** favourites shelf, not the watchlist. A free account answers
+`403 premium_only`, which the adapter reports once as *unmatched* ("behind its Pro
+plan") instead of failing every drain: Simkl grants Pro after the first month, and
+the switch starts working then with no change here. Custom lists stay out: their
+read side needs the account's user id, which nothing else here does.
 
 ## When it runs
 

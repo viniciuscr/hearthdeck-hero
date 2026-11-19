@@ -90,14 +90,19 @@ impl<'a> Sync<'a> {
     /// Favourites and custom lists are a paid, beta surface (`403 premium_only`),
     /// so they answer `Unmatched` here instead of failing on every attempt.
     fn list(&self, change: &ListChange) -> Result<Delivery> {
-        if change.list != "watchlist" {
-            return Ok(Delivery::Unmatched(format!("Simkl keeps {} behind its paid tier", change.list)));
-        }
         let ids = self.ids(&change.title);
-        let item = if change.member { json!({ "ids": ids, "to": "plantowatch" }) } else { json!({ "ids": ids }) };
-        let body = if change.title.kind == "series" { json!({ "shows": [item] }) } else { json!({ "movies": [item] }) };
-        let path = if change.member { "/sync/add-to-list" } else { "/sync/history/remove" };
-        self.classify(&self.url(path)?, &body)
+        let bucket = if change.title.kind == "series" { "shows" } else { "movies" };
+        // Watchlist is the one every account has; the favourites are the heart on
+        // simkl.com, and their endpoints are the beta Pro surface.
+        let (path, item) = match change.list.as_str() {
+            "watchlist" => (
+                if change.member { "/sync/add-to-list" } else { "/sync/history/remove" },
+                if change.member { json!({ "ids": ids, "to": "plantowatch" }) } else { json!({ "ids": ids }) },
+            ),
+            "favourites" => (if change.member { "/lists/favorites" } else { "/lists/favorites/remove" }, json!({ "ids": ids })),
+            other => return Ok(Delivery::Unmatched(format!("Simkl keeps {other} behind its Pro plan"))),
+        };
+        self.classify(&self.url(path)?, &json!({ (bucket): [item] }))
     }
 
     /// A half-watched title: Simkl stores it as a paused playback. Below its 80 %
@@ -172,6 +177,9 @@ impl<'a> Sync<'a> {
             }
             // The same watch is already recorded: what we wanted.
             409 => Ok(Delivery::Delivered),
+            // A paid endpoint on a free account is an answer, not a fault: try
+            // again next drain and it says the same thing forever.
+            403 if code.as_deref() == Some("premium_only") => Ok(Delivery::Unmatched("Simkl keeps this behind its Pro plan".into())),
             401 | 403 => Err(anyhow!("Simkl refused this account's token: sign in again (HTTP {status})")),
             // A malformed request will not fix itself; a rate limit will.
             // The docs print both spellings; the lock is a sub-second condition,
@@ -386,12 +394,35 @@ mod tests {
     }
 
     #[test]
-    fn a_paid_list_is_unmatched_without_a_request() {
+    fn a_favourite_is_the_heart_endpoint() {
         let fake = Fake::delivered();
+        SimklTracker::new(&fake, "client-1", "tok").sync_list(&list_change("series", "favourites", true)).unwrap();
+        let posts = fake.posts();
+        assert!(posts.iter().any(|post| post.contains("/lists/favorites") && post.contains(r#""shows""#)), "{posts:?}");
+
+        let fake = Fake::delivered();
+        SimklTracker::new(&fake, "client-1", "tok").sync_list(&list_change("movie", "favourites", false)).unwrap();
+        let posts = fake.posts();
+        assert!(posts.iter().any(|post| post.contains("/lists/favorites/remove")), "{posts:?}");
+    }
+
+    #[test]
+    fn a_free_account_is_told_about_pro_once() {
+        let fake = Fake::new(403, r#"{"error":"premium_only"}"#);
         let delivery = SimklTracker::new(&fake, "client-1", "tok").sync_list(&list_change("movie", "favourites", true)).unwrap();
         match delivery {
-            Delivery::Unmatched(message) => assert!(message.contains("paid"), "{message}"),
-            other => panic!("a paid list is unmatched, not {other:?}"),
+            Delivery::Unmatched(message) => assert!(message.contains("Pro"), "{message}"),
+            other => panic!("a paid endpoint on a free account is unmatched, not {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_list_simkl_does_not_have_is_unmatched_without_a_request() {
+        let fake = Fake::delivered();
+        let delivery = SimklTracker::new(&fake, "client-1", "tok").sync_list(&list_change("movie", "custom:42", true)).unwrap();
+        match delivery {
+            Delivery::Unmatched(message) => assert!(message.contains("Pro plan"), "{message}"),
+            other => panic!("an unknown list is unmatched, not {other:?}"),
         }
         assert!(fake.posts().is_empty(), "no request is spent on it");
     }

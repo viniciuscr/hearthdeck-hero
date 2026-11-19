@@ -435,7 +435,12 @@ fn apply_lists(
             match action {
                 Action::AddLocal => {
                     let Some(title) = title else { continue };
-                    library.add_watchlist(&list_item(&title));
+                    // The kind decides which shelf: a series from the provider's
+                    // favourites is a favourite here, not a watchlist entry.
+                    match kind {
+                        FAVOURITES => library.add_favourite(&list_item(&title)),
+                        _ => library.add_watchlist(&list_item(&title)),
+                    };
                     library.decide(kind, "", &imdb, decision(Membership::In));
                     added += 1;
                 }
@@ -767,6 +772,21 @@ mod tests {
         assert_eq!(report.lists_added, 1, "{report:?}");
         assert_eq!(watchlist(&app), ["tt9"]);
         assert_eq!(seen.get("watchlist"), Some(&vec!["tt9".to_owned()]), "the tick remembers what it saw");
+    }
+
+    #[test]
+    fn a_favourite_lands_on_the_favourites_shelf() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        let pulled = Pulled {
+            memberships: vec![RemoteMembership { title: title("tt9"), list: "favourites".into(), member: true }],
+            ..Default::default()
+        };
+        let _ = apply(&app, "simkl", &pulled, None, &BTreeMap::new()).unwrap();
+
+        let library = heronite_watch_state::personal::read(&app);
+        assert_eq!(library.favourites.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), ["tt9"]);
+        assert!(library.watchlist.is_empty(), "a favourite is not a watchlist entry");
     }
 
     #[test]
