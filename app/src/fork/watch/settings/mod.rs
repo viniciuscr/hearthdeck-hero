@@ -795,8 +795,12 @@ fn close_pairing(d: &mut SettingsPage, overlay: Option<&Entity<qr_overlay::QrOve
     cx.notify();
 }
 
-/// Opens TMDB's approval page for `token`; a browser that will not open is a
-/// notice, not a failure of the sign-in.
+/// Opens TMDB's approval page for `token` on a desk; a browser that will not
+/// open is a notice, not a failure of the sign-in.
+///
+/// A console only shows the page as a QR ([`open_pairing`]): there is a
+/// browser on the host to launch, and opening one would take the TV away from
+/// the panel the person is looking at.
 fn open_approval(d: &mut SettingsPage, token: &str) {
     let url = heronite_watch::tmdb_sign_in::approve_url(token);
     if let Err(error) = heronite_platform::shell::open(&url) {
@@ -822,9 +826,13 @@ fn start_tmdb_sign_in(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
             Ok(token) => {
                 let url = heronite_watch::tmdb_sign_in::approve_url(&token);
                 d.watch.tmdb_pending = Some(token.clone());
-                // The browser opens for a desk; the TV gets the same page as a QR.
-                open_approval(d, &token);
+                // The TV gets the page as a QR, and nothing else: a browser
+                // opening on the host would take the screen away from the panel.
+                // A desk has no panel over the page, so it opens the browser.
                 let overlay = open_pairing(d, tr!("Approve TMDB"), None, &url, cx);
+                if !crate::console::active() {
+                    open_approval(d, &token);
+                }
                 // TMDB only says "approved" through step 3, and a phone approves on
                 // a different device: ask again every few seconds instead of waiting
                 // for a button. `finish` answers `Pending` until the person is done.
