@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use heronite_data::paths::AppPaths;
 use heronite_watch_core::http::UreqTransport;
 use heronite_watch_core::progress::{finished, WatchedState};
-use heronite_watch_core::tracker::{Delivery, TrackEvent, TrackedTitle, TrackedView, TrackedWatch, WatchTracker};
+use heronite_watch_core::tracker::{Delivery, ListChange, TrackEvent, TrackedTitle, TrackedView, TrackedWatch, WatchTracker};
 use heronite_watch_core::types::MovieProgress;
 use heronite_watch_player::player::PlaybackOutcome;
 use heronite_watch_simkl::{SimklTracker, PROVIDER as SIMKL};
@@ -241,6 +241,29 @@ pub fn backfill(app: &AppPaths) -> Result<usize> {
     let report = drain(app)?;
     log::info!("sent {queued} watch sessions to the trackers, {} still waiting", report.pending);
     Ok(queued)
+}
+
+/// Delivers one list change to every enabled tracker that keeps lists, in the
+/// same order and one at a time as a watch event.
+///
+/// There is no list outbox: a change a tracker did not take stays owed (the ledger
+/// still says `in`/`out`, the provider's list still says otherwise) and the next
+/// import derives it again. That is why a failure here is a log line, not state.
+pub fn deliver_list(app: &AppPaths, change: &ListChange) -> Vec<(&'static str, Delivery)> {
+    let http = UreqTransport::new();
+    let enabled = enabled(app);
+    deliverers(app, &http, &enabled)
+        .into_iter()
+        .map(|(id, tracker)| {
+            // A tracker that cannot be used (a dead token, no session) is a retry,
+            // exactly like a watch event: the change is derived again next tick.
+            let delivery = match tracker.sync_list(change) {
+                Ok(delivery) => delivery,
+                Err(error) => Delivery::Retry(format!("{error:#}")),
+            };
+            (id, delivery)
+        })
+        .collect()
 }
 
 /// The trackers that can deliver right now, and the ids the outbox knows them by.

@@ -18,7 +18,7 @@ use heronite_watch_core::provider::Ctx;
 use heronite_watch_core::pull::{Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
 use heronite_watch_core::sync_rules::{reconcile, Action, Local, Remote, Seen};
 use heronite_watch_core::title::IMPORTED_ADDON;
-use heronite_watch_core::tracker::{TrackedTitle, TrackedView};
+use heronite_watch_core::tracker::{Delivery, ListChange, TrackedTitle, TrackedView};
 use heronite_watch_core::types::{MovieItem, MovieProgress, Origin};
 use heronite_watch_simkl::pull::SimklPull;
 use heronite_watch_state::import as cursor;
@@ -51,6 +51,12 @@ pub struct Report {
     pub lists_added: usize,
     pub lists_removed: usize,
     pub lists_push: usize,
+    /// What a tracker took during this run. A change that was not taken stays owed
+    /// and is derived again by the next tick, so there is no second outbox.
+    pub lists_delivered: usize,
+    /// The list changes this pull derived and still owes: delivered by [`run`].
+    #[doc(hidden)]
+    pub pushes: Vec<ListChange>,
 }
 
 impl Report {
@@ -86,7 +92,20 @@ pub fn run(app: &AppPaths, sync: &dyn WatchSync) -> Result<Report> {
     let http = UreqTransport::with_limits(Duration::from_secs(60), 64 << 20);
     let credentials = StoreCredentials::new(app);
     let ctx = Ctx { http: &http, credentials: &credentials };
-    run_with(app, sync, &ctx)
+    let mut report = run_with(app, sync, &ctx)?;
+    // The list changes the reconciliation derived, delivered here rather than in
+    // an outbox: a failure stays owed (the ledger still says `in`/`out`) and the
+    // next tick derives it again.
+    for change in std::mem::take(&mut report.pushes) {
+        for (tracker, delivery) in crate::trackers::deliver_list(app, &change) {
+            match delivery {
+                Delivery::Delivered => report.lists_delivered += 1,
+                Delivery::Retry(reason) => log::warn!("{tracker} list change: {reason}"),
+                Delivery::Unmatched(reason) => log::info!("{tracker} list change: {reason}"),
+            }
+        }
+    }
+    Ok(report)
 }
 
 /// Whether a provider's next automatic pull is due.
@@ -232,10 +251,11 @@ fn apply(
             positions.push(position);
         }
     }
-    let (added, removed, push, seen) = apply_lists(app, provider, pulled, last_seen, now)?;
+    let (added, removed, pushes, seen) = apply_lists(app, provider, pulled, last_seen, now)?;
     report.lists_added = added;
     report.lists_removed = removed;
-    report.lists_push = push;
+    report.lists_push = pushes.len();
+    report.pushes = pushes;
 
     if watches.is_empty() && positions.is_empty() {
         return Ok((report, seen));
@@ -330,11 +350,11 @@ fn apply_lists(
     pulled: &Pulled,
     last_seen: &BTreeMap<String, Vec<String>>,
     now: DateTime<Utc>,
-) -> Result<(usize, usize, usize, BTreeMap<String, Vec<String>>)> {
+) -> Result<(usize, usize, Vec<ListChange>, BTreeMap<String, Vec<String>>)> {
     let mut library = heronite_watch_state::personal::read(app);
     let mut added = 0usize;
     let mut removed = 0usize;
-    let mut push = 0usize;
+    let mut pushes: Vec<ListChange> = Vec::new();
 
     // What the provider says each list holds now.
     let mut remote: BTreeMap<String, Vec<&RemoteMembership>> = BTreeMap::new();
@@ -378,7 +398,8 @@ fn apply_lists(
                 origin: Origin::Imported,
                 imported_from: Some(provider.to_owned()),
             };
-            match reconcile(local, seen, is) {
+            let action = reconcile(local, seen, is);
+            match action {
                 Action::AddLocal => {
                     let Some(title) = title else { continue };
                     library.add_watchlist(&list_item(&title));
@@ -393,9 +414,13 @@ fn apply_lists(
                     }
                     library.decide(kind, "", &imdb, decision(Membership::Out));
                 }
-                // A local decision the provider has not been told about yet: the
-                // send side is the next slice.
-                Action::PushAdd | Action::PushRemove => push += 1,
+                // A local decision the provider has not been told about yet.
+                Action::PushAdd | Action::PushRemove => {
+                    let target = title.clone().or_else(|| local_tracked(&library, kind, &imdb));
+                    if let Some(target) = target {
+                        pushes.push(ListChange { title: target, list: kind.to_owned(), member: matches!(action, Action::PushAdd) });
+                    }
+                }
                 // Both moved: the local state wins until the send side exists.
                 Action::Conflict | Action::None => {}
             }
@@ -406,7 +431,18 @@ fn apply_lists(
     if added + removed > 0 {
         heronite_watch_state::personal::write(app, &library)?;
     }
-    Ok((added, removed, push, held_now))
+    Ok((added, removed, pushes, held_now))
+}
+
+/// A local list entry as a tracker's title: what a push is about when the
+/// provider has never mentioned it.
+fn local_tracked(library: &heronite_watch_core::personal::PersonalLibrary, kind: &str, imdb: &str) -> Option<TrackedTitle> {
+    local_items(library, kind).iter().find(|item| item.id == imdb).map(|item| TrackedTitle {
+        imdb: Some(item.id.clone()),
+        kind: item.kind.clone(),
+        title: item.name.clone(),
+        year: item.year.clone(),
+    })
 }
 
 /// The items a local list holds.
@@ -686,6 +722,10 @@ mod tests {
         let (report, _) = apply(&app, "simkl", &Pulled::default(), None, &BTreeMap::new()).unwrap();
         assert_eq!(report.lists_push, 1, "{report:?}");
         assert_eq!(watchlist(&app), ["tt1"], "absence is not a removal");
+        assert_eq!(report.pushes.len(), 1, "the change is owed to the provider");
+        assert_eq!(report.pushes[0].list, "watchlist");
+        assert!(report.pushes[0].member, "an add, not a removal");
+        assert_eq!(report.pushes[0].title.imdb.as_deref(), Some("tt1"), "the local entry names it");
     }
 
     struct FakeSync {
