@@ -209,6 +209,9 @@ pub fn tick(app: &AppPaths) -> Vec<(&'static str, Result<Report>)> {
         }
         log::info!("{}: pulling now", sync.id());
         let result = run(app, *sync);
+        if let Err(error) = &result {
+            log::warn!("{}: the pull failed: {error:#}", sync.id());
+        }
         let now = Utc::now();
         // The schedule is kept even when the pull failed: a failure is a schedule
         // fact, not a reason to hammer the provider.
@@ -334,6 +337,7 @@ fn apply(
                 // fact: a placeholder draws the title, and an episode record is what
                 // makes its episodes read as watched when the page opens. Without
                 // it a whole imported series was invisible.
+                log::info!("{provider}: {} is not in the library; kept as a placeholder", watch.title.title);
                 missing.push((imdb.to_owned(), kind, watch.title.title.clone(), watch.title.year.clone()));
                 if let TrackedView::Episode { season, number } = view {
                     let mut record = MovieProgress {
@@ -357,6 +361,7 @@ fn apply(
                             ..EpisodeProgress::default()
                         },
                     );
+                    log::info!("{provider}: {} S{season}E{number} watched (its own record: the library lacks the show)", watch.title.title);
                     movies.progress.push(record);
                     watched += 1;
                 }
@@ -365,17 +370,20 @@ fn apply(
             present.push((imdb.to_owned(), kind));
             // A title marked "not watched" here stays that way: the person said so.
             if record.unwatched {
+                log::info!("{provider}: {} left alone (marked not watched here)", watch.title.title);
                 held += 1;
                 continue;
             }
             match view {
                 TrackedView::Movie => {
                     if record.finished {
+                        log::info!("{provider}: {} left alone (already watched here)", watch.title.title);
                         held += 1;
                         continue;
                     }
                     record.finished = true;
                     stamp(record, provider, now, watch.at);
+                    log::info!("{provider}: {} watched", watch.title.title);
                     watched += 1;
                 }
                 TrackedView::Episode { season, number } => {
@@ -406,6 +414,7 @@ fn apply(
                     episode.imported_from = Some(provider.to_owned());
                     episode.imported_at = Some(now);
                     episode.remote_updated_at = watch.at;
+                    log::info!("{provider}: {} S{season}E{number} watched", watch.title.title);
                     watched += 1;
                 }
             }
