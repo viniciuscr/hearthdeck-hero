@@ -246,7 +246,12 @@ fn record(
             .map(str::to_owned)
             .or_else(|| previous.and_then(|progress| progress.video_id.clone()))
             .or_else(|| Some(id.to_owned())),
-        imdb: imdb.map(str::to_owned).or_else(|| previous.and_then(|progress| progress.imdb.clone())),
+        // An IMDb id, from the caller, a previous record, or the title's own id when
+        // it is one: a record with no imdb is a title nobody can match later.
+        imdb: imdb
+            .map(str::to_owned)
+            .or_else(|| previous.and_then(|progress| progress.imdb.clone()))
+            .or_else(|| id.starts_with("tt").then(|| id.to_owned())),
         episodes,
         ..Default::default()
     };

@@ -81,7 +81,16 @@ pub fn progress_for<'a>(movies: &'a MoviesFile, provider: &str, id: &str) -> Opt
 pub fn upsert_progress(movies: &mut MoviesFile, progress: MovieProgress) {
     let same = |entry: &MovieProgress| entry.provider == progress.provider && entry.id == progress.id;
     match movies.progress.iter_mut().find(|entry| same(entry)) {
-        Some(entry) => *entry = progress,
+        Some(entry) => {
+            // A writer that does not know the IMDb id must not erase the one a
+            // previous write recorded: the tracker needs it, and nothing re-derives
+            // it later.
+            let mut next = progress;
+            if next.imdb.is_none() {
+                next.imdb = entry.imdb.clone();
+            }
+            *entry = next;
+        }
         None => movies.progress.push(progress),
     }
 }
@@ -212,6 +221,22 @@ pub fn clear_simkl_client_id(app: &AppPaths) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_write_without_an_imdb_does_not_erase_the_one_that_is_there() {
+        let mut movies = MoviesFile::default();
+        upsert_progress(
+            &mut movies,
+            MovieProgress { provider: "stremio".into(), id: "tt1".into(), imdb: Some("tt1".into()), ..MovieProgress::default() },
+        );
+        // A writer that does not know the id (an older build, a bare position).
+        upsert_progress(
+            &mut movies,
+            MovieProgress { provider: "stremio".into(), id: "tt1".into(), imdb: None, ..MovieProgress::default() },
+        );
+        assert_eq!(movies.progress[0].imdb.as_deref(), Some("tt1"), "the tracker's id is not lost");
+        assert_eq!(movies.progress.len(), 1, "and the record is not duplicated");
+    }
     use chrono::Utc;
     use std::path::Path;
 

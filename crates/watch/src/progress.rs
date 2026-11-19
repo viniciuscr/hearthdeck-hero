@@ -123,7 +123,12 @@ pub fn set_watched(app: &AppPaths, mark: &Mark<'_>, watched: bool) -> Result<()>
             }
         }
         progress.updated_at = at;
-        progress.imdb = mark.imdb.map(str::to_owned).or_else(|| progress.imdb.clone());
+        // Same rule as playback: never leave a title without the id a tracker needs.
+        progress.imdb = mark
+            .imdb
+            .map(str::to_owned)
+            .or_else(|| progress.imdb.clone())
+            .or_else(|| mark.id.starts_with("tt").then(|| mark.id.to_owned()));
         store::upsert_progress(movies, progress);
         Ok(())
     })?;
