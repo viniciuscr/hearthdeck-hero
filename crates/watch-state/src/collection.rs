@@ -158,7 +158,7 @@ pub fn write_root(root: &Path, movies: &[MovieItem]) -> Result<()> {
         local.insert(name.clone(), local_meta(movie, &name));
         // `collectionMetadataKey` / `collectionArtKey`: `runner:appName`, and
         // `appName` already carries the provider.
-        let key = format!("{}:{}", provider(movie), name);
+        let key = format!("{}:{}", owner(movie), name);
         metadata.insert(key.clone(), movie_metadata(movie, &name));
         art.insert(key, movie_art(movie));
     }
@@ -184,6 +184,10 @@ pub fn write_root(root: &Path, movies: &[MovieItem]) -> Result<()> {
     Ok(())
 }
 
+/// The `addon` marker an imported placeholder carries: a title a provider knows
+/// and no stream source here has.
+pub const IMPORTED: &str = "imported";
+
 /// The provider that owns an item; an item without one is Stremio's.
 fn provider(movie: &MovieItem) -> &str {
     if movie.provider.is_empty() {
@@ -193,15 +197,27 @@ fn provider(movie: &MovieItem) -> &str {
     }
 }
 
-/// The Heroic `app_name` of an item: provider-prefixed, so two providers with
-/// the same id never share a local record or a timestamp.
+/// Who "owns" an item: its provider, or `imported` for a placeholder nothing here
+/// can play. Kept out of Stremio's namespace on purpose — an imported film must
+/// not borrow a provider's id or its play state.
+fn owner(movie: &MovieItem) -> &str {
+    if movie.addon == IMPORTED {
+        IMPORTED
+    } else {
+        provider(movie)
+    }
+}
+
+/// The Heroic `app_name` of an item: owner-prefixed, so two providers with the
+/// same id never share a local record or a timestamp.
 fn app_name(movie: &MovieItem) -> String {
-    format!("{}:{}", provider(movie), movie.id)
+    format!("{}:{}", owner(movie), movie.id)
 }
 
 fn game_json(movie: &MovieItem) -> Value {
     let kind = if movie.kind.is_empty() { "movie" } else { movie.kind.as_str() };
-    let provider = provider(movie);
+    let provider = owner(movie);
+    let imported = movie.addon == IMPORTED;
     let poster = movie.poster.clone();
     json!({
         "runner": provider,
@@ -212,7 +228,9 @@ fn game_json(movie: &MovieItem) -> Value {
         "art_background": movie.background.clone().or_else(|| movie.poster.clone()),
         "art_logo": &movie.logo,
         "description": &movie.description,
-        "is_installed": true,
+        // Repurposed for Watch: "installed" means a stream source can play it.
+        // A placeholder has none, which is exactly what the tiles grey on.
+        "is_installed": !imported,
         "install": {"platform": "movie"},
         "extra": {
             "stremioType": kind,
@@ -220,6 +238,7 @@ fn game_json(movie: &MovieItem) -> Value {
             CATALOG_KEY: &movie.catalog,
             "provider": provider,
             "watchId": &movie.id,
+            "imported": imported,
         },
     })
 }

@@ -414,6 +414,11 @@ impl CollectionView {
     /// The page's rows: Play, then for a series the season row, that season's
     /// episodes and the picked episode's streams; a film lists its own streams.
     fn watch_rows(&mut self, game: &CollectionGame, details: Option<&TitleDetails>, locale: DateLocale) -> Vec<Row> {
+        // A title no source here has: one line, and nothing that pretends it can
+        // play or be marked (there is no local record to mark).
+        if crate::fork::watch::sources::imported(game) {
+            return vec![Row::info("watch-unavailable", tr!("Playback"), tr!("Not currently present in any available stream source."))];
+        }
         let (label, icon) = self.primary_state(game);
         let mut rows = vec![Row::action("primary", label).icon(icon)];
         // The person's two flags: local, instant, and the label is the state.

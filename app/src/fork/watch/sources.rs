@@ -18,6 +18,13 @@ pub fn kind(game: &CollectionGame) -> &str {
     game.game.extra.as_ref().and_then(|extra| extra.get("stremioType")).and_then(serde_json::Value::as_str).unwrap_or("movie")
 }
 
+/// Whether this title came in from a provider and **no stream source here has
+/// it**: a placeholder. It shows where titles show, greyed (the library says it is
+/// not installed), and there is nothing to play.
+pub fn imported(game: &CollectionGame) -> bool {
+    game.game.extra.as_ref().and_then(|extra| extra.get("imported")).and_then(serde_json::Value::as_bool).unwrap_or(false)
+}
+
 /// The rail that brought the title in (`extra.watchCatalog`): a catalogue page's
 /// feed key, or `collection:<id>` for one of the rails the person turned on.
 pub fn rail_marker(game: &CollectionGame) -> Option<&str> {

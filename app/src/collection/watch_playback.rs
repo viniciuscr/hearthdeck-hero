@@ -326,6 +326,10 @@ impl CollectionView {
     /// film, started as soon as the list is known. While the title plays it
     /// stops it.
     pub(super) fn watch_play_picked(&mut self, game: &CollectionGame, video: Option<&str>, cx: &mut Context<Self>) {
+        if crate::fork::watch::sources::imported(game) {
+            self.show_toast(tr!("Not currently present in any available stream source."), true, cx);
+            return;
+        }
         if self.watch.running.as_ref().is_some_and(|running| running.key == game.key) {
             self.watch_stop(cx);
             return;
