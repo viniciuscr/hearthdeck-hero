@@ -1020,8 +1020,9 @@ fn set_tracker(d: &mut SettingsPage, id: &str, on: bool, cx: &mut Context<Settin
         // machine goes over once (with its own timestamps), and only what happens
         // from then on is sent afterwards.
         let app = d.ctx.app.clone();
+        let switched = id.to_owned();
         cx.spawn(async move |this, cx| {
-            let sent = cx.background_spawn(async move { heronite_watch::trackers::backfill(&app) }).await;
+            let sent = cx.background_spawn(async move { heronite_watch::trackers::backfill_for(&app, &switched) }).await;
             this.update(cx, |d, cx| {
                 match sent {
                     Ok(count) if count > 0 => d.watch.notice = Some(tr!("Sent {n} watch sessions.", n = count).into()),

@@ -182,6 +182,13 @@ pub fn due(queued: &QueuedEvent, tracker: &str, now: DateTime<Utc>) -> bool {
     }
 }
 
+/// Marks an event as already had by `tracker`, without it ever being sent: what a
+/// backfill does for the trackers that were on before, so switching a second one
+/// on does not re-send the whole history to the first.
+pub fn done_for(queued: &mut QueuedEvent, tracker: &str) {
+    queued.trackers.insert(tracker.to_owned(), TrackerState { done: true, failure: None });
+}
+
 /// The tracker has it.
 pub fn delivered(queued: &mut QueuedEvent, tracker: &str) {
     queued.trackers.insert(tracker.to_owned(), TrackerState { done: true, failure: None });
@@ -384,6 +391,17 @@ mod tests {
         assert_eq!(pending(&file, &enabled(&["simkl"])), 0);
         // A tracker that is not enabled is not owed anything.
         assert_eq!(pending(&file, &enabled(&["trakt"])), 1);
+    }
+
+    #[test]
+    fn an_event_can_be_marked_as_had_by_one_tracker_without_sending_it() {
+        let mut file = TrackingFile::default();
+        queue(&mut file, event(TrackedView::Movie, TrackedWatch::Watched));
+        done_for(&mut file.events[0], "simkl");
+        let now = Utc::now();
+        assert!(!due(&file.events[0], "simkl", now), "told already");
+        assert!(due(&file.events[0], "trakt", now), "the other still owes it");
+        assert_eq!(pending(&file, &enabled(&["simkl", "trakt"])), 1);
     }
 
     #[test]

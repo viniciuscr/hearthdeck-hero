@@ -242,6 +242,37 @@ pub fn drain(app: &AppPaths) -> Result<Report> {
 /// Queues the history already on this machine (every finished session), then
 /// drains it: what makes a library that predates the tracker show up there. A
 /// tracker receives each title/episode once — rewatch counts are Simkl's own.
+/// Queues the finished history already on this machine for **one** tracker: the
+/// one just switched on. The others were told already; the outbox marks these
+/// events done for them, so nothing is re-sent and nothing is delivered twice.
+pub fn backfill_for(app: &AppPaths, tracker: &str) -> Result<usize> {
+    let on = enabled(app);
+    if !on.iter().any(|id| id == tracker) {
+        return Ok(0);
+    }
+    let sessions = sessions::read(app).sessions;
+    let queued = tracking::update(app, |file| {
+        let mut queued = 0;
+        let mut seqs = Vec::new();
+        for session in sessions.iter().filter(|session| session.finished) {
+            let Some(event) = event_of_session(session) else { continue };
+            // `queue` assigns the seq, and may fold into an event still waiting.
+            seqs.push(tracking::queue(file, event).seq);
+            queued += 1;
+        }
+        for seq in seqs {
+            if let Some(queued) = queued_mut(file, seq) {
+                for other in on.iter().filter(|id| id.as_str() != tracker) {
+                    tracking::done_for(queued, other);
+                }
+            }
+        }
+        Ok(queued)
+    })?;
+    Ok(queued)
+}
+
+/// Queues the finished history for every tracker that is on.
 pub fn backfill(app: &AppPaths) -> Result<usize> {
     if enabled(app).is_empty() {
         return Ok(0);
@@ -496,6 +527,44 @@ mod tests {
         let show = TrackedTitle { imdb: Some("tt1".into()), kind: "series".into(), title: "A Show".into(), year: None };
         record_manual(&app, show, TrackedView::Movie, TrackedWatch::Watched);
         assert!(tracking::read(&app).events.is_empty(), "a film's mark on a show would be posted as a movie entry");
+    }
+
+    #[test]
+    fn a_backfill_only_arms_the_tracker_it_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        sign_in(&app);
+        let at = Utc::now();
+        heronite_watch_state::sessions::append(
+            &app,
+            WatchSession {
+                provider: "stremio".into(),
+                kind: "movie".into(),
+                id: "tt1".into(),
+                video_id: None,
+                season: None,
+                number: None,
+                name: "A Film".into(),
+                year: Some("2010".into()),
+                title: "A Film".into(),
+                started_at: at,
+                ended_at: at,
+                elapsed_seconds: 6_000.,
+                position_from_ms: 0,
+                position_to_ms: 6_000_000,
+                duration_ms: 6_000_000,
+                finished: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(backfill_for(&app, "trakt").unwrap(), 0, "a tracker that is off owes nothing");
+        assert!(tracking::read(&app).events.is_empty());
+
+        assert_eq!(backfill_for(&app, "simkl").unwrap(), 1);
+        let file = tracking::read(&app);
+        assert_eq!(file.events.len(), 1);
+        assert!(tracking::due(&file.events[0], "simkl", Utc::now()), "it is the one being told");
     }
 
     #[test]
