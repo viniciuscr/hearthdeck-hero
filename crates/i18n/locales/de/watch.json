@@ -57,6 +57,8 @@
   "Finished": "Abgeschlossen",
   "finished": "abgeschlossen",
   "Frees its memory; it is started again when you play a torrent.": "Gibt seinen Speicher frei; er startet wieder, wenn du einen Torrent abspielst.",
+  "Greyed titles stay out of the lists until a source can play them.": "Ausgegraute Titel bleiben aus den Listen, bis eine Quelle sie abspielen kann.",
+  "Hide titles no source here has": "Titel ausblenden, die keine Quelle hier hat",
   "Home": "Start",
   "IMDb {rating}": "IMDb {rating}",
   "In favourites": "In Favoriten",

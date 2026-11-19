@@ -62,9 +62,12 @@ fn items(http: &dyn Transport, app: &AppPaths, collections: &[(String, Collectio
     }
     // Titles a provider knows and no source here has: entries of their own, so
     // they appear where titles appear (greyed — the app greys what is not
-    // installed) instead of being invisible until the library gains them.
+    // installed) instead of being invisible until the library gains them. A
+    // person who would rather not see them turns them off, and the library is
+    // written without them: nothing downstream needs to know the rule.
+    let hide_placeholders = heronite_watch_state::settings::read(app).hide_placeholders;
     let imported = heronite_watch_state::placeholders::read(app);
-    if !imported.items.is_empty() {
+    if !hide_placeholders && !imported.items.is_empty() {
         let items: Vec<MovieItem> = imported
             .items
             .iter()

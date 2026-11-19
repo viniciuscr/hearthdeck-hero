@@ -1080,6 +1080,17 @@ fn tick_imports(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
 
 /// Turning the pull on runs it once, right away; turning it off leaves what came
 /// in, because imported marks are ordinary history.
+/// A display choice: the library is written again on the way into Watch, without
+/// the placeholders the person would rather not see.
+fn set_hide_placeholders(d: &mut SettingsPage, hide: bool, cx: &mut Context<SettingsPage>) {
+    let mut settings = heronite_watch::settings::read(&d.ctx.app);
+    settings.hide_placeholders = hide;
+    if let Err(error) = heronite_watch::settings::write(&d.ctx.app, &settings) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    cx.notify();
+}
+
 fn set_import(d: &mut SettingsPage, provider: &str, on: bool, cx: &mut Context<SettingsPage>) {
     if let Err(error) = heronite_watch::import::set_enabled(&d.ctx.app, provider, on) {
         log::warn!("saving the Watch settings: {error:#}");
@@ -1516,6 +1527,13 @@ pub(crate) fn account_rows(d: &SettingsPage) -> Vec<Row> {
             }
         }
     }
+    // A display choice rather than a source: greyed placeholders can be kept out
+    // of the lists entirely.
+    let hide = heronite_watch::settings::read(&d.ctx.app).hide_placeholders;
+    rows.push(
+        Row::toggle(SharedString::from("watch-hide-placeholders"), tr!("Hide titles no source here has"), hide)
+            .desc(tr!("Greyed titles stay out of the lists until a source can play them.")),
+    );
     rows
 }
 
@@ -1629,6 +1647,9 @@ pub(crate) fn source_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-tracker:") => {
             let tracker = id.trim_start_matches("watch-tracker:").to_owned();
             set_tracker(d, &tracker, on, cx);
+        }
+        Outcome::Changed(id, Value::Toggle(on)) if id == "watch-hide-placeholders" => {
+            set_hide_placeholders(d, on, cx);
         }
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-import:") => {
             let provider = id.trim_start_matches("watch-import:").to_owned();

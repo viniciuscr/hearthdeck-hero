@@ -56,6 +56,8 @@
   "Finding streams…": "Recherche des sources…",
   "finished": "terminé",
   "Frees its memory; it is started again when you play a torrent.": "Libère sa mémoire ; il redémarre quand vous lisez un torrent.",
+  "Greyed titles stay out of the lists until a source can play them.": "Les titres grisés restent hors des listes jusqu'à ce qu'une source puisse les lire.",
+  "Hide titles no source here has": "Masquer les titres qu'aucune source ici ne propose",
   "IMDb {rating}": "IMDb {rating}",
   "In favourites": "Dans les favoris",
   "In progress · {percent}%": "En cours · {percent}%",

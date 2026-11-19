@@ -56,6 +56,8 @@
   "Finding streams…": "Buscando fontes…",
   "finished": "concluído",
   "Frees its memory; it is started again when you play a torrent.": "Libera a memória; ele é iniciado de novo quando você reproduz um torrent.",
+  "Greyed titles stay out of the lists until a source can play them.": "Títulos acinzentados ficam fora das listas até uma fonte poder reproduzi-los.",
+  "Hide titles no source here has": "Ocultar títulos que nenhuma fonte aqui tem",
   "Home": "Início",
   "IMDb {rating}": "IMDb {rating}",
   "In favourites": "Nos favoritos",

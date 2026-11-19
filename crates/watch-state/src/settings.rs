@@ -35,6 +35,10 @@ pub struct Settings {
     /// already right when it lands.
     #[serde(default = "metadata_by_default")]
     pub metadata_sources: Vec<String>,
+    /// Leave greyed placeholders out of the lists entirely: a person who does not
+    /// want titles they cannot play in the way of the ones they can.
+    #[serde(default)]
+    pub hide_placeholders: bool,
     /// The rails the Watch space's **first page** draws, in order
     /// (Settings → Watch → Home). Two kinds of id: `continue:<provider>` is that
     /// provider's Continue watching, and anything else is a collection a source
@@ -106,6 +110,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             stop_service_when_done: true,
+            hide_placeholders: false,
             catalog_sources: catalogs_by_default(),
             metadata_sources: metadata_by_default(),
             home_rails: Vec::new(),
@@ -142,6 +147,18 @@ mod tests {
 
     fn app(dir: &std::path::Path) -> AppPaths {
         AppPaths { config: dir.join("config"), cache: dir.join("cache") }
+    }
+
+    #[test]
+    fn hiding_placeholders_is_off_until_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        assert!(!read(&app).hide_placeholders, "a fresh install shows what a provider knows");
+
+        let mut settings = read(&app);
+        settings.hide_placeholders = true;
+        write(&app, &settings).unwrap();
+        assert!(read(&app).hide_placeholders, "and keeps the choice");
     }
 
     #[test]
