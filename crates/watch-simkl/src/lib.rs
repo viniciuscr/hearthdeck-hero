@@ -13,6 +13,7 @@
 
 pub mod auth;
 pub mod meta;
+pub mod pull;
 pub mod sync;
 
 pub use auth::{DeviceCode, Session, Step, Tokens};
