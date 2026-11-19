@@ -20,17 +20,7 @@ use heronite_watch_state::store;
 /// episode in `video_id`.
 pub fn local(app: &AppPaths, provider: &str, id: &str) -> Option<MovieProgress> {
     let movies = store::read_movies(app);
-    let mut base = record_for(&movies, provider, id).cloned()?;
-    // Episodes can live in another writer's record for the same title — a file
-    // written before the import learned to reuse the existing record, for instance.
-    // The read is the title's, so it takes the union and never hides a watch.
-    for other in movies.progress.iter().filter(|record| record.id == id || record.imdb.as_deref() == Some(id)) {
-        for (key, episode) in &other.episodes {
-            base.episodes.entry(key.clone()).or_insert_with(|| episode.clone());
-        }
-        base.finished |= other.finished;
-    }
-    Some(base)
+    record_for(&movies, provider, id).cloned()
 }
 
 /// The record for a title: the one its provider wrote, or the one another writer

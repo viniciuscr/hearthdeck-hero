@@ -43,12 +43,60 @@ pub fn auth_path(app: &AppPaths) -> PathBuf {
 /// The owner of records written before the provider was part of the file.
 const LEGACY_PROVIDER: &str = "stremio";
 
+/// Makes a file obey the rule every writer must keep: a record for an IMDb id
+/// **carries** it, and a title has **one** record.
+///
+/// Run on every read (in memory) and on every write (persisted), so a file an older
+/// build got wrong heals itself once instead of teaching every reader a workaround.
+/// Returns whether anything changed.
+pub fn repair(movies: &mut MoviesFile) -> bool {
+    let mut changed = false;
+    for record in &mut movies.progress {
+        if record.imdb.is_none() && record.id.starts_with("tt") {
+            record.imdb = Some(record.id.clone());
+            changed = true;
+        }
+    }
+    // A stand-in record — the one an import wrote before it could recognise the
+    // title — is absorbed into the provider's own. Two records from two **real**
+    // providers are two facts and stay: progress is per provider.
+    let stand_in = |record: &MovieProgress| record.provider.is_empty() || record.provider == "imported";
+    let mut index = 0;
+    while index < movies.progress.len() {
+        let mut other = index + 1;
+        while other < movies.progress.len() {
+            let (same_title, index_stand_in, other_stand_in) = {
+                let a = &movies.progress[index];
+                let b = &movies.progress[other];
+                (a.id == b.id || (a.imdb.is_some() && a.imdb == b.imdb), stand_in(a), stand_in(b))
+            };
+            if !same_title || (!index_stand_in && !other_stand_in) {
+                other += 1;
+                continue;
+            }
+            if index_stand_in && !other_stand_in {
+                movies.progress.swap(index, other);
+            }
+            let merged = movies.progress.remove(other);
+            let into = &mut movies.progress[index];
+            for (key, episode) in merged.episodes {
+                into.episodes.entry(key).or_insert(episode);
+            }
+            into.finished |= merged.finished;
+            changed = true;
+        }
+        index += 1;
+    }
+    changed
+}
+
 pub fn read_movies(app: &AppPaths) -> MoviesFile {
     let path = movies_path(app);
     let mut movies = json_store::read(&path).unwrap_or_else(|error| {
         log::warn!("{}: {error:#}", path.display());
         MoviesFile::default()
     });
+    repair(&mut movies);
     // A record from before providers were recorded is Stremio's; the next
     // write makes it explicit.
     for progress in &mut movies.progress {
@@ -71,7 +119,11 @@ pub fn write_movies(app: &AppPaths, movies: &MoviesFile) -> Result<()> {
 /// `f` must not reach for the same file again — the lock is not reentrant.
 pub fn update_movies<T>(app: &AppPaths, f: impl FnOnce(&mut MoviesFile) -> Result<T>) -> Result<T> {
     let path = movies_path(app);
-    json_store::update(&path, f).with_context(|| format!("updating {}", path.display()))
+    json_store::update(&path, |movies| {
+        repair(movies);
+        f(movies)
+    })
+    .with_context(|| format!("updating {}", path.display()))
 }
 
 pub fn progress_for<'a>(movies: &'a MoviesFile, provider: &str, id: &str) -> Option<&'a MovieProgress> {
@@ -221,6 +273,27 @@ pub fn clear_simkl_client_id(app: &AppPaths) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repair_fills_a_missing_imdb_and_merges_the_duplicate() {
+        let mut movies = MoviesFile::default();
+        // What playback wrote long ago: the id, no imdb.
+        movies.progress.push(MovieProgress { provider: "stremio".into(), id: "tt9".into(), ..MovieProgress::default() });
+        // What the import added because it could not recognise it.
+        let mut imported =
+            MovieProgress { provider: "imported".into(), id: "tt9".into(), imdb: Some("tt9".into()), ..MovieProgress::default() };
+        imported.episodes.insert(
+            "tt9:1:2".into(),
+            heronite_watch_core::types::EpisodeProgress { season: Some(1), number: Some(2), finished: true, ..Default::default() },
+        );
+        movies.progress.push(imported);
+
+        assert!(repair(&mut movies), "something was wrong");
+        assert_eq!(movies.progress.len(), 1, "one record per title");
+        assert_eq!(movies.progress[0].provider, "stremio", "the provider's record is the one kept");
+        assert_eq!(movies.progress[0].imdb.as_deref(), Some("tt9"), "with its id filled in");
+        assert!(movies.progress[0].episodes.contains_key("tt9:1:2"), "and the imported episodes carried over");
+    }
 
     #[test]
     fn a_write_without_an_imdb_does_not_erase_the_one_that_is_there() {
