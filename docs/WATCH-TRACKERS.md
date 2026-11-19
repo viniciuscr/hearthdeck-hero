@@ -70,6 +70,21 @@ A tracker that cannot be used at all (a dead token, a transport that cannot send
 a header) answers `Err`: the drain stops that tracker for the run and keeps the
 event pending, so a re-sign-in picks it up.
 
+### How the facade finds a tracker
+
+A tracker is an **adapter**, not a branch: `TrackerAdapter { id, name, ready(app),
+build(app, http) }`, listed in one place (`trackers::adapters()`). Nothing else in
+the facade names a provider, so a second tracker is a crate plus one line in each
+registry (`adapters()`, `import::providers()`), and the screens ask for names
+(`trackers::name`) rather than mapping them.
+
+### A refusal can name its wait
+
+`Delivery::Retry { reason, after }`: `after` carries the provider's own
+`Retry-After` (Simkl's daily quota resets at midnight US Eastern), and the outbox
+uses it instead of the 1/5/30 ladder. The 20-second write lock stays on the
+ladder — that is a lock, not a quota.
+
 ## The outbox
 
 `heronite_watch_state::tracking` owns it.
@@ -120,6 +135,18 @@ Answers are read by status: `200/201` → check `not_found` (→ `Unmatched`);
 network faults → `Retry`; `401/403` → `Err` with "sign in again"; other `400`/`404`
 → `Unmatched`.
 
+### Lists, outbound
+
+Adding sends `POST /sync/add-to-list` with `to: plantowatch`. Removing sends
+`POST /sync/history/remove`, because Simkl has **no remove-from-list-only** call:
+that endpoint is their own "Remove from list" and it takes the title's watch
+history with it. That is what a person clicking it on simkl.com gets — and it is
+why a removal has to be an explicit act here, never something inferred from a
+title merely being absent.
+
+Favourites and custom lists are PRO/VIP beta (`403 premium_only`), so the adapter
+answers *unmatched* without spending a request instead of failing every drain.
+
 ## When it runs
 
 - the end of a playback (`playback::play`, after both local writes);
@@ -143,6 +170,13 @@ All of them are background tasks; none of them blocks a screen or a playback.
   is the first sync** (the finished history already on the machine, with its own
   timestamps); after that only what happens is sent. The console has the same
   row.
+
+## When it runs
+
+The outbox drains when Sources is opened, after a session ends, and on the row's
+own switch being turned on. The import ticks on the same two moments: its cursor's
+`next_at` decides whether the tick does anything, so a visit inside the interval
+spends nothing and one after it makes a single change query when nothing moved.
 
 ## Not in this slice
 

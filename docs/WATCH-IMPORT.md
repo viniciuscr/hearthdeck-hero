@@ -188,6 +188,25 @@ Source: `https://api.simkl.org/guides/sync`, `.../resources/rate-limits`,
   appears; normalize it at parse time.
 - Do not poll without user interaction.
 
+### 6a. Episodes
+
+A show is never one fact. The pull asks `extended=full&episode_watched_at=yes`, and
+the first pull also `include_all_episodes=yes`, so every watched episode arrives
+with its season, number and stamp; a later delta asks only for what moved.
+`episode_watched_at=yes` shares the show's last-watched stamp across its episodes —
+honest for a one-time baseline, which is why the flag is not `original` there.
+
+Applying an episode matches an existing record by season and number (playback keys
+episodes by the provider's id) and finishes it, with provenance. A title marked
+"not watched" here is never re-finished by a pull.
+
+### 6c. A library too big
+
+`400 {"error":"max_items"}` means "narrow the request", and the ladder is by media
+type, then by status. The pull reads the code from the refused body and walks down
+it, merging what each answer brings; a 400 that is not about size is still an
+error and does not start the ladder.
+
 ## 6b. Provider notes: Trakt (verified against the cached blueprint)
 
 A different shape, not a translation of Simkl's — which is the point of §2.5:
