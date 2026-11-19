@@ -56,6 +56,10 @@ pub struct State {
     /// Titles a tracker refused for good: shown beside the sync state, never as
     /// it (they do not go away when a drain succeeds).
     pub tracker_unmatched: Vec<String>,
+    /// Whether Simkl's history is pulled in automatically, and the last pull's
+    /// sentence ("Brought in 3 titles · 2 hours ago").
+    pub import_simkl: bool,
+    pub import_state: Option<SharedString>,
     /// Whether this visit already asked the trackers to catch up: the page
     /// renders many times, and a drain per frame would be a drain per frame.
     pub trackers_drained: bool,
@@ -99,6 +103,8 @@ impl State {
             tracker_pending: pending.count,
             tracker_error: pending.last_error.map(SharedString::from),
             tracker_unmatched: pending.unmatched,
+            import_simkl: heronite_watch::import::enabled(&ctx.app).contains(&"simkl"),
+            import_state: import_sentence(&ctx.app),
             trackers_drained: false,
             metadata_open: None,
             recap: recap::Recency::default(),
@@ -1026,6 +1032,43 @@ fn set_tracker(d: &mut SettingsPage, id: &str, on: bool, cx: &mut Context<Settin
 }
 
 /// Hands the outbox to the trackers, off the UI thread, then shows what is left.
+/// The sentence the import row shows: what the last pull did.
+fn import_sentence(app: &heronite_data::paths::AppPaths) -> Option<SharedString> {
+    let last = heronite_watch::import::status(app, "simkl")?;
+    Some(match &last.error {
+        Some(error) => tr!("Could not bring anything in: {error}", error = error.clone()).into(),
+        None if last.unchanged || last.watched + last.positions == 0 => tr!("Nothing new the last time it asked.").into(),
+        None => tr!("Brought in {n} titles.", n = last.watched + last.positions).into(),
+    })
+}
+
+/// Turning the pull on runs it once, right away; turning it off leaves what came
+/// in, because imported marks are ordinary history.
+fn set_import(d: &mut SettingsPage, provider: &str, on: bool, cx: &mut Context<SettingsPage>) {
+    if let Err(error) = heronite_watch::import::set_enabled(&d.ctx.app, provider, on) {
+        log::warn!("saving the Watch settings: {error:#}");
+    }
+    d.watch.import_simkl = heronite_watch::import::enabled(&d.ctx.app).contains(&"simkl");
+    if !on {
+        d.watch.import_state = None;
+        cx.notify();
+        return;
+    }
+    let app = d.ctx.app.clone();
+    cx.spawn(async move |this, cx| {
+        let ran = cx.background_spawn(async move { heronite_watch::import::tick(&app) }).await;
+        this.update(cx, |d, cx| {
+            if let Some((_, Ok(report))) = ran.into_iter().next() {
+                d.watch.notice = Some(tr!("Brought in {n} titles.", n = report.watched + report.positions).into());
+            }
+            d.watch.import_state = import_sentence(&d.ctx.app);
+            cx.notify();
+        })
+        .ok();
+    })
+    .detach();
+}
+
 fn drain_trackers(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
     d.watch.notice = None;
     let app = d.ctx.app.clone();
@@ -1511,6 +1554,17 @@ pub(crate) fn source_rows(d: &SettingsPage) -> Vec<Row> {
                 Row::toggle(SharedString::from(format!("watch-tracker:{id}")), SharedString::from(tracker_name(&id)), on)
                     .desc(tracker_state(d)),
             );
+            // The other direction, a separate switch: reading never queues a
+            // backfill of what was watched here.
+            let pulling = heronite_watch::import::enabled(&d.ctx.app).iter().any(|pulled| *pulled == id);
+            rows.push(
+                Row::toggle(
+                    SharedString::from(format!("watch-import:{id}")),
+                    tr!("Bring in what I watched in {provider}", provider = tracker_name(&id)),
+                    pulling,
+                )
+                .desc(d.watch.import_state.clone().unwrap_or_else(|| tr!("Automatic while Watch is open.").into())),
+            );
         }
     }
     rows
@@ -1535,6 +1589,10 @@ pub(crate) fn source_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut
         Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-tracker:") => {
             let tracker = id.trim_start_matches("watch-tracker:").to_owned();
             set_tracker(d, &tracker, on, cx);
+        }
+        Outcome::Changed(id, Value::Toggle(on)) if id.starts_with("watch-import:") => {
+            let provider = id.trim_start_matches("watch-import:").to_owned();
+            set_import(d, &provider, on, cx);
         }
         _ => {}
     }

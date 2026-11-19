@@ -113,6 +113,27 @@ pub fn record_result(cursor: &mut cursor::Cursor, result: &Result<Report>, now: 
     }
 }
 
+/// The pullers the person turned on.
+pub fn enabled(app: &AppPaths) -> Vec<&'static str> {
+    let ids = heronite_watch_state::settings::read(app).import_providers;
+    providers().iter().filter(|sync| ids.iter().any(|id| id == sync.id())).map(|sync| sync.id()).collect()
+}
+
+/// Turns one provider's automatic pull on or off.
+pub fn set_enabled(app: &AppPaths, provider: &str, on: bool) -> Result<()> {
+    let mut settings = heronite_watch_state::settings::read(app);
+    settings.import_providers.retain(|id| id != provider);
+    if on {
+        settings.import_providers.push(provider.to_owned());
+    }
+    heronite_watch_state::settings::write(app, &settings)
+}
+
+/// What the last pull did, for the settings row.
+pub fn status(app: &AppPaths, provider: &str) -> Option<cursor::LastImport> {
+    cursor::read(app, provider).last
+}
+
 /// Every enabled provider whose pull is due, run once. Called from the app on a
 /// timer, on opening Watch, and after a playback: never from a background service.
 pub fn tick(app: &AppPaths) -> Vec<(&'static str, Result<Report>)> {
