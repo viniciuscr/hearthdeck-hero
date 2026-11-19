@@ -540,6 +540,22 @@ impl CollectionView {
 
     /// Hands the tracker outbox to the trackers, off the UI thread: the mark is
     /// saved here and sent when the network lets it.
+    /// Fifteen minutes between attempts while the Watch space is in use. The
+    /// import's cursor decides whether the tick calls anything, so this is a clock
+    /// rather than a schedule: a screen that redraws a hundred times spends nothing.
+    pub(super) fn watch_import_tick(&mut self, cx: &mut Context<Self>) {
+        use std::time::{Duration, Instant};
+        const EVERY: Duration = Duration::from_secs(15 * 60);
+        if !matches!(self.space, crate::collection::Space::Watch) {
+            return;
+        }
+        if self.import_ticked_at.is_some_and(|at| at.elapsed() < EVERY) {
+            return;
+        }
+        self.import_ticked_at = Some(Instant::now());
+        self.watch_tick_imports(cx);
+    }
+
     /// Asks the pull to catch up after a session: the cursor's own schedule decides
     /// whether it runs, so this is one request at most, and never on the UI thread.
     fn watch_tick_imports(&mut self, cx: &mut Context<Self>) {

@@ -181,6 +181,10 @@ impl Space {
 
 pub struct CollectionView {
     started: Instant,
+    /// When the import was last asked (Watch space only). The import's own cursor
+    /// decides whether a tick does anything; this is only a clock, so a screen that
+    /// redraws constantly does not ask the providers constantly.
+    import_ticked_at: Option<Instant>,
     first_frame_logged: bool,
     data_paths: DataPaths,
     app_paths: AppPaths,
@@ -516,6 +520,7 @@ impl CollectionView {
         let onboarding = onboarding::OnboardingGlue::load(&app_paths);
         let mut this = Self {
             started,
+            import_ticked_at: None,
             first_frame_logged: false,
             data_paths,
             app_paths,
@@ -799,6 +804,7 @@ impl Render for CollectionView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.schedule_ui_save(cx);
         self.ensure_hltb_for_focus(cx);
+        self.watch_import_tick(cx);
         self.render_desktop(window, cx)
     }
 }
