@@ -23,6 +23,12 @@ pub const DIR: &str = "watch-import";
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cursor {
+    /// The build that wrote this cursor. A pull that changes what it asks for
+    /// (episodes, list membership) bumps it, and an older cursor is refetched as a
+    /// baseline: a snapshot sends only deltas, so the rows a previous build skipped
+    /// would otherwise never arrive.
+    #[serde(default)]
+    pub schema: u32,
     /// The provider's own snapshot (Simkl's activities, Trakt's last_activities):
     /// stored verbatim, never interpreted here.
     #[serde(default)]
@@ -58,6 +64,10 @@ pub struct LastImport {
     /// The change query said nothing moved: no pull ran.
     #[serde(default)]
     pub unchanged: bool,
+    /// Titles the provider knows and no source here has: they arrived as greyed
+    /// placeholders, which is still bringing them in.
+    #[serde(default)]
+    pub placeholders: usize,
     /// Rows the pull could not place (no id, no episode number, a bucket Simkl
     /// refused even after splitting). A screen reads it to say the library is not
     /// whole.

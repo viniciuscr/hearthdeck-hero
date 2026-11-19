@@ -31,6 +31,11 @@ use crate::trackers;
 /// How long after a delivery our own write is still "not news".
 const ECHO: chrono::Duration = chrono::Duration::minutes(5);
 
+/// What the current pull asks for. Bumped when a pull's shape changes, so a cursor
+/// written by an older build is refetched as a baseline: a snapshot sends only
+/// deltas, and the rows a previous build skipped would never arrive otherwise.
+pub const CURSOR_SCHEMA: u32 = 1;
+
 /// What one import did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
@@ -131,6 +136,7 @@ pub fn record_result(cursor: &mut cursor::Cursor, result: &Result<Report>, now: 
                 positions: report.positions,
                 unchanged: report.unchanged,
                 skipped: report.skipped,
+                placeholders: report.no_local,
                 error: None,
             });
         }
@@ -143,6 +149,7 @@ pub fn record_result(cursor: &mut cursor::Cursor, result: &Result<Report>, now: 
                 positions: 0,
                 unchanged: false,
                 skipped: 0,
+                placeholders: 0,
                 error: Some(format!("{error:#}")),
             });
         }
@@ -206,7 +213,11 @@ pub fn run_with(app: &AppPaths, sync: &dyn WatchSync, ctx: &Ctx<'_>) -> Result<R
     let provider = sync.id();
     let stored = cursor::read(app, provider);
     let now = sync.snapshot(ctx)?;
-    let since = (!stored.snapshot.is_null()).then(|| stored.snapshot.clone());
+    let stale = stored.schema < CURSOR_SCHEMA;
+    if stale && !stored.snapshot.is_null() {
+        log::info!("{provider}: the saved cursor predates this build's pull; fetching the whole history once");
+    }
+    let since = (!stale && !stored.snapshot.is_null()).then(|| stored.snapshot.clone());
 
     if let Some(since) = since.as_ref() {
         if sync.unchanged(since, &now) {
@@ -233,6 +244,7 @@ pub fn run_with(app: &AppPaths, sync: &dyn WatchSync, ctx: &Ctx<'_>) -> Result<R
     // Last, and only now: a failed apply leaves the cursor where it was, so the
     // next run asks for the same window again.
     cursor::update(app, provider, |cursor| {
+        cursor.schema = CURSOR_SCHEMA;
         cursor.snapshot = now;
         // What the lists hold *now*: the base the next removal is found against.
         cursor.list_ids = seen;
@@ -838,6 +850,49 @@ mod tests {
         assert_eq!(report.pushes[0].list, "watchlist");
         assert!(report.pushes[0].member, "an add, not a removal");
         assert_eq!(report.pushes[0].title.imdb.as_deref(), Some("tt1"), "the local entry names it");
+    }
+
+    /// A puller that remembers the window it was asked for.
+    struct Recording {
+        pulled: Pulled,
+        since: std::sync::Mutex<Option<Value>>,
+    }
+
+    impl WatchSync for Recording {
+        fn id(&self) -> &'static str {
+            "simkl"
+        }
+        fn name(&self) -> &'static str {
+            "Simkl"
+        }
+        fn snapshot(&self, _: &Ctx<'_>) -> Result<Value> {
+            Ok(serde_json::json!({"all": "2026-02-01T00:00:00Z"}))
+        }
+        fn unchanged(&self, _: &Value, _: &Value) -> bool {
+            false
+        }
+        fn pull(&self, _: &Ctx<'_>, since: Option<&Value>) -> Result<Pulled> {
+            *self.since.lock().unwrap() = since.cloned();
+            Ok(self.pulled.clone())
+        }
+    }
+
+    #[test]
+    fn a_cursor_from_an_older_build_is_fetched_as_a_baseline() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        // What the build before episodes left behind: a snapshot and no schema.
+        cursor::update(&app, "simkl", |cursor| {
+            cursor.snapshot = serde_json::json!({"all": "2026-01-01T00:00:00Z"});
+            cursor.last_pull_at = Some(Utc::now());
+            Ok(())
+        })
+        .unwrap();
+
+        let sync = Recording { pulled: Pulled::default(), since: Default::default() };
+        let _ = run(&app, &sync).unwrap();
+        assert!(sync.since.lock().unwrap().is_none(), "an old cursor must not narrow the pull to a delta");
+        assert_eq!(cursor::read(&app, "simkl").schema, CURSOR_SCHEMA, "and the cursor is stamped");
     }
 
     struct FakeSync {
