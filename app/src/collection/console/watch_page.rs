@@ -834,6 +834,7 @@ mod tests {
             video_id: None,
             imdb: Some("tt1".into()),
             episodes: Default::default(),
+            ..Default::default()
         };
         assert_eq!(title_status(Some(&progress), "movie", None).as_deref(), Some("In progress · 40%"));
 
@@ -850,6 +851,7 @@ mod tests {
                     finished: true,
                     season: Some(1),
                     number: Some(number),
+                    ..Default::default()
                 },
             );
         }

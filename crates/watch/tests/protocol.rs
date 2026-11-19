@@ -205,6 +205,7 @@ fn progress_writes_the_full_record_and_the_probe_is_a_no_op() {
         video_id: None,
         imdb: None,
         episodes: Default::default(),
+        ..Default::default()
     };
     let item = write_progress(&client, &progress).unwrap();
     assert_eq!(item.id, "tt26657236");

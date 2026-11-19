@@ -64,6 +64,16 @@ pub fn write_movies(app: &AppPaths, movies: &MoviesFile) -> Result<()> {
     json_store::write(&path, movies).with_context(|| format!("writing {}", path.display()))
 }
 
+/// Applies `f` to `movies.json` under the one per-path lock every writer takes
+/// (`json_store::update`): a playback being saved and a mark pressed at the same
+/// moment can no longer lose each other's write.
+///
+/// `f` must not reach for the same file again — the lock is not reentrant.
+pub fn update_movies<T>(app: &AppPaths, f: impl FnOnce(&mut MoviesFile) -> Result<T>) -> Result<T> {
+    let path = movies_path(app);
+    json_store::update(&path, f).with_context(|| format!("updating {}", path.display()))
+}
+
 pub fn progress_for<'a>(movies: &'a MoviesFile, provider: &str, id: &str) -> Option<&'a MovieProgress> {
     movies.progress.iter().find(|progress| progress.provider == provider && progress.id == id)
 }
@@ -226,12 +236,43 @@ mod tests {
                 video_id: None,
                 imdb: None,
                 episodes: Default::default(),
+                ..Default::default()
             },
         );
         write_movies(&app, &movies).unwrap();
         let read = read_movies(&app);
         assert_eq!(read.progress.len(), 1);
         assert_eq!(progress_for(&read, "stremio", "tt1").unwrap().position_ms, 1000);
+    }
+
+    #[test]
+    fn an_update_reads_and_writes_under_the_same_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = paths(dir.path());
+        for (id, position) in [("tt1", 1000), ("tt2", 2000)] {
+            update_movies(&app, |movies| {
+                upsert_progress(
+                    movies,
+                    MovieProgress {
+                        provider: "stremio".into(),
+                        id: id.into(),
+                        position_ms: position,
+                        duration_ms: 4000,
+                        updated_at: Utc::now(),
+                        finished: false,
+                        video_id: None,
+                        imdb: None,
+                        episodes: Default::default(),
+                        ..Default::default()
+                    },
+                );
+                Ok(())
+            })
+            .unwrap();
+        }
+        let movies = read_movies(&app);
+        assert_eq!(movies.progress.len(), 2, "one write cannot lose the other");
+        assert_eq!(progress_for(&movies, "stremio", "tt2").unwrap().position_ms, 2000);
     }
 
     #[test]
@@ -301,6 +342,7 @@ mod tests {
             video_id: None,
             imdb: None,
             episodes: Default::default(),
+            ..Default::default()
         }
     }
 }

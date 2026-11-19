@@ -22,7 +22,7 @@ use serde_json::{Map, Value};
 
 use heronite_data::json_store;
 use heronite_data::paths::AppPaths;
-use heronite_watch_core::tracker::TrackEvent;
+use heronite_watch_core::tracker::{TrackEvent, TrackedTitle, TrackedView};
 
 /// The file, under the app's config folder, like `movies.json`.
 pub const FILE: &str = "watch-tracking.json";
@@ -33,6 +33,15 @@ pub const MAX_EVENTS: usize = 500;
 
 /// Refusals remembered for the settings card, newest first.
 pub const MAX_NOTICES: usize = 8;
+
+/// Deliveries remembered for echo suppression, and for how long. Bounded because
+/// it is a hint, not a record: an old delivery no longer needs suppressing.
+pub const MAX_PUSHED: usize = 64;
+pub const PUSHED_FOR: chrono::Duration = chrono::Duration::hours(24);
+
+/// How long a queued event blocks an import for its title: the sum of the retry
+/// ladder, after which the outbox is out of cheap options and the pull may run.
+pub const PENDING_HORIZON: chrono::Duration = chrono::Duration::minutes(36);
 
 /// How long to wait before asking again, in minutes, by attempt. After the list
 /// runs out the wait stays at its last value; the next app start drains anyway.
@@ -51,6 +60,11 @@ pub struct TrackingFile {
     /// "could not be matched", not as a fault.
     #[serde(default)]
     pub notices: Vec<String>,
+    /// What was delivered recently: an import ignores a provider fact about one of
+    /// these, because it is our own write coming back. Pruned by `prune`, unlike
+    /// `events`.
+    #[serde(default)]
+    pub pushed: Vec<PushedRecord>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -62,6 +76,26 @@ pub struct QueuedEvent {
     pub event: TrackEvent,
     #[serde(default)]
     pub trackers: BTreeMap<String, TrackerState>,
+    /// When it was queued (not when it happened): the clock the pending horizon
+    /// runs on. Absent in a file written before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_at: Option<DateTime<Utc>>,
+}
+
+impl QueuedEvent {
+    /// When it entered the outbox, falling back to the event's own time.
+    pub fn since(&self) -> DateTime<Utc> {
+        self.queued_at.unwrap_or(self.event.at)
+    }
+}
+
+/// One delivery, kept so a pull can recognise its own echo.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushedRecord {
+    pub delivered_at: DateTime<Utc>,
+    pub title: heronite_watch_core::tracker::TrackedTitle,
+    pub view: heronite_watch_core::tracker::TrackedView,
 }
 
 /// A tracker's standing on one event.
@@ -130,9 +164,10 @@ pub fn queue(file: &mut TrackingFile, mut event: TrackEvent) -> TrackEvent {
     // it, the pair are two things that happened.
     let waiting =
         file.events.iter().position(|queued| queued.event.same_target(&event) && queued.trackers.values().all(|state| !state.done));
+    let fresh = QueuedEvent { event: event.clone(), trackers: BTreeMap::new(), queued_at: Some(Utc::now()) };
     match waiting {
-        Some(index) => file.events[index] = QueuedEvent { event: event.clone(), trackers: BTreeMap::new() },
-        None => file.events.push(QueuedEvent { event: event.clone(), trackers: BTreeMap::new() }),
+        Some(index) => file.events[index] = fresh,
+        None => file.events.push(fresh),
     }
     trim(file);
     event
@@ -192,6 +227,41 @@ fn trim(file: &mut TrackingFile) {
         let excess = file.events.len() - MAX_EVENTS;
         file.events.drain(..excess);
     }
+    let now = Utc::now();
+    file.pushed.retain(|record| now.signed_duration_since(record.delivered_at) < PUSHED_FOR);
+    if file.pushed.len() > MAX_PUSHED {
+        let excess = file.pushed.len() - MAX_PUSHED;
+        file.pushed.drain(..excess);
+    }
+}
+
+/// Notes a delivery: the import ignores a provider fact for this target while it
+/// is recent (our own write coming back).
+pub fn record_pushed(file: &mut TrackingFile, event: &TrackEvent, at: DateTime<Utc>) {
+    file.pushed.push(PushedRecord { delivered_at: at, title: event.title.clone(), view: event.view.clone() });
+    trim(file);
+}
+
+/// Whether this target was delivered inside `window` — the echo test.
+pub fn pushed_within(file: &TrackingFile, title: &TrackedTitle, view: &TrackedView, window: chrono::Duration, now: DateTime<Utc>) -> bool {
+    file.pushed.iter().any(|record| {
+        record.view == *view
+            && record.title.is(title.imdb.as_deref(), &title.title)
+            && now.signed_duration_since(record.delivered_at) < window
+    })
+}
+
+/// Whether a title or episode still has an event the outbox is working on. A
+/// pull skips it: importing first would race our own write.
+pub fn pending_for(file: &TrackingFile, title: &TrackedTitle, view: &TrackedView, now: DateTime<Utc>) -> bool {
+    file.events.iter().any(|queued| {
+        queued.event.title.is(title.imdb.as_deref(), &title.title)
+            && queued.event.view == *view
+            // An event nobody has attempted yet is pending too: an empty map is
+            // not "everyone is done".
+            && (queued.trackers.is_empty() || queued.trackers.values().any(|state| !state.done))
+            && now.signed_duration_since(queued.since()) < PENDING_HORIZON
+    })
 }
 
 /// How many events are still owed to at least one enabled tracker.
@@ -379,5 +449,81 @@ mod tests {
         json_store::write(&path(&app), &value).unwrap();
         let read_back = read(&app);
         assert_eq!(read_back.extra.get("somethingNew"), Some(&serde_json::json!(true)));
+    }
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::*;
+    use heronite_watch_core::tracker::TrackedWatch;
+
+    fn title() -> TrackedTitle {
+        TrackedTitle { imdb: Some("tt1".into()), kind: "series".into(), title: "A Show".into(), year: Some("2011".into()) }
+    }
+
+    fn event() -> TrackEvent {
+        TrackEvent {
+            seq: 0,
+            at: Utc::now(),
+            title: title(),
+            view: TrackedView::Episode { season: 1, number: 2 },
+            watch: TrackedWatch::Watched,
+        }
+    }
+
+    fn episode() -> TrackedView {
+        TrackedView::Episode { season: 1, number: 2 }
+    }
+
+    #[test]
+    fn a_delivery_is_remembered_and_prune_keeps_the_evidence() {
+        let mut file = TrackingFile::default();
+        let event = queue(&mut file, event());
+        delivered(&mut file.events[0], "simkl");
+        record_pushed(&mut file, &event, Utc::now());
+        prune(&mut file, &["simkl".to_owned()]);
+        assert!(file.events.is_empty(), "the outbox is done with it");
+        assert_eq!(file.pushed.len(), 1, "the delivery survives the prune");
+    }
+
+    #[test]
+    fn a_pushed_target_is_recognised_inside_the_window_only() {
+        let mut file = TrackingFile::default();
+        record_pushed(&mut file, &event(), Utc::now());
+        assert!(pushed_within(&file, &title(), &episode(), chrono::Duration::minutes(5), Utc::now()));
+        assert!(
+            !pushed_within(&file, &title(), &TrackedView::Movie, chrono::Duration::minutes(5), Utc::now()),
+            "another view is another target"
+        );
+        let later = Utc::now() + chrono::Duration::minutes(10);
+        assert!(!pushed_within(&file, &title(), &episode(), chrono::Duration::minutes(5), later), "the window closed");
+    }
+
+    #[test]
+    fn the_pushed_log_is_bounded() {
+        let mut file = TrackingFile::default();
+        for _ in 0..(MAX_PUSHED + 10) {
+            record_pushed(&mut file, &event(), Utc::now());
+        }
+        assert_eq!(file.pushed.len(), MAX_PUSHED);
+    }
+
+    #[test]
+    fn pending_is_true_while_fresh_and_false_after_the_horizon() {
+        let mut file = TrackingFile::default();
+        queue(&mut file, event());
+        assert!(pending_for(&file, &title(), &episode(), Utc::now()), "never attempted is pending");
+        let later = Utc::now() + PENDING_HORIZON + chrono::Duration::minutes(1);
+        assert!(!pending_for(&file, &title(), &episode(), later), "the ladder is spent, the pull may run");
+        delivered(&mut file.events[0], "simkl");
+        assert!(!pending_for(&file, &title(), &episode(), Utc::now()), "delivered is not pending");
+    }
+
+    #[test]
+    fn another_title_is_not_pending() {
+        let mut file = TrackingFile::default();
+        queue(&mut file, event());
+        let other = TrackedTitle { imdb: Some("tt9".into()), ..title() };
+        assert!(!pending_for(&file, &other, &episode(), Utc::now()));
     }
 }

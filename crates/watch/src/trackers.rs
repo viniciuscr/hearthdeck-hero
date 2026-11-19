@@ -104,6 +104,18 @@ pub fn record_manual(app: &AppPaths, title: TrackedTitle, view: TrackedView, wat
     queue(app, TrackEvent { seq: 0, at: Utc::now(), title, view, watch });
 }
 
+/// Whether the outbox is still working on this title or episode: a pull skips it
+/// rather than racing our own write.
+pub fn pending_for(app: &AppPaths, title: &TrackedTitle, view: &TrackedView) -> bool {
+    tracking::pending_for(&tracking::read(app), title, view, Utc::now())
+}
+
+/// Whether this target was delivered inside `window` — the echo test a pull uses
+/// to recognise its own write.
+pub fn pushed_within(app: &AppPaths, title: &TrackedTitle, view: &TrackedView, window: chrono::Duration) -> bool {
+    tracking::pushed_within(&tracking::read(app), title, view, window, Utc::now())
+}
+
 /// What is waiting, for a screen to show.
 pub fn pending(app: &AppPaths) -> Pending {
     let enabled = enabled(app);
@@ -180,11 +192,13 @@ pub fn drain(app: &AppPaths) -> Result<Report> {
     report.failed = failed;
 
     tracking::update(app, |file| {
+        let mut delivered: Vec<TrackEvent> = Vec::new();
         for (id, seq, delivery) in results {
             match delivery {
                 Delivery::Delivered => {
                     if let Some(queued) = queued_mut(file, seq) {
                         tracking::delivered(queued, id);
+                        delivered.push(queued.event.clone());
                     }
                 }
                 Delivery::Unmatched(reason) => tracking::unmatched(file, seq, id, &reason, now),
@@ -194,6 +208,11 @@ pub fn drain(app: &AppPaths) -> Result<Report> {
                     }
                 }
             }
+        }
+        // Our own write, remembered so a pull ignores it coming back — and noted
+        // before `prune`, which would otherwise erase the evidence.
+        for event in delivered {
+            tracking::record_pushed(file, &event, now);
         }
         tracking::prune(file, &enabled);
         report.pending = tracking::pending(file, &enabled);
@@ -403,6 +422,7 @@ mod tests {
             video_id: None,
             imdb: Some("tt1".into()),
             episodes: Default::default(),
+            ..Default::default()
         };
         record_playback(&app, &request(None), Some(&previous), &outcome(600_000, 6_000_000));
         assert!(tracking::read(&app).events.is_empty(), "a rewatch stopped part-way is not a paused playback");

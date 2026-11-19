@@ -41,6 +41,16 @@ pub trait Transport: Send + Sync {
         anyhow::bail!("this transport cannot read a redirect's Location")
     }
 
+    /// A GET carrying `Authorization: Bearer <token>` whose **status and body**
+    /// both come back: an importer reads what a refusal says (`400 max_items`
+    /// asks for a narrower pull) instead of treating it as an opaque fault. A
+    /// transport that cannot send headers says so rather than sending the
+    /// request unauthenticated.
+    fn get_bearer_answer(&self, url: &Url, token: &str) -> Result<(u16, Vec<u8>)> {
+        let _ = (url, token);
+        anyhow::bail!("this transport cannot carry an Authorization header")
+    }
+
     /// A GET carrying `Authorization: Bearer <token>`: what TMDB's v4 endpoints
     /// take instead of a key in the query. A transport that cannot send headers
     /// says so rather than sending an unauthenticated request that would come
@@ -145,6 +155,11 @@ impl Transport for UreqTransport {
     }
 
     fn get_bearer(&self, url: &Url, token: &str) -> Result<Vec<u8>> {
+        let (status, bytes) = self.get_bearer_answer(url, token)?;
+        accepted(url, status, bytes)
+    }
+
+    fn get_bearer_answer(&self, url: &Url, token: &str) -> Result<(u16, Vec<u8>)> {
         let mut response = self
             .agent
             .get(url.as_str())
@@ -154,7 +169,9 @@ impl Transport for UreqTransport {
             .header("authorization", format!("Bearer {token}"))
             .call()
             .map_err(|e| transport_error(url, e))?;
-        read(url, &mut response, self.max_bytes)
+        let status = response.status().as_u16();
+        let bytes = response.body_mut().with_config().limit(self.max_bytes).read_to_vec().map_err(|e| anyhow!("{}", failure(url, e)))?;
+        Ok((status, bytes))
     }
 
     fn post_json(&self, url: &Url, body: &Value) -> Result<Vec<u8>> {
@@ -264,6 +281,21 @@ mod tests {
         let (status, body) = UreqTransport::new().post_json_answer(&url, &serde_json::json!({})).expect("the answer is read");
         assert_eq!(status, 400);
         assert_eq!(String::from_utf8_lossy(&body), r#"{"error":"authorization_pending"}"#, "the OAuth error code is the protocol");
+    }
+
+    #[test]
+    fn a_bearer_get_keeps_the_body_of_a_refused_answer() {
+        let url = answer_once(400, r#"{"error":"max_items"}"#);
+        let (status, body) = UreqTransport::new().get_bearer_answer(&url, "token").expect("the answer is read");
+        assert_eq!(status, 400);
+        assert_eq!(String::from_utf8_lossy(&body), r#"{"error":"max_items"}"#, "an importer reads the refusal to split the pull");
+    }
+
+    #[test]
+    fn a_bearer_get_without_the_body_still_reports_the_status() {
+        let url = answer_once(404, "{}");
+        let error = UreqTransport::new().get_bearer(&url, "token").expect_err("a refusal is an error on this path");
+        assert_eq!(http_status(&error), Some(404));
     }
 
     #[test]

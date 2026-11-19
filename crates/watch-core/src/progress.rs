@@ -121,7 +121,7 @@ mod tests {
     use chrono::Utc;
 
     fn episode(position_ms: u64, duration_ms: u64, finished: bool) -> EpisodeProgress {
-        EpisodeProgress { position_ms, duration_ms, updated_at: Utc::now(), finished, season: None, number: None }
+        EpisodeProgress { position_ms, duration_ms, updated_at: Utc::now(), finished, season: None, number: None, ..Default::default() }
     }
 
     fn record(position_ms: u64, duration_ms: u64, finished: bool) -> MovieProgress {
@@ -135,6 +135,7 @@ mod tests {
             video_id: None,
             imdb: Some("tt1".into()),
             episodes: Default::default(),
+            ..Default::default()
         }
     }
 

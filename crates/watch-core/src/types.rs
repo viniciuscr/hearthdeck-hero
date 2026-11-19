@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -84,6 +84,22 @@ impl StreamChoice {
     }
 }
 
+/// Who wrote a fact: this machine, or a provider it was pulled from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Origin {
+    /// This machine wrote it (a playback, a mark).
+    #[default]
+    Local,
+    /// A pull wrote it from a provider.
+    Imported,
+}
+
+/// `true` is the interesting value; a false one is left out of the file.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Local, non-secret progress. Stremio remains the cross-device source.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MovieProgress {
@@ -109,6 +125,46 @@ pub struct MovieProgress {
     pub finished: bool,
     #[serde(default)]
     pub video_id: Option<String>,
+    /// Who last wrote this record: `local` for anything this machine wrote,
+    /// `imported` for a pull. Informational — playing never reads it.
+    #[serde(default)]
+    pub origin: Origin,
+    /// The provider a fact came from, when imported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_at: Option<DateTime<Utc>>,
+    /// The provider's own stamp for the fact — never our clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_updated_at: Option<DateTime<Utc>>,
+    /// Marked "not watched" by hand here: an import must never re-finish it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unwatched: bool,
+    /// Fields a newer build wrote; kept so a downgrade cannot drop them.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl Default for MovieProgress {
+    fn default() -> Self {
+        Self {
+            imdb: None,
+            episodes: Default::default(),
+            provider: String::new(),
+            id: String::new(),
+            position_ms: 0,
+            duration_ms: 0,
+            updated_at: DateTime::<Utc>::MIN_UTC,
+            finished: false,
+            video_id: None,
+            origin: Origin::Local,
+            imported_from: None,
+            imported_at: None,
+            remote_updated_at: None,
+            unwatched: false,
+            extra: Map::new(),
+        }
+    }
 }
 
 /// One episode's state: where it stands and whether it was finished. Kept per
@@ -131,4 +187,84 @@ pub struct EpisodeProgress {
     pub season: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
+    /// Who last wrote this episode: `local` or `imported` (see `MovieProgress`).
+    #[serde(default)]
+    pub origin: Origin,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_updated_at: Option<DateTime<Utc>>,
+    /// Marked "not watched" by hand: an import must never re-finish it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unwatched: bool,
+    /// Fields a newer build wrote; kept so a downgrade cannot drop them.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl Default for EpisodeProgress {
+    fn default() -> Self {
+        Self {
+            position_ms: 0,
+            duration_ms: 0,
+            updated_at: DateTime::<Utc>::MIN_UTC,
+            finished: false,
+            season: None,
+            number: None,
+            origin: Origin::Local,
+            imported_from: None,
+            imported_at: None,
+            remote_updated_at: None,
+            unwatched: false,
+            extra: Map::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_record_written_before_the_new_fields_still_reads() {
+        let old = r#"{"provider":"stremio","id":"tt1","position_ms":10,"duration_ms":20,
+                      "updated_at":"2026-01-01T00:00:00Z","finished":false}"#;
+        let record: MovieProgress = serde_json::from_str(old).expect("an old file still reads");
+        assert_eq!(record.origin, Origin::Local);
+        assert!(!record.unwatched);
+        assert!(record.imported_from.is_none() && record.imported_at.is_none());
+        assert!(record.extra.is_empty());
+    }
+
+    #[test]
+    fn a_field_from_a_newer_build_survives_a_write() {
+        let future = r#"{"provider":"stremio","id":"tt1","position_ms":0,"duration_ms":0,
+                         "updated_at":"2026-01-01T00:00:00Z","finished":false,"whatever":7}"#;
+        let record: MovieProgress = serde_json::from_str(future).expect("reads");
+        assert_eq!(record.extra.get("whatever"), Some(&serde_json::json!(7)));
+        let text = serde_json::to_string(&record).unwrap();
+        assert!(text.contains("\"whatever\":7"), "{text}");
+    }
+
+    #[test]
+    fn an_imported_episode_says_so_in_camel_case() {
+        let mut episode = EpisodeProgress { finished: true, ..EpisodeProgress::default() };
+        episode.origin = Origin::Imported;
+        episode.imported_from = Some("simkl".into());
+        episode.remote_updated_at = Some(DateTime::<Utc>::UNIX_EPOCH);
+        let text = serde_json::to_string(&episode).unwrap();
+        assert!(text.contains("\"origin\":\"imported\""), "{text}");
+        assert!(text.contains("\"importedFrom\":\"simkl\""), "{text}");
+        assert!(text.contains("\"remoteUpdatedAt\""), "{text}");
+        assert!(!text.contains("\"unwatched\""), "a false marker is left out: {text}");
+    }
+
+    #[test]
+    fn an_unwatched_mark_is_written() {
+        let record = MovieProgress { unwatched: true, ..Default::default() };
+        let text = serde_json::to_string(&record).unwrap();
+        assert!(text.contains("\"unwatched\":true"), "{text}");
+    }
 }

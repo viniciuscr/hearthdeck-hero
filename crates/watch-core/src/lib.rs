@@ -12,6 +12,7 @@ pub mod metadata;
 pub mod personal;
 pub mod progress;
 pub mod provider;
+pub mod sync_rules;
 pub mod tracker;
 pub mod types;
 

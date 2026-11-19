@@ -105,6 +105,7 @@ mod tests {
             video_id: video.map(str::to_owned),
             imdb: Some("tt1".into()),
             episodes: Default::default(),
+            ..Default::default()
         }
     }
 

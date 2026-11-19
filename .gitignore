@@ -1,3 +1,6 @@
 /target
 /dist
 /packaging/flatpak/cargo-sources.json
+
+# Local-only reference copies for agent reviews (not shipped, not committed)
+.cache/

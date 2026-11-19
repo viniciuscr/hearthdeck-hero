@@ -62,6 +62,18 @@ pub struct TrackEvent {
     pub watch: TrackedWatch,
 }
 
+impl TrackedTitle {
+    /// Whether this names the same title as `imdb`/`title` — the identity rule
+    /// [`TrackEvent::same_target`] uses, exposed for callers holding only a
+    /// record (the pushed log, an import).
+    pub fn is(&self, imdb: Option<&str>, title: &str) -> bool {
+        match (&self.imdb, imdb) {
+            (Some(one), Some(two)) => one == two,
+            _ => self.title == title,
+        }
+    }
+}
+
 impl TrackEvent {
     /// Whether `other` describes the same thing: the same title, the same episode
     /// (or the same film). The outbox folds those into the newest, so a

@@ -227,6 +227,7 @@ fn record(
                 finished,
                 season: request.season,
                 number: request.number,
+                ..Default::default()
             },
         );
     }
@@ -247,10 +248,12 @@ fn record(
             .or_else(|| Some(id.to_owned())),
         imdb: imdb.map(str::to_owned).or_else(|| previous.and_then(|progress| progress.imdb.clone())),
         episodes,
+        ..Default::default()
     };
-    let mut movies = store::read_movies(app);
-    store::upsert_progress(&mut movies, progress.clone());
-    if let Err(error) = store::write_movies(app, &movies) {
+    if let Err(error) = store::update_movies(app, |movies| {
+        store::upsert_progress(movies, progress.clone());
+        Ok(())
+    }) {
         log::warn!("saving watch progress: {error:#}");
         return;
     }
@@ -274,6 +277,7 @@ mod tests {
             video_id: None,
             imdb: None,
             episodes: Default::default(),
+            ..Default::default()
         }
     }
 
@@ -378,6 +382,7 @@ mod tests {
             video_id: Some("tt1:1:2".into()),
             imdb: Some("tt1".into()),
             episodes: Default::default(),
+            ..Default::default()
         };
         record(&app, &NoopProvider, &ctx, &request("tt1", None), Some(&previous), &PlaybackOutcome { position_ms: 500, duration_ms: 1000 });
 
@@ -493,6 +498,7 @@ mod tests {
             video_id: None,
             imdb: None,
             episodes: Default::default(),
+            ..Default::default()
         };
         assert_eq!(resume_at(&huge), None);
         assert!(finished(u64::MAX, u64::MAX));

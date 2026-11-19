@@ -175,6 +175,7 @@ impl WatchProvider for Stremio {
             // were finished: that is only known here.
             imdb: Some(item.id.clone()).filter(|id| id.starts_with("tt")),
             episodes: std::collections::BTreeMap::new(),
+            ..Default::default()
         }))
     }
 

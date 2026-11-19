@@ -8,9 +8,8 @@
 //! the same record a playback would and then queues the tracker event, so a tick
 //! and an ending episode reach Simkl the same way.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
-use heronite_data::json_store;
 use heronite_data::paths::AppPaths;
 pub use heronite_watch_core::progress::WatchedState;
 use heronite_watch_core::tracker::{TrackedTitle, TrackedView, TrackedWatch};
@@ -57,10 +56,9 @@ pub struct Mark<'a> {
 /// or signed out, changes nothing here.
 pub fn set_watched(app: &AppPaths, mark: &Mark<'_>, watched: bool) -> Result<()> {
     let at = Utc::now();
-    // The record is written under the same per-path lock playback uses, so a mark
-    // pressed while a session is being saved cannot be overwritten by it.
-    let path = store::movies_path(app);
-    json_store::update(&path, |movies: &mut store::MoviesFile| {
+    // One per-path lock for every writer — this mark, a playback, and the import —
+    // so a mark pressed while a session is being saved cannot be overwritten.
+    store::update_movies(app, |movies| {
         let mut progress = store::progress_for(movies, mark.provider, mark.id).cloned().unwrap_or_else(|| MovieProgress {
             provider: mark.provider.to_owned(),
             id: mark.id.to_owned(),
@@ -71,6 +69,7 @@ pub fn set_watched(app: &AppPaths, mark: &Mark<'_>, watched: bool) -> Result<()>
             video_id: None,
             imdb: None,
             episodes: Default::default(),
+            ..Default::default()
         });
 
         match mark.target {
@@ -92,6 +91,7 @@ pub fn set_watched(app: &AppPaths, mark: &Mark<'_>, watched: bool) -> Result<()>
                     finished: watched,
                     season: Some(season),
                     number: Some(number),
+                    ..Default::default()
                 };
                 progress.episodes.insert(video_id.to_owned(), entry);
                 progress.video_id = Some(video_id.to_owned());
@@ -101,8 +101,7 @@ pub fn set_watched(app: &AppPaths, mark: &Mark<'_>, watched: bool) -> Result<()>
         progress.imdb = mark.imdb.map(str::to_owned).or_else(|| progress.imdb.clone());
         store::upsert_progress(movies, progress);
         Ok(())
-    })
-    .with_context(|| format!("saving the watch mark in {}", path.display()))?;
+    })?;
 
     crate::trackers::record_manual(
         app,

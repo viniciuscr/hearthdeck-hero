@@ -9,10 +9,40 @@
 //! Identity is the pair the rest of Watch uses: `provider`, `kind`, `id`. A film and
 //! a series may share an id, so kind is part of it.
 
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::types::MovieItem;
+use crate::types::{MovieItem, Origin};
+
+/// Whether a title is in a list, as the last decision said.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Membership {
+    In,
+    Out,
+}
+
+/// The decision recorded for one title in one list kind — the ledger that tells
+/// "removed there" from "never was there". A sync reconciles against it; the
+/// screens read it only through [`PersonalLibrary::membership`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDecision {
+    pub state: Membership,
+    /// When the decision was made (local clock): the tie-breaker in a conflict.
+    pub changed_at: DateTime<Utc>,
+    #[serde(default)]
+    pub origin: Origin,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<String>,
+}
+
+/// The list kinds this file records decisions for.
+pub const WATCHLIST: &str = "watchlist";
+pub const FAVOURITES: &str = "favourites";
 
 /// The person's own shelf: two flags and their lists.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -27,6 +57,10 @@ pub struct PersonalLibrary {
     /// Named lists, reserved for the "Add to a list…" pass.
     #[serde(default)]
     pub lists: Vec<PersonalList>,
+    /// The decision per list kind and title (`"watchlist:stremio:tt1"`): what a
+    /// sync reconciles against. Absent means "never decided here".
+    #[serde(default)]
+    pub decisions: BTreeMap<String, ListDecision>,
     /// A newer build's fields survive a write here.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -53,6 +87,35 @@ pub fn same_title(a: &MovieItem, b: &MovieItem) -> bool {
 }
 
 impl PersonalLibrary {
+    /// The ledger key for a list kind and a title.
+    pub fn decision_key(kind: &str, provider: &str, id: &str) -> String {
+        format!("{kind}:{provider}:{id}")
+    }
+
+    /// What was decided here, `None` for a title never decided.
+    pub fn decision(&self, kind: &str, provider: &str, id: &str) -> Option<&ListDecision> {
+        self.decisions.get(&Self::decision_key(kind, provider, id))
+    }
+
+    /// Records a decision, replacing any earlier one for the same title.
+    pub fn decide(&mut self, kind: &str, provider: &str, id: &str, decision: ListDecision) {
+        self.decisions.insert(Self::decision_key(kind, provider, id), decision);
+    }
+
+    /// The membership this file implies: the ledger when it has an entry, else the
+    /// plain vecs (a file written before the ledger existed). `None` for a title
+    /// that is in neither.
+    pub fn membership(&self, kind: &str, provider: &str, id: &str) -> Option<Membership> {
+        if let Some(decision) = self.decision(kind, provider, id) {
+            return Some(decision.state);
+        }
+        let list = match kind {
+            WATCHLIST => &self.watchlist,
+            FAVOURITES => &self.favourites,
+            _ => return None,
+        };
+        list.iter().any(|item| item.id == id && (item.provider.is_empty() || item.provider == provider)).then_some(Membership::In)
+    }
     /// Adds a title to the watchlist, or refreshes the snapshot of one already
     /// there without moving it. `true` when it was not in the list before.
     pub fn add_watchlist(&mut self, item: &MovieItem) -> bool {
@@ -209,5 +272,26 @@ mod tests {
         assert!(library.remove_from_list("sci-fi", &matrix));
         assert!(!library.remove_from_list("sci-fi", &matrix), "already gone");
         assert!(!library.add_to_list("nope", &matrix), "no such list");
+    }
+
+    #[test]
+    fn decisions_round_trip_and_old_files_read() {
+        // A file written before the ledger: no `decisions`, entries in the vecs.
+        let legacy = r#"{"watchlist":[{"id":"tt1","kind":"movie","name":"A"}],"favourites":[]}"#;
+        let mut library: PersonalLibrary = serde_json::from_str(legacy).expect("an old file still reads");
+        assert!(library.decisions.is_empty());
+        assert_eq!(library.membership(WATCHLIST, "stremio", "tt1"), Some(Membership::In), "the vec is still the answer");
+        assert_eq!(library.membership(FAVOURITES, "stremio", "tt1"), None);
+
+        library.decide(
+            WATCHLIST,
+            "stremio",
+            "tt1",
+            ListDecision { state: Membership::Out, changed_at: Utc::now(), origin: Origin::Local, imported_from: None },
+        );
+        let text = serde_json::to_string(&library).unwrap();
+        let back: PersonalLibrary = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.membership(WATCHLIST, "stremio", "tt1"), Some(Membership::Out), "a decision outranks the vec");
+        assert!(text.contains("\"decisions\""), "{text}");
     }
 }
