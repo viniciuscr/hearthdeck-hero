@@ -17,12 +17,34 @@ use heronite_watch_core::progress::{finished, WatchedState};
 use heronite_watch_core::tracker::{Delivery, ListChange, TrackEvent, TrackedTitle, TrackedView, TrackedWatch, WatchTracker};
 use heronite_watch_core::types::MovieProgress;
 use heronite_watch_player::player::PlaybackOutcome;
-use heronite_watch_simkl::{SimklTracker, PROVIDER as SIMKL};
 use heronite_watch_state::sessions::{self, WatchSession};
 use heronite_watch_state::tracking;
 
 use crate::playback::PlaybackRequest;
-use crate::simkl_sign_in;
+
+/// What the facade needs to know about one tracker: how to tell it is usable, and
+/// how to build the deliverer for a drain. A second tracker is another module
+/// implementing this and one line in [`adapters`] — no branch anywhere else.
+pub trait TrackerAdapter: Sync {
+    fn id(&self) -> &'static str;
+    /// How a screen or a log calls it.
+    fn name(&self) -> &'static str;
+    /// Whether this machine can use it right now (signed in, credentials there).
+    fn ready(&self, app: &AppPaths) -> bool;
+    /// The deliverer for one drain; `Err` when it cannot be built (a dead session).
+    fn build<'a>(&self, app: &AppPaths, http: &'a UreqTransport) -> Result<Box<dyn WatchTracker + 'a>>;
+}
+
+/// Every tracker this build ships, in registry order.
+pub fn adapters() -> &'static [&'static dyn TrackerAdapter] {
+    static ALL: [&'static dyn TrackerAdapter; 1] = [&crate::simkl_adapter::SIMKL];
+    &ALL
+}
+
+/// How a tracker is called on a screen.
+pub fn name(id: &str) -> &'static str {
+    adapters().iter().find(|adapter| adapter.id() == id).map(|adapter| adapter.name()).unwrap_or("Tracker")
+}
 
 /// What a drain did, and how much is left.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -54,11 +76,7 @@ pub const MAX_PER_RUN: usize = 40;
 
 /// The trackers this build can use **now**: signed in, with the app's credential.
 pub fn available(app: &AppPaths) -> Vec<String> {
-    let mut ids = Vec::new();
-    if simkl_sign_in::configured(app) && simkl_sign_in::session(app).is_some() {
-        ids.push(SIMKL.to_owned());
-    }
-    ids
+    adapters().iter().filter(|adapter| adapter.ready(app)).map(|adapter| adapter.id().to_owned()).collect()
 }
 
 /// The trackers the person turned on, among the ones this build can use.
@@ -269,12 +287,12 @@ pub fn deliver_list(app: &AppPaths, change: &ListChange) -> Vec<(&'static str, D
 /// The trackers that can deliver right now, and the ids the outbox knows them by.
 fn deliverers<'a>(app: &AppPaths, http: &'a UreqTransport, enabled: &[String]) -> Vec<(&'static str, Box<dyn WatchTracker + 'a>)> {
     let mut out: Vec<(&'static str, Box<dyn WatchTracker + 'a>)> = Vec::new();
-    if enabled.iter().any(|id| id == SIMKL) {
-        // Refreshed here, before a delivery could meet an expired token.
-        match (simkl_sign_in::client_id(app), simkl_sign_in::tokens_fresh_with(http, app)) {
-            (Ok(client_id), Ok(Some(tokens))) => out.push((SIMKL, Box::new(SimklTracker::new(http, &client_id, &tokens.access_token)))),
-            (_, Err(error)) => log::warn!("Simkl session: {error:#}; not delivering to it"),
-            _ => log::debug!("Simkl is enabled but this machine has no session for it"),
+    for adapter in adapters().iter().filter(|adapter| enabled.iter().any(|id| id == adapter.id())) {
+        match adapter.build(app, http) {
+            Ok(tracker) => out.push((adapter.id(), tracker)),
+            // A tracker that cannot be built now (a dead session) is said once and
+            // skipped; the outbox keeps its events.
+            Err(error) => log::warn!("{}: {error:#}; not delivering to it", adapter.name()),
         }
     }
     out
@@ -354,7 +372,7 @@ mod tests {
         let app = AppPaths::for_data(&DataPaths::at(dir.to_path_buf()));
         // Nothing is on by default: switching the tracker on is what the person
         // does in Sources, and these tests are all about a switched-on tracker.
-        let settings = heronite_watch_state::settings::Settings { trackers: vec![SIMKL.to_owned()], ..Default::default() };
+        let settings = heronite_watch_state::settings::Settings { trackers: vec!["simkl".to_owned()], ..Default::default() };
         heronite_watch_state::settings::write(&app, &settings).unwrap();
         app
     }

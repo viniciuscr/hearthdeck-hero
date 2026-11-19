@@ -56,9 +56,10 @@ pub struct State {
     /// Titles a tracker refused for good: shown beside the sync state, never as
     /// it (they do not go away when a drain succeeds).
     pub tracker_unmatched: Vec<String>,
-    /// Whether Simkl's history is pulled in automatically, and the last pull's
-    /// sentence ("Brought in 3 titles · 2 hours ago").
-    pub import_simkl: bool,
+    /// Whether **any** provider's history is pulled in automatically, and the last
+    /// pull's sentence ("Brought in 3 titles · 2 hours ago"). One sentence: the
+    /// rows below say which provider did what.
+    pub import_any: bool,
     pub import_state: Option<SharedString>,
     /// Whether this visit already asked the pull to catch up: the page draws many
     /// times, and the cursor's own schedule decides whether a tick does anything.
@@ -106,7 +107,7 @@ impl State {
             tracker_pending: pending.count,
             tracker_error: pending.last_error.map(SharedString::from),
             tracker_unmatched: pending.unmatched,
-            import_simkl: heronite_watch::import::enabled(&ctx.app).contains(&"simkl"),
+            import_any: !heronite_watch::import::enabled(&ctx.app).is_empty(),
             import_state: import_sentence(&ctx.app),
             imports_ticked: false,
             trackers_drained: false,
@@ -433,7 +434,7 @@ pub fn render_sources(d: &mut SettingsPage, _window: &mut Window, cx: &mut Conte
     // the interval costs nothing.
     if !d.watch.imports_ticked {
         d.watch.imports_ticked = true;
-        if d.watch.import_simkl {
+        if d.watch.import_any {
             tick_imports(d, cx);
         }
     }
@@ -589,12 +590,9 @@ fn tracker_state(d: &SettingsPage) -> String {
     }
 }
 
-/// How a tracker is called on a screen.
+/// How a tracker is called on a screen: the registry's own name.
 fn tracker_name(id: &str) -> &'static str {
-    match id {
-        "simkl" => "Simkl",
-        _ => "Tracker",
-    }
+    heronite_watch::trackers::name(id)
 }
 
 /// One account's card: its name and what it gives, then its sign-in and the
@@ -1044,9 +1042,11 @@ fn set_tracker(d: &mut SettingsPage, id: &str, on: bool, cx: &mut Context<Settin
 }
 
 /// Hands the outbox to the trackers, off the UI thread, then shows what is left.
-/// The sentence the import row shows: what the last pull did.
+/// The sentence the import row shows: what the last pull did. Whichever provider
+/// is enabled — one row per provider already carries its own switch.
 fn import_sentence(app: &heronite_data::paths::AppPaths) -> Option<SharedString> {
-    let last = heronite_watch::import::status(app, "simkl")?;
+    let provider = heronite_watch::import::enabled(app).into_iter().next()?;
+    let last = heronite_watch::import::status(app, provider)?;
     Some(match &last.error {
         Some(error) => tr!("Could not bring anything in: {error}", error = error.clone()).into(),
         None if last.unchanged || last.watched + last.positions == 0 => tr!("Nothing new the last time it asked.").into(),
@@ -1078,7 +1078,7 @@ fn set_import(d: &mut SettingsPage, provider: &str, on: bool, cx: &mut Context<S
     if let Err(error) = heronite_watch::import::set_enabled(&d.ctx.app, provider, on) {
         log::warn!("saving the Watch settings: {error:#}");
     }
-    d.watch.import_simkl = heronite_watch::import::enabled(&d.ctx.app).contains(&"simkl");
+    d.watch.import_any = !heronite_watch::import::enabled(&d.ctx.app).is_empty();
     if !on {
         d.watch.import_state = None;
         cx.notify();

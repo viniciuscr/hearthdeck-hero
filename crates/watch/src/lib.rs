@@ -15,6 +15,7 @@ pub mod playback;
 pub mod progress;
 pub mod registry;
 pub mod service;
+pub mod simkl_adapter;
 pub mod simkl_sign_in;
 pub mod stats;
 pub mod tmdb_sign_in;

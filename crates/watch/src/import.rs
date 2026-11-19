@@ -142,6 +142,11 @@ pub fn record_result(cursor: &mut cursor::Cursor, result: &Result<Report>, now: 
     }
 }
 
+/// How a puller is called on a screen.
+pub fn name(id: &str) -> &'static str {
+    providers().iter().find(|sync| sync.id() == id).map(|sync| sync.name()).unwrap_or("Provider")
+}
+
 /// The pullers the person turned on.
 pub fn enabled(app: &AppPaths) -> Vec<&'static str> {
     let ids = heronite_watch_state::settings::read(app).import_providers;
