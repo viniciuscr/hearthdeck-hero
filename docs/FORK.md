@@ -215,15 +215,19 @@ date, upstream commit, files, and resolution.
 
 ## Releases
 
-- Tag `fork/main` as `v<upstream>-hearthdeck.<n>` (for example
-  `v1.5.0-hearthdeck.1`); never tag `main`.
-- Releases are tag-driven: the tag starts `.github/workflows/fork-release.yml`,
-  which gates the commit, builds `hearthdeck-hero` packages and publishes an
-  unsigned Arch repository to `gh-pages`.
-- `scripts/fork/release.sh` creates and pushes the tag. See
-  `docs/RELEASING.md` for the one-time Pages setup.
+- Cut a release from `fork/main` with the **Fork Release** workflow
+  (Actions → *Run workflow*; `fork/main` is the default branch, so the button
+  is offered) or with `scripts/fork/release.py --publish`. It gates the
+  branch, computes `v<upstream>-hearthdeck.<counter>` and the notes from the
+  commits, tags, builds the `hearthdeck-hero` packages and publishes the
+  unsigned Arch repository to `gh-pages`. Never tag `main`.
+- The annotated tag's message *is* the release notes: the fork's changes (its
+  own commits), then upstream's highlights with a link to upstream's own
+  release notes. `scripts/fork/release.py` writes them and `--check` validates
+  a tag; `git show <tag>` is the record of what a release shipped.
 - Arch `pkgver` replaces the tag's hyphen with a dot
-  (`1.5.0.hearthdeck.1`); increment the last number for a rebuild.
+  (`1.7.0.hearthdeck.1.5.0`); the counter moves with the commits
+  (`feat` → minor, otherwise patch). See `docs/RELEASING.md`.
 - Keep upstream `release.yml`, `flatpak.yml`, and `windows-packages.yml`
   **disabled** in the fork's Actions settings: they use upstream secrets and
   publish to upstream's package channels.

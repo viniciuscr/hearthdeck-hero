@@ -1,15 +1,37 @@
 name: Fork Release
 
-# Tag-driven release from fork/main. The tag is the source of truth:
-#   scripts/fork/release.sh 1.5.0-hearthdeck.1
-# builds the system packages, publishes a signed Arch repository to the
-# gh-pages branch for pacman, and creates the GitHub release.
+# One release pipeline, two ways in.
+#
+# - "Run workflow" on fork/main: the gate runs on the branch head,
+#   scripts/fork/release.py works out the next version and its notes, the
+#   annotated tag is created and pushed, and this same run goes on to build and
+#   publish it. It is the same run on purpose: a tag pushed with GITHUB_TOKEN
+#   starts no workflow of its own, so waiting for the tag event would publish
+#   nothing.
+# - pushing a tag by hand: the gate runs on the tagged commit, the tag's name
+#   and place in the sequence are checked, and its own message is published.
+#   Use it to recover a release whose build failed, or to tag a checkout:
+#   scripts/fork/release.py --tag and --notes are the two commands a person
+#   types there.
+#
+# The notes live in the annotated tag, so a tag is a complete record of what it
+# shipped and a re-run publishes the same text. docs/RELEASING.md has the flow.
 on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Fork counter bump (auto: derived from the commits)"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
   push:
-    tags: ["v*"]
+    # Only the fork's own tags: `sync-upstream.sh` fetches upstream's `v1.7.0`
+    # tags into a maintainer's clone, and a `git push --tags` should not start
+    # a release for one of those.
+    tags: ["v*-hearthdeck.*"]
 
 concurrency:
-  group: fork-release-${{ github.ref }}
+  group: fork-release
   cancel-in-progress: false
 
 permissions:
@@ -21,28 +43,40 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
-  verify:
-    name: Gate the tagged commit
+  prepare:
+    name: Gate, and work out the version
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      pkgver: ${{ steps.version.outputs.pkgver }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: A release is cut from fork/main
+        if: github.ref_type == 'branch'
+        run: |
+          test "$GITHUB_REF" = "refs/heads/fork/main" || {
+            echo "::error::a release is cut from fork/main, not $GITHUB_REF"; exit 1; }
       - name: The tag is on fork/main
+        if: github.ref_type == 'tag'
         run: |
           git fetch origin fork/main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/fork/main
+      - name: The tag is well formed
+        if: github.ref_type == 'tag'
+        run: python3 scripts/fork/release.py --check "$GITHUB_REF_NAME"
       - name: System packages
         run: scripts/ci-deps.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      # Restore only. Caches are scoped to the ref: a tag run reads the
-      # default branch's (main) entries, never another tag's, so anything
-      # saved here could not be restored by any later run and would only take
-      # space from the repository's 10 GB. `check` is ci.yml's Linux job id,
-      # so this run reuses what main's gate saved instead of a `verify` key
-      # nothing has ever written.
+      # Restore only. Caches are scoped to the ref: a run on a tag reads the
+      # default branch's entries, never another tag's, so anything saved here
+      # could not be restored by any later run and would only take space from
+      # the repository's 10 GB. The key is the one upstream ci.yml writes on
+      # main, so the gate usually starts warm instead of rebuilding 36 crates.
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: check
@@ -53,27 +87,74 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
+      - name: Work out the version and the notes
+        id: version
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            # A re-run of a release whose build failed: the tag already exists
+            # at this commit, so publish that one instead of cutting another.
+            # Sorted by version: the names' lexicographic order would pick
+            # 1.9.0 over 1.10.0.
+            tag=$(git tag --points-at HEAD --list 'v*-hearthdeck.*' --sort=-v:refname | head -n 1)
+            if [ -z "$tag" ]; then
+              # Warnings only (a merge upstream still owes shows here); the
+              # notes themselves are printed below, once the tag is known.
+              python3 scripts/fork/release.py --bump "$BUMP" >/dev/null
+              tag=$(python3 scripts/fork/release.py --tag --bump "$BUMP")
+              python3 scripts/fork/release.py --notes --bump "$BUMP" > "$RUNNER_TEMP/notes.md"
+              cat "$RUNNER_TEMP/notes.md"
+            fi
+          fi
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "pkgver=${version//-/.}" >> "$GITHUB_OUTPUT"
+      - name: Tag the release
+        if: github.ref_type == 'branch'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            echo "$TAG already exists; publishing it again."
+            exit 0
+          fi
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          # --cleanup=whitespace, not the default: `strip` deletes every line
+          # that starts with '#', which would take the notes' headings with it.
+          git tag -a --cleanup=whitespace "$TAG" -F "$RUNNER_TEMP/notes.md"
+          git push origin "refs/tags/$TAG"
+          echo "Tagged $TAG; this run now builds and publishes it."
 
   build:
     name: Build the packages
-    needs: verify
+    needs: prepare
     runs-on: ubuntu-22.04
     steps:
+      # The tag, not the ref: these are the files the release publishes, and
+      # the tag names the commit the gate passed and the notes describe.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
       - name: System packages
         run: scripts/ci-deps.sh
       - uses: dtolnay/rust-toolchain@stable
-      # Restore only. A tag cannot read the caches it saves (see the verify
-      # job), and the release profile shares no artifacts with the debug
-      # gate, so this key has nothing to hit today: saving would only fill
-      # the repository's cache quota.
+      # Restore only. A tag cannot read the caches it saves (see the prepare
+      # job), and the release profile shares no artifacts with the debug gate.
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: "false"
       - name: Use the tag version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          sed -i "s/^version = \".*\"/version = \"$version\"/" Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
           grep -n '^version' Cargo.toml
       - name: Build
         # TMDB and Simkl need an application credential on every call, so the
@@ -93,11 +174,9 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nfpm.tar.gz" -C "$RUNNER_TEMP" nfpm
           sudo install -m755 "$RUNNER_TEMP/nfpm" /usr/local/bin/nfpm
       - name: Package
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          # Arch pkgver cannot contain a hyphen.
-          pkgver="${version//-/.}"
-          scripts/packages.sh "$pkgver"
+        env:
+          PKGVER: ${{ needs.prepare.outputs.pkgver }}
+        run: scripts/packages.sh "$PKGVER"
       - uses: actions/upload-artifact@v4
         with:
           name: release-packages
@@ -139,7 +218,7 @@ jobs:
 
   release:
     name: Create the GitHub release
-    needs: [build, arch-repo]
+    needs: [prepare, build, arch-repo]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -147,20 +226,55 @@ jobs:
         with:
           name: release-packages
           path: dist
-      - name: Release
+      - name: The notes
+        id: notes
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          cat > notes.md <<'NOTES'
-          Arch repository:
-          `https://viniciuscr.github.io/hearthdeck-hero/arch/$arch`
+          set -euo pipefail
+          # The tag is the record: its body is what scripts/fork/release.py
+          # wrote, or what the person wrote when they tagged by hand.
+          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          body=$(git tag -l --format='%(contents:body)' "$TAG")
+          : > notes.md
+          if [ -n "$body" ]; then printf '%s\n\n---\n\n' "$body" > notes.md; fi
+          echo "tagged=$([ -n "$body" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          cat >> notes.md <<'NOTES'
+          ### Installing
+
+          Arch Linux, from the `hearthdeck` repository (or the `.deb`, `.rpm`
+          and `.pkg.tar.zst` files attached here):
 
           ```
           [hearthdeck]
-          SigLevel = Required DatabaseOptional
+          SigLevel = Optional TrustAll
           Server = https://viniciuscr.github.io/hearthdeck-hero/arch/$arch
           ```
+
+          The repository is unsigned; signatures can be added later without
+          changing the package name or the URL.
           NOTES
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "Hearthdeck Hero $GITHUB_REF_NAME" \
-            --notes-file notes.md
+          cat notes.md
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TAGGED: ${{ steps.notes.outputs.tagged }}
+        run: |
+          # A re-run after the release was already created republishes the
+          # tag's notes and refreshes the packages instead of failing on
+          # "release already exists". A tag that carries no notes is an older
+          # release: its body on GitHub is left as it is.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$TAGGED" = yes ]; then
+              gh release edit "$TAG" --title "Hearthdeck Hero $TAG" --notes-file notes.md
+              gh release upload "$TAG" dist/* --clobber
+            else
+              echo "$TAG carries no notes; leaving the published release alone."
+            fi
+          else
+            gh release create "$TAG" dist/* \
+              --title "Hearthdeck Hero $TAG" \
+              --notes-file notes.md \
+              --verify-tag
+          fi

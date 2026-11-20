@@ -2,5 +2,8 @@
 /dist
 /packaging/flatpak/cargo-sources.json
 
+# Python bytecode (scripts/fork/release.py is importable)
+__pycache__/
+
 # Local-only reference copies for agent reviews (not shipped, not committed)
 .cache/
