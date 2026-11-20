@@ -144,31 +144,64 @@ pub(super) fn card(i: usize, focused: bool, c: &Card) -> AnyElement {
 }
 
 impl CollectionView {
-    /// Playtime, How Long To Beat (how far along the main story) and the
-    /// journal; the last one only once the journal of the focused game is read.
+    /// Playtime (the watched time, in Watch), what it takes to finish it — How
+    /// Long To Beat for a game, the length the catalogue gave for a film — and
+    /// the journal; the last one only once the journal of the focused game is
+    /// read.
     pub(super) fn spotlight_cards(&self, g: &CollectionGame) -> Vec<Card> {
+        let watch = self.space == crate::collection::Space::Watch;
         let last = match g.last_played.as_deref().and_then(played_ago) {
+            Some(when) if watch => tr!("Last watched {at}", at = when.to_lowercase()),
             Some(when) => tr!("Last played: {when}", when = when),
+            None if watch => tr!("Not watched yet").to_string(),
             None => tr!("Never played").to_string(),
         };
         let played = played_time(g).unwrap_or_else(|| "\u{2014}".to_string());
-        let mut cards = vec![Card { icon: Icon::AccessTime, title: tr!("Playtime").into(), value: played, note: last, progress: None }];
-        let main = self.wiki.hltb(&g.title, &g.game.title).map(|h| h.main_story).filter(|h| *h > 0.);
-        let hltb = tr!("How Long To Beat");
-        cards.push(match main {
-            Some(hours) => {
-                let done = (g.playtime_minutes > 0).then(|| (g.playtime_minutes as f64 / 60. / hours) as f32);
-                let note = match done {
-                    Some(d) => {
-                        let percent = (d * 100.).round().min(99.) as u32;
-                        tr!("Main story \u{b7} you are at {percent}%", percent = percent)
-                    }
-                    None => tr!("Main story").to_string(),
-                };
-                Card { icon: Icon::Flag, title: hltb.into(), value: heronite_data::hltb::format_hours(hours), note, progress: done }
+        let icon = if watch { Icon::Check } else { Icon::AccessTime };
+        let title = if watch { tr!("Watched") } else { tr!("Playtime") };
+        let mut cards = vec![Card { icon, title: title.into(), value: played, note: last, progress: None }];
+        // HowLongToBeat knows games: asking it about a film would put a game's
+        // times on it, so Watch shows the catalogue's own length.
+        if watch {
+            let finish = self.watch_card_runtime(g);
+            let note = if finish.is_some() { String::new() } else { tr!("No data").to_string() };
+            cards.push(Card {
+                icon: Icon::AccessTime,
+                title: crate::fork::watch::sources::length_label(g).into(),
+                value: finish.unwrap_or_else(|| "\u{2014}".to_string()),
+                note,
+                progress: None,
+            });
+            // A show has a whole one: every episode at the length they run.
+            if let Some(binge) = self.watch_card_binge(g) {
+                cards.push(Card {
+                    icon: Icon::PlayCircle,
+                    title: tr!("Time to binge").into(),
+                    value: binge,
+                    note: String::new(),
+                    progress: None,
+                });
             }
-            None => Card { icon: Icon::Flag, title: hltb.into(), value: "\u{2014}".into(), note: tr!("No data").into(), progress: None },
-        });
+        } else {
+            let main = self.wiki.hltb(&g.title, &g.game.title).map(|h| h.main_story).filter(|h| *h > 0.);
+            let hltb = tr!("How Long To Beat");
+            cards.push(match main {
+                Some(hours) => {
+                    let done = (g.playtime_minutes > 0).then(|| (g.playtime_minutes as f64 / 60. / hours) as f32);
+                    let note = match done {
+                        Some(d) => {
+                            let percent = (d * 100.).round().min(99.) as u32;
+                            tr!("Main story \u{b7} you are at {percent}%", percent = percent)
+                        }
+                        None => tr!("Main story").to_string(),
+                    };
+                    Card { icon: Icon::Flag, title: hltb.into(), value: heronite_data::hltb::format_hours(hours), note, progress: done }
+                }
+                None => {
+                    Card { icon: Icon::Flag, title: hltb.into(), value: "\u{2014}".into(), note: tr!("No data").into(), progress: None }
+                }
+            });
+        }
         let key = SharedString::from(g.key.clone());
         if let Some(j) = self.journal.data.as_ref().filter(|_| self.journal.is_for(&key)) {
             let n = j.entries.len();

@@ -30,8 +30,13 @@ pub struct MovieItem {
     pub logo: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// How long it runs, in the source's own words (`136 min`).
     #[serde(default)]
-    pub runtime: Option<Value>,
+    pub runtime: Option<String>,
+    /// The day it came out (`1999-03-31`), when the source says: what "New"
+    /// measures in a catalogue that has no added date.
+    #[serde(default)]
+    pub released: Option<String>,
     #[serde(default)]
     pub genres: Vec<String>,
     /// Cinemeta's Top catalog membership, for the “Top movies” rail.
@@ -44,9 +49,20 @@ pub struct MovieItem {
     /// Stremio's last watch, for the “Continue watching” rail.
     #[serde(default)]
     pub last_watched: Option<String>,
-    /// Stremio's watched minutes (`timeWatched`).
+    /// Stremio's watched minutes (`timeWatched`). It is 0 for a title that was
+    /// only started, so it is not what says whether anything was watched.
     #[serde(default)]
     pub minutes_played: f64,
+    /// Where the provider left off and how long the title is (`timeOffset`,
+    /// `duration`): the two fields that say "in progress" when no minute was
+    /// counted.
+    #[serde(default)]
+    pub position_ms: u64,
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// The provider says it was finished (`flaggedWatched`).
+    #[serde(default)]
+    pub finished: bool,
     #[serde(default)]
     pub provider: String,
     /// The addon that supplied it, for provenance and error messages.

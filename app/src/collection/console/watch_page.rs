@@ -181,10 +181,24 @@ fn not_present() -> &'static str {
     tr!("Not currently present in any available stream source.")
 }
 
-/// The line under a film's title: who owns it, then what the source knows
-/// (`Stremio · 1999 · 136 min · IMDb 8.7`).
-fn facts_line(provider: &str, details: Option<&TitleDetails>, library_year: Option<&str>) -> String {
-    let mut facts = vec![provider.to_owned()];
+/// The watched mark's label: the state itself, and which episode it is about
+/// when the card shows one — the card follows the list, and "Mark as watched"
+/// alone would not say which episode.
+fn watched_mark_label(on: bool, episode: Option<&str>) -> SharedString {
+    match (episode, on) {
+        (Some(episode), true) => tr!("Mark {episode} as not watched", episode = episode).into(),
+        (Some(episode), false) => tr!("Mark {episode} as watched", episode = episode).into(),
+        (None, true) => tr!("Mark as not watched").into(),
+        (None, false) => tr!("Mark as watched").into(),
+    }
+}
+
+/// The line under a film's title: where it comes from, then what the source
+/// knows (`Cinemeta · Stremio · 1999 · 136 min · IMDb 8.7`). The origins are
+/// `sources::origins_with`, so the stream provider appears only once a stream is
+/// known to exist.
+fn facts_line(origins: &[&str], details: Option<&TitleDetails>, library_year: Option<&str>) -> String {
+    let mut facts: Vec<String> = origins.iter().map(|origin| (*origin).to_owned()).collect();
     let year = details.and_then(|details| details.year.clone()).or_else(|| library_year.map(str::to_owned));
     facts.extend(year);
     if let Some(details) = details {
@@ -257,7 +271,15 @@ fn detail_lines(details: Option<&TitleDetails>, library_genres: &[String], local
             tr!("Released").into(),
             details.released.as_deref().map(|at| heronite_data::text::format_timestamp(at, locale)).filter(|at| !at.trim().is_empty()),
         );
-        push(tr!("Runtime").into(), details.runtime.clone());
+        let series = details.kind == "series";
+        // The sources give a show one episode's length, never the whole run: the
+        // label says which it is, and the binge sums the episodes it lists.
+        push(if series { tr!("Episode runtime") } else { tr!("Runtime") }.into(), details.runtime.clone());
+        if series {
+            let per_episode = details.runtime.as_deref().and_then(crate::fork::watch::sources::runtime_minutes_of);
+            let binge = crate::fork::watch::sources::binge_minutes(per_episode, details.episode_count());
+            push(tr!("Time to binge").into(), binge.map(heronite_data::collection::format_playtime_minutes));
+        }
         push(tr!("Rating").into(), details.rating.clone());
         push(tr!("Genres").into(), names(&details.genres));
         push(tr!("Country").into(), names(&details.countries));
@@ -400,7 +422,8 @@ impl CollectionView {
         let selection =
             details.as_deref().filter(|details| !details.episodes.is_empty()).map(|details| self.watch_ensure_selection(key, details));
         let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
-        let facts = facts_line(g.source_label, details.as_deref(), crate::fork::watch::sources::year(&g));
+        let origins = crate::fork::watch::sources::origins_with(&g, self.watch_streams_known(&g));
+        let facts = facts_line(&origins, details.as_deref(), crate::fork::watch::sources::year(&g));
         let progress = heronite_watch::progress::local(&self.app_paths, &g.runner, crate::fork::watch::sources::id(&g));
         let status = title_status(progress.as_ref(), crate::fork::watch::sources::kind(&g), details.as_deref());
         let watched = watched_line(g.playtime_minutes, g.last_played.as_deref(), status, locale);
@@ -430,12 +453,13 @@ impl CollectionView {
         };
         let header = self.watch_header(key, &g, &facts, watched, &*window);
 
-        let marks = self.watch_marks(
-            &g,
-            progress.as_ref(),
-            picked.as_ref().map(|episode| Picked { id: episode.id.as_str(), season: episode.season, number: episode.number }),
-        );
+        let marks = self.watch_marks(&g, progress.as_ref(), picked.as_ref());
         let mark_focus = self.watch_mark_focus(marks.len());
+        // What the focused mark is, beside the icons: the label the tooltip shows,
+        // drawn while the pad is on the row so a person does not have to press to
+        // find out. It disappears with the focus and the icons stay put.
+        let marks_label =
+            (pane == Pane::Marks).then(|| marks.get(mark_focus)).flatten().map(|state| (state.mark.rank(), state.label.clone()));
 
         let s = kit::scale();
         let still = picked.as_ref().and_then(|episode| episode.thumbnail.as_deref()).and_then(|url| self.episode_still(url, 420., 236., s));
@@ -443,13 +467,24 @@ impl CollectionView {
 
         // The marks: icons, not rows. ◀ ▶ move along them, A presses one; ↑ from
         // the first row of the list arrives here, ↓ (or B) goes back.
-        let marks_row = div().flex().items_center().gap(u(10.)).children(marks.into_iter().enumerate().map(|(index, state)| {
-            let focused = pane == Pane::Marks && index == mark_focus;
-            pill_button(focused, state.mark.icon(state.on), None, state.mark.tint(state.on), PillSize::MARK)
-                .id(SharedString::from(format!("watch-mark-{}", state.mark.rank())))
-                .tooltip(crate::ui::tooltip(state.label))
-                .on_pads(mark_route(pane, list_focus, mark_focus, index))
-        }));
+        let marks_row = div()
+            .flex()
+            .items_center()
+            .gap(u(10.))
+            .children(marks.into_iter().enumerate().map(|(index, state)| {
+                let focused = pane == Pane::Marks && index == mark_focus;
+                pill_button(focused, state.mark.icon(state.on), None, state.mark.tint(state.on), PillSize::MARK)
+                    .id(SharedString::from(format!("watch-mark-{}", state.mark.rank())))
+                    .tooltip(crate::ui::tooltip(state.label))
+                    .on_pads(mark_route(pane, list_focus, mark_focus, index))
+            }))
+            .children(marks_label.map(|(rank, label)| {
+                motion::fade_in(
+                    SharedString::from(format!("watch-mark-label-{rank}")),
+                    div().min_w_0().truncate().text_size(u(14.)).text_color(theme::text_muted()).child(label),
+                    160,
+                )
+            }));
 
         // The card's two sides: what the title or the picked episode is, and the
         // streams it can be played from. The trailer is not a card: it is a press
@@ -588,7 +623,7 @@ impl CollectionView {
         &mut self,
         game: &CollectionGame,
         progress: Option<&heronite_watch::progress::MovieProgress>,
-        picked: Option<Picked<'_>>,
+        episode: Option<&Episode>,
     ) -> Vec<MarkState> {
         if !has_marks(game) {
             return Vec::new();
@@ -596,6 +631,7 @@ impl CollectionView {
         // No record is a mark that is off, not one that is missing: a film nobody
         // has played is exactly what "Mark as watched" is for, and so is an
         // episode watched elsewhere.
+        let picked = episode.map(|episode| Picked { id: episode.id.as_str(), season: episode.season, number: episode.number });
         let watched = watched_state(progress, picked, crate::fork::watch::sources::kind(game));
         let item = crate::fork::watch::sources::personal_item(game);
         let personal = self.watch_personal_states(&item);
@@ -603,8 +639,8 @@ impl CollectionView {
         // A film's watched mark, and the picked episode's: local first, the
         // trackers get it from the outbox afterwards.
         if let Some(on) = watched {
-            let label = if on { tr!("Mark as not watched") } else { tr!("Mark as watched") };
-            marks.push(MarkState { mark: Mark::Watched, on, label: label.into() });
+            let code = episode.map(Episode::code);
+            marks.push(MarkState { mark: Mark::Watched, on, label: watched_mark_label(on, code.as_deref()) });
         }
         for (flag, on) in personal {
             let mark = match flag {
@@ -705,7 +741,7 @@ impl CollectionView {
         let details = self.watch_details(key);
         let tab = self.watch_tab();
         // L3 (the left stick's click) is the trailer's: the hint bar says
-        // "Watch trailer" while the title has one, and this is the press it
+        // "Play trailer" while the title has one, and this is the press it
         // promises. X keeps what it does on the list — it starts the title —
         // and Y keeps the list's search, so no two presses trade places. A
         // title with no trailer answers the press itself (`watch_play_trailer`).
@@ -908,7 +944,7 @@ const TRAILER_BTN: Btn = Btn::L3;
 /// in mpv instead of the stream. No trailer, no hint — the press itself is what
 /// says there is none (`watch_play_trailer`).
 fn trailer_hint(has_trailer: bool) -> Option<Hint> {
-    has_trailer.then(|| hint(TRAILER_BTN, tr!("Watch trailer")))
+    has_trailer.then(|| hint(TRAILER_BTN, tr!("Play trailer")))
 }
 
 /// Whether `pad` is the trailer's press: the click of the left stick, never the
@@ -986,10 +1022,15 @@ mod tests {
     }
 
     #[test]
-    fn the_header_names_the_provider_and_what_the_source_knows() {
-        assert_eq!(facts_line("Stremio", Some(&matrix()), None), "Stremio · 1999 · 136 min · IMDb 8.7");
-        assert_eq!(facts_line("Stremio", None, Some("1999")), "Stremio · 1999");
-        assert_eq!(facts_line("Stremio", None, None), "Stremio");
+    fn the_header_names_where_the_title_comes_from_and_what_the_source_knows() {
+        assert_eq!(facts_line(&["Cinemeta"], Some(&matrix()), None), "Cinemeta · 1999 · 136 min · IMDb 8.7");
+        assert_eq!(
+            facts_line(&["Cinemeta", "Stremio"], Some(&matrix()), None),
+            "Cinemeta · Stremio · 1999 · 136 min · IMDb 8.7",
+            "the stream source follows the catalogue once a stream is known"
+        );
+        assert_eq!(facts_line(&["Stremio"], None, Some("1999")), "Stremio · 1999");
+        assert_eq!(facts_line(&["Cinemeta"], None, None), "Cinemeta");
     }
 
     #[test]
@@ -1033,6 +1074,9 @@ mod tests {
         assert_eq!(value("Status"), Some("Ended"));
         assert_eq!(value("Seasons"), Some("2"));
         assert_eq!(value("Episodes"), Some("3"));
+        assert_eq!(value("Episode runtime"), Some("136 min"), "a show's length is one episode's");
+        assert_eq!(value("Time to binge"), Some("6h 48m"), "three episodes at 136 min");
+        assert_eq!(value("Runtime"), None, "a show never says a whole runtime");
     }
 
     #[test]
@@ -1104,7 +1148,7 @@ mod tests {
         assert!(trailer_hint(false).is_none(), "no trailer, nothing to offer");
         let offered = trailer_hint(true).expect("a trailer is offered on the stick's click");
         assert_eq!(offered.btn, Btn::L3, "the stick's click, never the primary's X");
-        assert_eq!(offered.label, "Watch trailer");
+        assert_eq!(offered.label, "Play trailer");
     }
 
     #[test]
@@ -1201,6 +1245,14 @@ mod tests {
         assert_eq!(Mark::Watchlist.flag(), Some(Flag::Watchlist));
         assert_eq!(Mark::Favourite.flag(), Some(Flag::Favourite));
         assert_eq!(Mark::Watched.flag(), None, "the watched mark writes the record, not a shelf");
+    }
+
+    #[test]
+    fn the_watched_mark_names_the_episode_it_is_about() {
+        assert_eq!(watched_mark_label(false, None).as_ref(), "Mark as watched");
+        assert_eq!(watched_mark_label(true, None).as_ref(), "Mark as not watched");
+        assert_eq!(watched_mark_label(false, Some("S1E2")).as_ref(), "Mark S1E2 as watched");
+        assert_eq!(watched_mark_label(true, Some("S1E2")).as_ref(), "Mark S1E2 as not watched");
     }
 
     #[test]

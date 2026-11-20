@@ -78,8 +78,18 @@ pub struct MetaPreview {
     pub description: Option<String>,
     #[serde(default)]
     pub year: Option<Value>,
+    /// When the source says it came out (`1999-03-31T00:00:00.000Z`): a
+    /// catalogue has no added date, so this is what "New" measures.
+    #[serde(default)]
+    pub released: Option<Value>,
     #[serde(default)]
     pub genres: Vec<String>,
+    /// The protocol spells the same list `genres`, and catalogues in the wild
+    /// send `genre` (Cinemeta does both, on different entries). The same
+    /// tolerance [`MetaDetails`] keeps: a source's spelling is not the
+    /// screens', and the projection stores one list either way.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub genre: Vec<String>,
     #[serde(default)]
     pub runtime: Option<Value>,
 }
@@ -91,10 +101,14 @@ impl MetaPreview {
     /// many feeds); the protocol type only says what the title is.
     pub fn into_title(self, provider: &ProviderId) -> Title {
         let mut title = Title::new(TitleKey::of_source(&self.kind, &self.id, provider), &self.name).plays(provider.clone());
-        title.release = text(self.year);
+        title.released = text(self.released).as_deref().and_then(day_of);
+        // "1999", or a series' "2011–2019", is what the library prints; a
+        // preview that only names the day gets its year from it.
+        title.release = text(self.year).or_else(|| title.released.as_deref().and_then(|day| day.get(..4)).map(str::to_owned));
+        title.runtime = text(self.runtime);
         title.art = Art { poster: self.poster, background: self.background, logo: self.logo };
         title.description = self.description;
-        title.genres = self.genres;
+        title.genres = clean(if self.genres.is_empty() { self.genre } else { self.genres });
         title
     }
 }
@@ -496,6 +510,22 @@ mod tests {
         let url = client.catalog_url("series", "top", &[("skip", "")]).unwrap();
         assert_eq!(url.as_str(), "https://v3-cinemeta.strem.io/catalog/series/top.json", "an empty extra is left out");
         assert!(client.catalog("movie", "top", &[("skip", "50")]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_catalogue_entry_spelling_the_list_genre_still_names_its_genres() {
+        // Cinemeta sends both spellings, on different entries of the same
+        // catalogue: the projection stores one list either way, and the screens
+        // never read a source's field.
+        let transport = Stub(Answer::Body(
+            r#"{"metas":[{"id":"tt1","type":"movie","name":"A Film","genre":["Action","Sci-Fi"],"released":"2026-11-14T00:00:00.000Z","runtime":"173 min"}]}"#,
+        ));
+        let mut metas = client(&transport).catalog("movie", "top", &[]).unwrap();
+        let title = metas.remove(0).into_title(&ProviderId::declared("stremio"));
+        assert_eq!(title.genres, ["Action", "Sci-Fi"]);
+        assert_eq!(title.released.as_deref(), Some("2026-11-14"), "the day it came out, not the stamp");
+        assert_eq!(title.runtime.as_deref(), Some("173 min"));
+        assert_eq!(title.release.as_deref(), Some("2026"), "a preview that names no year takes it from the day");
     }
 
     #[test]

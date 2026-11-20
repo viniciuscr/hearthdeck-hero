@@ -27,6 +27,24 @@ pub const ROOT: &str = "watch-library";
 /// The mark a catalog page leaves in its records, so a rails refresh keeps them.
 pub const CATALOG_KEY: &str = "watchCatalog";
 
+/// Where the provider left off, how long the title is and whether it is
+/// finished: the three fields `timeWatched` does not say (it stays 0 for a title
+/// that was only started). Kept in the record's `extra`, the projection's own
+/// namespace, so a reloaded `CollectionGame` still carries them.
+pub const POSITION_KEY: &str = "watchPosition";
+pub const DURATION_KEY: &str = "watchDuration";
+pub const FINISHED_KEY: &str = "watchFinished";
+/// The day the title came out and how long it runs: a catalogue has no added
+/// date, so "New" measures the first, and the facts line shows the second.
+pub const RELEASED_KEY: &str = "watchReleased";
+pub const RUNTIME_KEY: &str = "watchRuntime";
+/// The catalogue or provider that listed the title: the film page names it
+/// instead of the stream provider every record is stamped with.
+pub const SOURCE_KEY: &str = "watchSource";
+/// What the last stream probe found (`true` a stream, `false` none); absent
+/// when no probe is known or the answer aged out.
+pub const STREAMS_KEY: &str = "watchStreams";
+
 /// What a rails refresh fetched: the titles the sources answered with, and the
 /// collection rails that answered at all — an empty page is an answer, a source
 /// that could not be asked (offline, no key) is not.
@@ -188,11 +206,15 @@ fn stored_item(game: &Value, metadata: &Value, timestamps: &Value) -> Option<Mov
             .unwrap_or_default(),
         top: extra.get("stremioTop").and_then(Value::as_bool).unwrap_or(false),
         catalog: text(extra.get(CATALOG_KEY)),
+        runtime: text(extra.get(RUNTIME_KEY)),
+        released: text(extra.get(RELEASED_KEY)),
+        position_ms: extra.get(POSITION_KEY).and_then(Value::as_u64).unwrap_or(0),
+        duration_ms: extra.get(DURATION_KEY).and_then(Value::as_u64).unwrap_or(0),
+        finished: extra.get(FINISHED_KEY).and_then(Value::as_bool).unwrap_or(false),
         last_watched: text(stamp.and_then(|stamp| stamp.get("lastPlayed"))),
         minutes_played: stamp.and_then(|stamp| stamp.get("totalPlayed")).and_then(Value::as_f64).unwrap_or(0.0),
         provider: if imported { String::new() } else { runner.to_owned() },
-        addon: if imported { IMPORTED_ADDON.to_owned() } else { String::new() },
-        ..MovieItem::default()
+        addon: if imported { IMPORTED_ADDON.to_owned() } else { text(extra.get(SOURCE_KEY)).unwrap_or_default() },
     })
 }
 
@@ -204,7 +226,9 @@ fn stored_item(game: &Value, metadata: &Value, timestamps: &Value) -> Option<Mov
 /// title carries it: upstream's copies total sums every copy, so writing the
 /// same minutes on each would double the "N in all" figure on the grouped card.
 fn record_of(title: &Title, provider: Option<&ProviderId>, with_watch: bool) -> MovieItem {
-    let feed = title.rails.first().and_then(|mark| match mark {
+    // The catalogue that listed it, even when a collection mark names it first:
+    // the rail source is what a card says the title comes from.
+    let feed = title.rails.iter().find_map(|mark| match mark {
         RailMark::Feed { source, .. } => Some(source.clone()),
         RailMark::Collection(_) => None,
     });
@@ -218,17 +242,21 @@ fn record_of(title: &Title, provider: Option<&ProviderId>, with_watch: bool) -> 
         background: title.art.background.clone(),
         logo: title.art.logo.clone(),
         description: title.description.clone(),
+        runtime: title.runtime.clone(),
+        released: title.released.clone(),
         genres: title.genres.clone(),
         top: title.top,
         catalog: title.rails.first().map(RailMark::as_wire),
         last_watched: watched.and_then(|seen| seen.at).map(stamp),
         minutes_played: watched.map_or(0.0, |seen| seen.minutes),
+        position_ms: watched.map_or(0, |seen| seen.position_ms),
+        duration_ms: watched.map_or(0, |seen| seen.duration_ms),
+        finished: watched.is_some_and(|seen| seen.finished),
         provider: provider.map(|id| id.as_str().to_owned()).unwrap_or_default(),
         addon: match provider {
             Some(_) => feed.unwrap_or_default(),
             None => IMPORTED_ADDON.to_owned(),
         },
-        ..MovieItem::default()
     }
 }
 
@@ -272,7 +300,12 @@ pub fn write_root(root: &Path, titles: &[Title]) -> Result<()> {
         }
     }
 
-    let games: Vec<Value> = records.iter().map(game_json).collect();
+    let games: Vec<Value> = {
+        // What the stream probes found, read once: a catalogue lists a title,
+        // only a stream answer says someone can play it.
+        let probes = crate::streams::read(root);
+        records.iter().map(|record| game_json(record, &probes)).collect()
+    };
     json_store::write(&paths.sideload_library(), &json!({"games": games})).context("writing the movie list")?;
 
     let mut local = Map::new();
@@ -382,10 +415,17 @@ fn app_name(record: &MovieItem) -> String {
     format!("{}:{}", owner(record), record.id)
 }
 
-fn game_json(record: &MovieItem) -> Value {
+fn game_json(record: &MovieItem, probes: &std::collections::HashMap<String, crate::streams::Probe>) -> Value {
     let kind = if record.kind.is_empty() { "movie" } else { record.kind.as_str() };
     let owner = owner(record);
     let imported = record.addon == IMPORTED_ADDON;
+    // Absent when never asked (or the answer aged out): the screens say nothing
+    // about a title they have not tried.
+    let streams = match crate::streams::availability(probes, provider(record), kind, &record.id) {
+        crate::streams::Availability::Available => Some(true),
+        crate::streams::Availability::Unavailable => Some(false),
+        crate::streams::Availability::Unknown => None,
+    };
     let poster = record.poster.clone();
     json!({
         "runner": owner,
@@ -407,6 +447,15 @@ fn game_json(record: &MovieItem) -> Value {
             "provider": owner,
             "watchId": &record.id,
             "imported": imported,
+            RELEASED_KEY: &record.released,
+            RUNTIME_KEY: &record.runtime,
+            POSITION_KEY: record.position_ms,
+            DURATION_KEY: record.duration_ms,
+            FINISHED_KEY: record.finished,
+            // Where the title was listed, and what the last probe found: a
+            // null `watchStreams` is "never asked".
+            SOURCE_KEY: &record.addon,
+            STREAMS_KEY: streams,
         },
     })
 }
@@ -565,7 +614,7 @@ mod tests {
         let root = dir.path();
         let at = chrono::DateTime::parse_from_rfc3339("2026-11-12T20:00:00Z").expect("an rfc3339 instant").with_timezone(&chrono::Utc);
         let mut watched = title("tt1", "A Film");
-        watched.watched = Some(heronite_watch_core::title::Watched { at: Some(at), minutes: 42.0 });
+        watched.watched = Some(heronite_watch_core::title::Watched { at: Some(at), minutes: 42.0, ..Default::default() });
         write_root(root, &[watched]).unwrap();
 
         let mut page = title("tt2", "Another Film");
@@ -645,7 +694,7 @@ mod tests {
         let at = chrono::DateTime::parse_from_rfc3339("2026-11-12T20:00:00Z").expect("an rfc3339 instant").with_timezone(&chrono::Utc);
         let mut film = title("tt1", "A Film");
         film.providers.insert(ProviderId::declared("youtube"));
-        film.watched = Some(heronite_watch_core::title::Watched { at: Some(at), minutes: 42.0 });
+        film.watched = Some(heronite_watch_core::title::Watched { at: Some(at), minutes: 42.0, ..Default::default() });
         write_root(dir.path(), &[film]).unwrap();
 
         let timestamps: Value = json_store::read(&DataPaths::at(dir.path().to_path_buf()).timestamps()).unwrap();
@@ -698,11 +747,48 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let at = chrono::DateTime::parse_from_rfc3339("2026-11-12T20:00:00Z").expect("an rfc3339 instant").with_timezone(&chrono::Utc);
         let mut watched = title("tt1", "A Film");
-        watched.watched = Some(heronite_watch_core::title::Watched { at: Some(at), minutes: 42.5 });
+        watched.watched = Some(heronite_watch_core::title::Watched { at: Some(at), minutes: 42.5, ..Default::default() });
         write_root(dir.path(), &[watched]).unwrap();
 
         let timestamps: Value = json_store::read(&DataPaths::at(dir.path().to_path_buf()).timestamps()).unwrap();
         assert_eq!(timestamps["stremio:tt1"]["lastPlayed"], "2026-11-12T20:00:00.000Z");
         assert_eq!(timestamps["stremio:tt1"]["totalPlayed"], 42.5);
+    }
+
+    #[test]
+    fn a_started_film_keeps_its_position_and_what_a_catalogue_said_about_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-17T19:49:06Z").expect("an rfc3339 instant").with_timezone(&chrono::Utc);
+        let mut film = title("tt1", "A Film");
+        film.released = Some("2026-11-14".into());
+        film.runtime = Some("173 min".into());
+        // Stremio counts no minute for a film that was only started: the
+        // position is what says it was, and the screens read it off the record.
+        film.watched = Some(heronite_watch_core::title::Watched {
+            at: Some(at),
+            minutes: 0.0,
+            position_ms: 2_271_644,
+            duration_ms: 6_628_768,
+            finished: false,
+        });
+        write_root(dir.path(), &[film]).unwrap();
+
+        let paths = DataPaths::at(dir.path().to_path_buf());
+        let library: Value = json_store::read(&paths.sideload_library()).unwrap();
+        let extra = &library["games"][0]["extra"];
+        assert_eq!(extra[POSITION_KEY], 2_271_644);
+        assert_eq!(extra[DURATION_KEY], 6_628_768);
+        assert_eq!(extra[FINISHED_KEY], false);
+        assert_eq!(extra[RELEASED_KEY], "2026-11-14");
+        assert_eq!(extra[RUNTIME_KEY], "173 min");
+
+        let back = stored(dir.path());
+        let seen = back[0].watched.as_ref().expect("the started record came back");
+        assert_eq!(
+            seen.state(),
+            heronite_watch_core::progress::WatchedState::InProgress { position_ms: 2_271_644, duration_ms: 6_628_768 }
+        );
+        assert_eq!(back[0].released.as_deref(), Some("2026-11-14"));
+        assert_eq!(back[0].runtime.as_deref(), Some("173 min"));
     }
 }

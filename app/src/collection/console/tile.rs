@@ -10,6 +10,7 @@ use heronite_data::appearance::CategoryStyle;
 use heronite_data::art::CoverOrigin;
 use heronite_data::console_theme::{Badges, FocusStyle, TileShape, TileTitles};
 use heronite_data::cover_family::CoverFamily;
+use heronite_data::CollectionGame;
 use heronite_i18n::tr;
 use heronite_images::Variant;
 
@@ -77,6 +78,17 @@ pub(super) fn category_area(w: f32, unit: f32, window_scale: f32) -> cats::Area 
 }
 
 impl CollectionView {
+    /// Whether a tile wears "New": a game by the day it entered the library, a
+    /// Watch title by its release. A catalogue has no added date — everything it
+    /// lists would be "added" on the first load — so there it is a recent release
+    /// instead (`sources::is_new_release`, a week).
+    fn tile_is_new(&self, g: &CollectionGame) -> bool {
+        if self.space == crate::collection::Space::Watch {
+            return crate::fork::watch::sources::is_new_release(g);
+        }
+        self.game_extras.added.get(&g.key).is_some_and(|day| is_new(day))
+    }
+
     /// The look's style for the categories and those of `key`, when they
     /// show and the game has any.
     pub(super) fn console_categories(&self, key: &str) -> Option<(CategoryStyle, Vec<CategoryBadge>)> {
@@ -192,10 +204,10 @@ impl CollectionView {
             wide_title: (landscape_art && logo.is_none() && src.is_some()).then(|| title.clone()),
             src,
             logo,
-            grey: (theme.tiles.grey_uninstalled || game.as_ref().is_some_and(|g| crate::fork::watch::sources::imported(g))) && missing,
+            grey: (theme.tiles.grey_uninstalled || game.as_ref().is_some_and(|g| crate::fork::watch::sources::dimmed(g))) && missing,
             badge: if theme.tiles.badges == Badges::Off { None } else { running },
             favourite: all_badges && game.as_ref().is_some_and(|g| g.favourite),
-            new: all_badges && game.as_ref().and_then(|g| self.game_extras.added.get(&g.key)).is_some_and(|d| is_new(d)),
+            new: all_badges && game.as_ref().is_some_and(|g| self.tile_is_new(g)),
             title: title.clone(),
             top_r: !has_header,
             bottom_r: !has_bar,
@@ -206,7 +218,16 @@ impl CollectionView {
             category_style,
             scale: window.scale_factor(),
         };
-        let store = has_header.then(|| game.as_ref().map_or(String::new(), |g| g.source_label.to_uppercase()));
+        let store = has_header.then(|| {
+            game.as_ref().map_or(String::new(), |g| match self.space {
+                // A film's strip names the catalogue that listed it (Stremio
+                // only once a stream is known): a storefront it has none of.
+                crate::collection::Space::Watch => {
+                    crate::fork::watch::sources::origins(g).first().copied().unwrap_or_default().to_uppercase()
+                }
+                crate::collection::Space::Games => g.source_label.to_uppercase(),
+            })
+        });
         let name_under = match theme.tiles.titles {
             TileTitles::Always => true,
             TileTitles::Focused => focused,

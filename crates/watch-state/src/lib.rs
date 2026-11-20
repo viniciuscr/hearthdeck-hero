@@ -10,4 +10,5 @@ pub mod placeholders;
 pub mod sessions;
 pub mod settings;
 pub mod store;
+pub mod streams;
 pub mod tracking;

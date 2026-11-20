@@ -4,6 +4,55 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-20 — a card says where a title comes from, and dims what
+> cannot be played.** A catalogue stamps every title it lists with the provider
+> that would resolve a stream (Stremio), so every film read "Stremio" — in the
+> film page's facts, the Grid's fact line and the tile's strip — and none was
+> ever dimmed, because the record looked installed. The listing source now
+> travels in the projection (`extra.watchSource`) and is what those places read:
+> a film says **Cinemeta** (or **TMDB**) and gains **Stremio** only once a stream
+> is known to exist; a title Stremio's own account brought says Stremio alone.
+> The stream answer is the only proof, so the page's own probe — the fetch it
+> already makes when a film opens, and Play again — is recorded in `streams.json`
+> beside the projection: empty is `Unavailable`, anything else `Available`,
+> trusted for a week. A film the probe found empty is dimmed whatever "Grey
+> uninstalled games" says ("no source here can play it" is information, not
+> decoration) and its facts line loses the provider. Series are judged per
+> episode, so only films are marked from a probe. **No extra request is made**:
+> the grid catches up on its next load, and the open page updates at once from
+> the answer it just received.
+>
+> **Revision 2026-11-20 — what a Watch card says, and what "New" means.** The
+> chip under a cover was the games' playtime: it read "Not Played" under a film
+> whose provider counted no minute (`timeWatched` stays 0 until Stremio counts
+> one) while the same record said "Last watched 3 days ago". The chip is Watch's
+> now — the watched time when there is one, else "Watched", "In progress · 40%"
+> or "Not watched" — and it reads the provider's position and flag
+> (`timeOffset`, `duration`, `flaggedWatched`), which the projection keeps in
+> each record's `extra` beside the release day and the runtime.
+>
+> "New" no longer means "the first load saw it" (on a catalogue that is every
+> title at once): it means a release from the last **week**, from the date the
+> source gives. The console layouts follow — in Watch the Grid's side panel, the
+> Spotlight cards, the Dashboard pick and the Wheel say **Last watched**, the
+> watched time and the length instead of a game's "Last played" and How Long To
+> Beat, which is not even asked for a film. The length is named for what the
+> sources give: a film's **Runtime**, and for a show its **Episode runtime** —
+> sources never give a whole show's. A series also gets **Time to binge**, every
+> episode it lists at that length (the count is the merged metadata's, so it
+> arrives with that answer). They ask the **merged metadata** for the title they
+> rest on — the same week-long cache the page uses, debounced with the background
+> art — and print its genres and length when the answer arrives; until then the
+> catalogue's own values stand, so a card is never empty while the sources are
+> being asked. Genres are back: a catalogue entry spells the list `genre` as
+> often as `genres`, and only the second was read, so every film arrived bare.
+>
+> The mark icons now say what they are: the focused one draws its label beside
+> the row (it leaves with the focus, the icons do not move), and the watched
+> mark names the episode the card shows ("Mark S1E2 as watched"). The trailer's
+> hint reads **`L3 · Play trailer`**: it plays it, and "watch" was the
+> collection's word for a film.
+>
 > **Revision 2026-11-19 — the details panel reaches the page's top edge, and the
 > marks are icons.** The page's right column was 65 % of the screen: the cover
 > and the title took a band *across the whole page* above both columns, and a
@@ -40,7 +89,7 @@ the rules that apply while building it.
 > trailer's on the film page, but Y is the list's search: one press cannot be two
 > things, and a person who learned the trailer on the page could not play it
 > from the grid. The trailer now answers to **L3 (the click of the left stick)**
-> everywhere — the film page's hint bar reads `L3 · Watch trailer`, and the
+> everywhere — the film page's hint bar reads `L3 · Play trailer`, and the
 > covers of every layout in the Watch space carry the same hint and play the
 > focused title's trailer. A cover never opened the page, so the press asks the
 > metadata sources for the title's details first and plays the trailer with the
@@ -566,6 +615,9 @@ pub struct MovieItem {
     pub logo: Option<Url>,
     pub description: Option<String>,
     pub runtime: Option<String>,
+    /// The day it came out (`1999-03-31`): a catalogue has no added date, so
+    /// this is what "New" measures.
+    pub released: Option<String>,
     pub genres: Vec<String>,
     pub addon: String,                  // addon id, for provenance
 }
@@ -704,6 +756,23 @@ Envelope, source `stremio-core`:
   they are kept under `<cache>/watch-catalog/ids/` (delete-safe), and the misses
   of a page go out four at a time instead of twenty in a row; a title TMDB has no
   IMDb id for is remembered as such and never asked again.
+- The **discover fields** the panel offers are one choice each (◀ ▶ cycles,
+  "All" = unset): `genre` and `year` for both kinds, a **rating floor**
+  (`vote_average.gte` 9+/8+/7+/6+, always with `vote_count.gte=200` so one
+  ten-vote title cannot win), a **length** bucket (`with_runtime.lte=89`,
+  `gte/lte=90/120`, `gte=121` — a show's episode length, which is what TMDB
+  measures), an **original language** (`with_original_language`, offered in the
+  language's own words), **adult content** (`include_adult`, hide or show) and,
+  for series only, a **production status** (`with_status`: returning 0, ended 3,
+  canceled 4). Values are stable ids where the words are ours and TMDB's own
+  names otherwise; the panel localizes the labels and the length/adult/status
+  words (`console/watch_panel.rs`). Cinemeta can offer nothing more — the addon
+  protocol's only extras are `genre`, `year`, `skip` and `search`.
+- **A search hides the browse controls.** TMDB's `/search` takes no discover
+  filters (year and adult only), so the panel shows the search field alone while
+  one is typed instead of controls that would not apply; clearing it brings the
+  catalog, the order and the fields back. The list scrolls when a source declares
+  more fields than the panel's height holds.
 - Probed with redirects followed — every catalog answers **307** to
   `cinemeta-catalogs.strem.io/<id>/catalog/…`, which the transport follows:
   `top` 50; `imdbRating` 49, then 50 at `skip=50`; `year/genre=1999` 50, and 50

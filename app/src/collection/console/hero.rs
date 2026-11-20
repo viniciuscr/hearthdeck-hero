@@ -205,10 +205,17 @@ pub(crate) fn pill_button(focused: bool, ic: Icon, label: Option<SharedString>, 
 }
 
 impl CollectionView {
-    /// "Steam · Installed · 3h 54m played" for a game; "Stremio · 1999" for a
-    /// film or a series — where it streams from and when it is from.
+    /// "Steam · Installed · 3h 54m played" for a game; "Cinemeta · 1999" (and
+    /// "Stremio" once a stream is known) for a film or a series — where it was
+    /// listed and what the source knows.
     pub(super) fn console_facts(&self, g: &CollectionGame) -> String {
-        let mut facts = vec![g.source_label.to_string()];
+        let mut facts: Vec<String> = match self.space {
+            crate::collection::Space::Games => vec![g.source_label.to_string()],
+            // A catalogue stamps the provider that would resolve a stream, not
+            // one that has it: the origin names the catalogue, and the stream
+            // source joins it only when a probe found something.
+            crate::collection::Space::Watch => crate::fork::watch::sources::origins(g).into_iter().map(str::to_owned).collect(),
+        };
         match self.space {
             crate::collection::Space::Games => {
                 facts.push(if g.installed { tr!("Installed").into() } else { tr!("Not installed").into() });

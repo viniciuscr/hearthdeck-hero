@@ -279,29 +279,65 @@ impl CollectionView {
         let status = self.console_status(g);
         let value = |text: String| div().truncate().text_size(u(15.)).text_color(theme::text_primary()).child(text);
         let row = || div().flex().gap(u(18.));
-        let facts = div()
-            .flex()
-            .flex_col()
-            .gap(u(12.))
-            .mt(u(16.))
-            .child(
-                row()
-                    .child(fact_cell(tr!("Release year"), value(release_year(g).map_or_else(dash, |y| y.to_string()))))
-                    .child(fact_cell(tr!("Genre"), value(g.details.genres.first().cloned().unwrap_or_else(dash))))
-                    .child(fact_cell(tr!("Rating"), value(g.details.critic_score.map_or_else(dash, |s| format!("{s:.0}"))))),
-            )
-            .child(
-                row()
-                    .child(fact_cell(tr!("Playtime"), value(played_time(g).unwrap_or_else(dash))))
-                    .child(fact_cell(
-                        tr!("Status"),
-                        match status {
-                            Some((label, colour)) => value(label).text_color(kit::tint(colour)),
-                            None => value(dash()),
-                        },
-                    ))
-                    .child(fact_cell(tr!("Developer"), value(g.details.developers.first().cloned().unwrap_or_else(dash)))),
-            );
+        let watch = self.space == crate::collection::Space::Watch;
+        let year = release_year(g).map_or_else(dash, |y| y.to_string());
+        let genre = if watch {
+            self.watch_card_genres(g).first().cloned().unwrap_or_else(dash)
+        } else {
+            g.details.genres.first().cloned().unwrap_or_else(dash)
+        };
+        // A film has no status, developer or critic score here: its own facts are
+        // the watched time, when it was watched and how long it runs.
+        let facts = if watch {
+            let runtime = self.watch_card_runtime(g).unwrap_or_else(dash);
+            let binge = self.watch_card_binge(g).map(|time| fact_cell(tr!("Time to binge"), value(time)));
+            let last = g
+                .last_played
+                .as_deref()
+                .and_then(crate::collection::data::played_ago)
+                .unwrap_or_else(|| tr!("Not watched yet").to_string());
+            div()
+                .flex()
+                .flex_col()
+                .gap(u(12.))
+                .mt(u(16.))
+                .child(
+                    row()
+                        .child(fact_cell(tr!("Release year"), value(year)))
+                        .child(fact_cell(tr!("Genre"), value(genre)))
+                        .child(fact_cell(crate::fork::watch::sources::length_label(g), value(runtime))),
+                )
+                .child(
+                    row()
+                        .child(fact_cell(tr!("Watched"), value(played_time(g).unwrap_or_else(dash))))
+                        .child(fact_cell(tr!("Last watched"), value(last)))
+                        .children(binge),
+                )
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .gap(u(12.))
+                .mt(u(16.))
+                .child(
+                    row()
+                        .child(fact_cell(tr!("Release year"), value(year)))
+                        .child(fact_cell(tr!("Genre"), value(genre)))
+                        .child(fact_cell(tr!("Rating"), value(g.details.critic_score.map_or_else(dash, |s| format!("{s:.0}"))))),
+                )
+                .child(
+                    row()
+                        .child(fact_cell(tr!("Playtime"), value(played_time(g).unwrap_or_else(dash))))
+                        .child(fact_cell(
+                            tr!("Status"),
+                            match status {
+                                Some((label, colour)) => value(label).text_color(kit::tint(colour)),
+                                None => value(dash()),
+                            },
+                        ))
+                        .child(fact_cell(tr!("Developer"), value(g.details.developers.first().cloned().unwrap_or_else(dash)))),
+                )
+        };
         let overview = theme.hero.overview.then(|| self.console_overview(&g.key)).flatten();
         let frame = div()
             .relative()

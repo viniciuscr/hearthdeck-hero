@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::collections::mark;
 use crate::personal::ShelfTitle;
+use crate::progress::WatchedState;
 use crate::types::MovieItem;
 
 /// The `addon` marker an imported placeholder carries: a title a provider knows
@@ -229,12 +230,29 @@ impl RailMark {
     }
 }
 
-/// What the library knows about watching a title: when it was last watched, and
-/// the minutes it has taken. The provider's own stamp, parsed.
-#[derive(Clone, Debug, PartialEq)]
+/// What the library knows about watching a title: when it was last watched, the
+/// minutes it has taken, and where the provider left off. The provider's own
+/// state, parsed.
+///
+/// `minutes` is Stremio's `timeWatched`, which is 0 for a title that was only
+/// started — that is why the position and its length travel beside it.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Watched {
     pub at: Option<DateTime<Utc>>,
     pub minutes: f64,
+    /// `timeOffset`: how far into the title (or its last episode) it stopped.
+    pub position_ms: u64,
+    /// `duration`: the length the provider measured the position against.
+    pub duration_ms: u64,
+    /// `flaggedWatched`: the provider says it is finished.
+    pub finished: bool,
+}
+
+impl Watched {
+    /// Where the title stands: the three states the screens draw a mark from.
+    pub fn state(&self) -> WatchedState {
+        WatchedState::of(self.position_ms, self.duration_ms, self.finished)
+    }
 }
 
 /// One title in the Watch library.
@@ -248,6 +266,11 @@ pub struct Title {
     pub name: String,
     /// As the library prints it: `1999`, or a series' `2011–2019`.
     pub release: Option<String>,
+    /// The day it came out (`1999-03-31`), when a source says it: "New" measures
+    /// this in a catalogue, which has no added date.
+    pub released: Option<String>,
+    /// How long it runs, in the source's own words (`136 min`).
+    pub runtime: Option<String>,
     pub art: Art,
     pub description: Option<String>,
     pub genres: Vec<String>,
@@ -268,6 +291,8 @@ impl Title {
             key,
             name: name.to_owned(),
             release: None,
+            released: None,
+            runtime: None,
             art: Art::default(),
             description: None,
             genres: Vec::new(),
@@ -304,6 +329,8 @@ impl Title {
             key: TitleKey::of_item(item),
             name: item.name.clone(),
             release: item.year.clone(),
+            released: item.released.clone(),
+            runtime: item.runtime.clone(),
             art: Art { poster: item.poster.clone(), background: item.background.clone(), logo: item.logo.clone() },
             description: item.description.clone(),
             genres: item.genres.clone(),
@@ -321,6 +348,10 @@ impl Title {
             key: TitleKey::of_parts(&shelf.kind, &shelf.id, ProviderId::new(&shelf.provider)),
             name: shelf.name.clone(),
             release: shelf.release.clone(),
+            // A snapshot keeps what a card draws; the release day and the length
+            // are the catalogue's and come back with its next answer.
+            released: None,
+            runtime: None,
             art: shelf.art.clone(),
             description: shelf.description.clone(),
             genres: shelf.genres.clone(),
@@ -381,6 +412,12 @@ impl Title {
         if self.release.is_none() {
             self.release = other.release;
         }
+        if self.released.is_none() {
+            self.released = other.released;
+        }
+        if self.runtime.is_none() {
+            self.runtime = other.runtime;
+        }
         if self.description.is_none() {
             self.description = other.description;
         }
@@ -408,10 +445,17 @@ fn is_imdb(id: &str) -> bool {
     id.strip_prefix("tt").is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-/// The watch a provider reports, parsed: a stamp, minutes, or both.
+/// The watch a provider reports, parsed: a stamp, minutes, a position, or any
+/// of them.
 fn watched_of(item: &MovieItem) -> Option<Watched> {
     let at = item.last_watched.as_deref().and_then(parse_stamp);
-    (at.is_some() || item.minutes_played > 0.0).then_some(Watched { at, minutes: item.minutes_played })
+    (at.is_some() || item.minutes_played > 0.0 || item.position_ms > 0 || item.finished).then_some(Watched {
+        at,
+        minutes: item.minutes_played,
+        position_ms: item.position_ms,
+        duration_ms: item.duration_ms,
+        finished: item.finished,
+    })
 }
 
 /// The instant a provider's stamp names; an unparseable one is no stamp.
@@ -437,6 +481,8 @@ mod tests {
             key: key(id),
             name: "A Film".into(),
             release: None,
+            released: None,
+            runtime: None,
             art: Art::default(),
             description: None,
             genres: Vec::new(),
@@ -520,9 +566,9 @@ mod tests {
     #[test]
     fn merge_keeps_the_later_watch_and_its_minutes() {
         let mut first = title("tt1", "stremio");
-        first.watched = Some(Watched { at: Some(at("2026-11-12T20:00:00Z")), minutes: 42.0 });
+        first.watched = Some(Watched { at: Some(at("2026-11-12T20:00:00Z")), minutes: 42.0, ..Watched::default() });
         let mut second = title("tt1", "stremio");
-        second.watched = Some(Watched { at: Some(at("2026-11-13T20:00:00Z")), minutes: 7.0 });
+        second.watched = Some(Watched { at: Some(at("2026-11-13T20:00:00Z")), minutes: 7.0, ..Watched::default() });
 
         assert!(first.merge(second).is_none());
         assert_eq!(first.watched.as_ref().and_then(|seen| seen.at), Some(at("2026-11-13T20:00:00Z")));
@@ -533,9 +579,9 @@ mod tests {
     fn merge_keeps_the_left_watch_when_the_stamps_are_equal() {
         let same = at("2026-11-12T20:00:00Z");
         let mut first = title("tt1", "stremio");
-        first.watched = Some(Watched { at: Some(same), minutes: 42.0 });
+        first.watched = Some(Watched { at: Some(same), minutes: 42.0, ..Watched::default() });
         let mut second = title("tt1", "stremio");
-        second.watched = Some(Watched { at: Some(same), minutes: 7.0 });
+        second.watched = Some(Watched { at: Some(same), minutes: 7.0, ..Watched::default() });
 
         assert!(first.merge(second).is_none());
         assert_eq!(first.watched.as_ref().map(|seen| seen.minutes), Some(42.0));
@@ -571,9 +617,9 @@ mod tests {
     #[test]
     fn a_dated_watch_beats_an_undated_one() {
         let mut first = title("tt1", "stremio");
-        first.watched = Some(Watched { at: None, minutes: 42.0 });
+        first.watched = Some(Watched { at: None, minutes: 42.0, ..Watched::default() });
         let mut second = title("tt1", "stremio");
-        second.watched = Some(Watched { at: Some(at("2026-11-12T20:00:00Z")), minutes: 7.0 });
+        second.watched = Some(Watched { at: Some(at("2026-11-12T20:00:00Z")), minutes: 7.0, ..Watched::default() });
 
         assert!(first.merge(second).is_none());
         assert_eq!(first.watched.as_ref().and_then(|seen| seen.at), Some(at("2026-11-12T20:00:00Z")));
@@ -635,6 +681,27 @@ mod tests {
         assert_eq!(title.key, TitleKey::new(TitleKind::Movie, TitleId::imdb("tt1")));
         assert!(title.available());
         assert!(title.played_by(&provider("stremio")));
+    }
+
+    #[test]
+    fn a_started_title_is_a_watch_even_with_no_minute_counted() {
+        // Stremio leaves `timeWatched` at 0 until it counts something; the
+        // position is what says the film was started, and how far it got.
+        let mut started = item("tt1", "stremio", "cinemeta");
+        started.last_watched = Some("2026-11-17T19:49:06.859Z".into());
+        started.position_ms = 2_271_644;
+        started.duration_ms = 6_628_768;
+        let seen = Title::of_item(&started).watched.expect("a started title kept its state");
+        assert_eq!(seen.minutes, 0.0);
+        assert_eq!(seen.state(), WatchedState::InProgress { position_ms: 2_271_644, duration_ms: 6_628_768 });
+        assert_eq!(seen.state().percent(), Some(34));
+
+        // A finished flag is the provider's word, whatever the position says.
+        let mut finished = item("tt2", "stremio", "cinemeta");
+        finished.finished = true;
+        assert_eq!(Title::of_item(&finished).watched.map(|seen| seen.state()), Some(WatchedState::Watched));
+
+        assert!(Title::of_item(&item("tt3", "stremio", "cinemeta")).watched.is_none(), "nothing played, nothing to say");
     }
 
     #[test]

@@ -758,7 +758,7 @@ impl CollectionView {
     /// L3 on a cover of the Watch space: the trailer plays from the list as it
     /// does from the title's page, where Y keeps the search it has here.
     pub(super) fn console_trailer_hint(&self) -> Option<Hint> {
-        (self.space == Space::Watch && self.selected.is_some()).then(|| hint(Btn::L3, tr!("Watch trailer")))
+        (self.space == Space::Watch && self.selected.is_some()).then(|| hint(Btn::L3, tr!("Play trailer")))
     }
 
     /// Hints of whatever takes the presses now.
@@ -815,10 +815,21 @@ impl CollectionView {
             }
         }
         let wanted = key.clone();
+        let details_wanted = key;
         self.console.art_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(220)).await;
             this.update(cx, |this, cx| {
                 this.console.art_key = wanted;
+                // A card rested on: what the metadata sources know about it, so
+                // the side panel can replace the catalogue's genres and length
+                // with the merged answer. Debounced like the art, so scrolling
+                // past a row does not ask for every title it crossed.
+                if this.space == crate::collection::Space::Watch {
+                    let game = details_wanted.as_deref().and_then(|key| this.lib.as_ref().and_then(|lib| lib.get(key))).cloned();
+                    if let Some(game) = game {
+                        this.watch_ensure_details(&game, cx);
+                    }
+                }
                 cx.notify();
             })
             .ok();

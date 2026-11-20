@@ -252,6 +252,55 @@ impl CollectionView {
         self.watch.info.item.as_deref() == Some(key) && matches!(self.watch.info.state, TitleState::Failed)
     }
 
+    /// What the page's own stream probe found for `game`, when it was about the
+    /// title itself: a film's answer is newer than the projection's, which only
+    /// knows what the last load asked. A series' answer is one episode's, so it
+    /// says nothing here.
+    pub(super) fn watch_streams_known(&self, game: &CollectionGame) -> Option<bool> {
+        if self.watch.item.as_deref() != Some(game.key.as_str()) || self.watch.video.is_some() {
+            return None;
+        }
+        match &self.watch.state {
+            StreamsState::Ready(streams) => Some(!streams.is_empty()),
+            _ => None,
+        }
+    }
+
+    /// The genres a card shows for `game`: the merged metadata's when that
+    /// answer has arrived (the focused title, cached for a week), else the
+    /// catalogue's own list from the projection.
+    pub(super) fn watch_card_genres(&self, game: &CollectionGame) -> Vec<String> {
+        self.watch_details(&game.key)
+            .map(|details| details.genres.clone())
+            .filter(|genres| !genres.is_empty())
+            .unwrap_or_else(|| game.details.genres.clone())
+    }
+
+    /// The length a card shows for `game` (`2h 53m`): the merged details'
+    /// runtime when it has arrived, else the catalogue's. `None` when neither
+    /// says — a source that knew the film may name no runtime at all. For a
+    /// series this is **one episode's**; the label comes from
+    /// `sources::length_label`.
+    pub(super) fn watch_card_runtime(&self, game: &CollectionGame) -> Option<String> {
+        self.watch_details(&game.key)
+            .and_then(|details| details.runtime.as_deref().and_then(crate::fork::watch::sources::runtime_minutes_of))
+            .or_else(|| crate::fork::watch::sources::runtime_minutes(game))
+            .map(heronite_data::collection::format_playtime_minutes)
+    }
+
+    /// The whole show at the length its episodes run: what watching it from the
+    /// first episode to the last takes. The episode count is the merged
+    /// details', so this arrives with that answer (and not before).
+    pub(super) fn watch_card_binge(&self, game: &CollectionGame) -> Option<String> {
+        use crate::fork::watch::sources;
+        if !sources::is_series(game) {
+            return None;
+        }
+        let details = self.watch_details(&game.key)?;
+        let per_episode = details.runtime.as_deref().and_then(sources::runtime_minutes_of).or_else(|| sources::runtime_minutes(game));
+        sources::binge_minutes(per_episode, details.episode_count()).map(heronite_data::collection::format_playtime_minutes)
+    }
+
     /// What is known about `key`'s trailer without asking: the details may not
     /// describe this title yet (a cover never opened it).
     fn watch_trailer(&self, key: &str) -> Trailer {
@@ -282,8 +331,25 @@ impl CollectionView {
         let id = video.clone().unwrap_or_else(|| crate::fork::watch::sources::id(game).to_owned());
         let provider = game.runner.clone();
         let kind = crate::fork::watch::sources::kind(game).to_owned();
+        let title_id = crate::fork::watch::sources::id(game).to_owned();
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { heronite_watch::playback::streams(&app, &provider, &kind, &id) }).await;
+            let result = cx
+                .background_spawn(async move {
+                    let answer = heronite_watch::playback::streams(&app, &provider, &kind, &id);
+                    // What the addons answered is the only proof a title can be
+                    // played: the projection keeps it so a card can dim a title
+                    // no source here has. A film's answer is the title's own; a
+                    // series' is one episode's and says nothing about the show.
+                    if kind == "movie" {
+                        if let Ok(streams) = &answer {
+                            if let Err(error) = heronite_watch::streams::note(&app, &provider, &kind, &title_id, streams.len()) {
+                                log::warn!("recording the stream probe: {error:#}");
+                            }
+                        }
+                    }
+                    answer
+                })
+                .await;
             this.update(cx, |this, cx| {
                 // Another title or episode took the page while this one loaded.
                 if this.watch.item.as_deref() != Some(key.as_str()) || this.watch.video != video {

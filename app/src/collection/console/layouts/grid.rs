@@ -558,17 +558,45 @@ impl CollectionView {
     }
 
     /// The focused game on the right of the grid: its wide art, name,
-    /// facts, when it was last played, time to beat, genres, overview.
+    /// facts, when it was last played (watched, in Watch), the time to beat
+    /// (the time to finish, for a film or a series), genres, overview.
     fn grid_panel(&mut self, g: &CollectionGame, w: f32, window: &Window) -> AnyElement {
         let theme = look::theme();
+        let watch = self.space == crate::collection::Space::Watch;
+        let dash = || "\u{2014}".to_string();
         let key = SharedString::from(g.key.clone());
         let art = self.console_wide_art(&key, w, (w * 9. / 16.).round(), 200, window);
         let size = HeroSize { title: 26., logo: (w, 64.), max_w: w, overview: 0 };
         let name = self.console_name(g, size, window);
-        let last = g.last_played.as_deref().and_then(played_ago).unwrap_or_else(|| tr!("Never").to_string());
-        let beat =
-            self.wiki.hltb(&g.title, &g.game.title).map(|h| h.main_story).filter(|h| *h > 0.).map_or_else(|| "\u{2014}".into(), hours_text);
-        let genres = if g.details.genres.is_empty() { "\u{2014}".to_string() } else { g.details.genres.join(", ") };
+        let last = match g.last_played.as_deref().and_then(played_ago) {
+            Some(ago) => ago,
+            None if watch => tr!("Not watched yet").to_string(),
+            None => tr!("Never").to_string(),
+        };
+        // HowLongToBeat knows games: on a film the cached answer would be a
+        // game's, so Watch shows the length the merged metadata gives, or the
+        // catalogue's until that answer arrives. A series' length is one
+        // episode's; the whole show is the binge row under it.
+        let length = if watch {
+            let finish = self.watch_card_runtime(g).unwrap_or_else(dash);
+            fact(watch_sources::length_label(g), finish)
+        } else {
+            let beat = self.wiki.hltb(&g.title, &g.game.title).map(|h| h.main_story).filter(|h| *h > 0.).map_or_else(dash, hours_text);
+            fact(tr!("Time to beat"), beat)
+        };
+        let binge = watch.then(|| self.watch_card_binge(g)).flatten().map(|time| fact(tr!("Time to binge"), time));
+        let genres = if watch {
+            let list = self.watch_card_genres(g);
+            if list.is_empty() {
+                dash()
+            } else {
+                list.join(", ")
+            }
+        } else if g.details.genres.is_empty() {
+            dash()
+        } else {
+            g.details.genres.join(", ")
+        };
         let overview = theme.hero.overview.then(|| self.console_overview(&g.key)).flatten();
         let panel = div()
             .relative()
@@ -595,8 +623,9 @@ impl CollectionView {
                     .flex_col()
                     .gap(u(5.))
                     .text_size(u(13.5))
-                    .child(fact(tr!("Last played"), last))
-                    .child(fact(tr!("Time to beat"), beat))
+                    .child(fact(if watch { tr!("Last watched") } else { tr!("Last played") }, last))
+                    .child(length)
+                    .children(binge)
                     .child(fact(tr!("Genre"), genres)),
             )
             .children(overview.map(|o| {

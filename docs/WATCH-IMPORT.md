@@ -961,7 +961,7 @@ it decides nothing — a **GAP** number (listed at the end with a recommendation
 | K3 | Search typed fast | debounce, cache per session (quota is per user) |
 | K4 | Metadata priority reordered | refetch (cache key is the ordered set) |
 | K5 | Trailer is a vertical Short | banner is the backdrop or a wide crop; no portrait frame |
-| K6 | No trailer | no `L3 · Watch trailer` hint on the title's page |
+| K6 | No trailer | no `L3 · Play trailer` hint on the title's page |
 | K7 | Catalog source off | it declares nothing; no rows, no errors |
 | K8 | Trailer from a cover | `L3` plays the focused title's trailer; its details are asked for first when the page was never opened |
 
@@ -1202,7 +1202,7 @@ way (§7.4).
 
 **US-21 — Trailer flow.**
 Given metadata sources on and a title with a trailer.
-When the film page opens. Then the hint bar offers `L3 · Watch trailer`, which plays
+When the film page opens. Then the hint bar offers `L3 · Play trailer`, which plays
 in mpv and records nothing; with no trailer the hint stays what it was; a vertical
 Short shows as a wide banner or a pillarboxed player frame, never a portrait.
 

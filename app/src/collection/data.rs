@@ -17,7 +17,7 @@ use heronite_data::{CollectionGame, GroupBy, Library, SortMode, ViewQuery};
 use super::vm::*;
 use crate::icons::Icon;
 use crate::theme;
-use heronite_i18n::{tr, trn};
+use heronite_i18n::{tr, trc, trn};
 
 fn parse_hex(hex: &str) -> Rgba {
     let h = hex.trim_start_matches('#');
@@ -26,19 +26,19 @@ fn parse_hex(hex: &str) -> Rgba {
 
 /// A card whose caption is `caption` instead of the playtime.
 /// `copies`: the game's copies when the card stands for all of them (none otherwise).
-fn card_vm_with(g: &CollectionGame, playing: bool, caption: Option<Caption>, copies: &[&Game]) -> Arc<CardVm> {
+fn card_vm_with(
+    g: &CollectionGame,
+    playing: bool,
+    caption: Option<Caption>,
+    copies: &[&Game],
+    space: crate::collection::Space,
+) -> Arc<CardVm> {
     Arc::new(CardVm {
         key: g.key.clone().into(),
         title: g.title.clone().into(),
-        caption: caption.unwrap_or_else(|| Caption {
-            icon: Icon::AccessTime,
-            text: collection::playtime_label(g.playtime_minutes).into(),
-            muted: false,
-            stars: None,
-            tint: None,
-        }),
+        caption: caption.unwrap_or_else(|| cover_caption(g, space)),
         installed: g.installed || copies.iter().any(|c| c.installed),
-        imported: crate::fork::watch::sources::imported(g),
+        imported: crate::fork::watch::sources::dimmed(g),
         playing,
         hidden: g.hidden,
         favourite: g.favourite,
@@ -46,6 +46,40 @@ fn card_vm_with(g: &CollectionGame, playing: bool, caption: Option<Caption>, cop
         copies: copies.len(),
         family: g.family.as_ref().map(|f| f.owner_name.trim().to_string().into()),
     })
+}
+
+/// The line under a cover nothing else captions: the playtime in Games; in
+/// Watch the watched time, or the state it is in. "Not Played" is a game's
+/// word, and it is wrong for a film whose provider counted no minute for it.
+fn cover_caption(g: &CollectionGame, space: crate::collection::Space) -> Caption {
+    use crate::fork::watch::sources::watch_state;
+    if space == crate::collection::Space::Games {
+        return Caption {
+            icon: Icon::AccessTime,
+            text: collection::playtime_label(g.playtime_minutes).into(),
+            muted: false,
+            stars: None,
+            tint: None,
+        };
+    }
+    watch_caption(g.playtime_minutes, watch_state(g))
+}
+
+/// [`cover_caption`] for a Watch title, over the two facts it reads.
+fn watch_caption(minutes: u64, state: crate::fork::watch::sources::WatchState) -> Caption {
+    use crate::fork::watch::sources::WatchState;
+    let shown = |icon, text: String| Caption { icon, text: text.into(), muted: false, stars: None, tint: None };
+    if minutes > 0 {
+        return shown(Icon::AccessTime, collection::format_playtime_minutes(minutes));
+    }
+    match state {
+        WatchState::Watched => shown(Icon::Check, tr!("Watched").to_string()),
+        WatchState::InProgress { percent: Some(percent) } => shown(Icon::AccessTime, tr!("In progress · {percent}%", percent = percent)),
+        // A different wording from the stats page's "In progress" column: the
+        // cover says the title was started, not that it is a running total.
+        WatchState::InProgress { percent: None } => shown(Icon::AccessTime, trc!("watch", "In progress").to_string()),
+        WatchState::Unseen => shown(Icon::VisibilityOff, tr!("Not watched").to_string()),
+    }
 }
 
 /// The line under a card's cover: the value the list is sorted by, so the
@@ -85,13 +119,20 @@ fn caption(g: &CollectionGame, sort: SortMode, o: &Organize, locale: DateLocale)
 
 /// The line under a cover for Settings → Appearance → "Under the cover";
 /// `None` keeps the playtime. Title and Nothing hide the line.
-fn chosen_caption(g: &CollectionGame, lib: &Library, ui: &UiState, o: &Organize) -> Option<Caption> {
+fn chosen_caption(g: &CollectionGame, lib: &Library, ui: &UiState, o: &Organize, space: crate::collection::Space) -> Option<Caption> {
+    let watch = space == crate::collection::Space::Watch;
     match theme::appearance().cover_label {
         CoverLabel::Auto => caption(g, ui.sort, o, lib.date_locale),
         CoverLabel::Playtime | CoverLabel::Title | CoverLabel::Nothing => None,
         CoverLabel::LastPlayed => Some(match g.last_played.as_deref().and_then(days_since) {
             Some(days) => Caption { icon: Icon::History, text: days_ago(days).into(), muted: false, stars: None, tint: None },
-            None => Caption { icon: Icon::History, text: tr!("Never played").into(), muted: true, stars: None, tint: None },
+            None => Caption {
+                icon: Icon::History,
+                text: if watch { tr!("Not watched yet") } else { tr!("Never played") }.into(),
+                muted: true,
+                stars: None,
+                tint: None,
+            },
         }),
         CoverLabel::Status => display_status(g.status_raw.as_deref(), &lib.statuses).map(|st| Caption {
             icon: Icon::Flag,
@@ -145,6 +186,7 @@ pub(super) fn build_groups(
     launch_step: &dyn Fn(&str) -> Option<SharedString>,
     organize: &Organize,
     smart: &[organize::SmartSection],
+    space: crate::collection::Space,
 ) -> Vec<GroupVm> {
     let mut filtered = collection::filter_games_organized(&lib.games, &view_query(ui, search), keep, organize);
     if ui.group_copies {
@@ -154,7 +196,7 @@ pub(super) fn build_groups(
     let card = |g: &Game| {
         // A launch that is preparing says its step under the cover.
         let step = launch_step(&g.key).map(|text| Caption { icon: Icon::Refresh, text, muted: false, stars: None, tint: None });
-        card_vm_with(g, is_playing(&g.key), step.or_else(|| chosen_caption(g, lib, ui, organize)), &copies(g))
+        card_vm_with(g, is_playing(&g.key), step.or_else(|| chosen_caption(g, lib, ui, organize, space)), &copies(g), space)
     };
     let icon = group_icon(ui.group_by);
     organize::group_games_with(&filtered, ui.group_by, organize, smart)
@@ -458,5 +500,21 @@ mod hltb_year_tests {
         assert_eq!(year_in("TBA"), None);
         assert_eq!(year_in("12345"), None, "not part of a longer number");
         assert_eq!(year_in("1234"), None, "not a plausible year");
+    }
+}
+
+#[cfg(test)]
+mod watch_caption_tests {
+    use super::watch_caption;
+    use crate::fork::watch::sources::WatchState;
+
+    #[test]
+    fn a_watch_cover_says_its_state_and_never_a_games_word() {
+        assert_eq!(watch_caption(0, WatchState::Unseen).text.as_ref(), "Not watched");
+        assert_eq!(watch_caption(0, WatchState::Watched).text.as_ref(), "Watched");
+        assert_eq!(watch_caption(0, WatchState::InProgress { percent: Some(34) }).text.as_ref(), "In progress \u{b7} 34%");
+        assert_eq!(watch_caption(0, WatchState::InProgress { percent: None }).text.as_ref(), "In progress");
+        assert_eq!(watch_caption(65, WatchState::Watched).text.as_ref(), "1h 5m", "the time watched wins when it is known");
+        assert_eq!(watch_caption(0, WatchState::Unseen).icon, crate::icons::Icon::VisibilityOff);
     }
 }

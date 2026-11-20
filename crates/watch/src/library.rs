@@ -21,8 +21,8 @@ use heronite_watch_core::catalog::{CatalogCtx, CatalogRequest, WatchCatalogSourc
 use heronite_watch_core::collections::CollectionDescriptor;
 use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::provider::{Ctx, Rail, RailDescriptor};
-use heronite_watch_core::title::{RailMark, Title, TitleKey, IMPORTED_ADDON};
-use heronite_watch_core::types::MovieItem;
+use heronite_watch_core::title::{RailMark, Title, TitleKey, Watched, IMPORTED_ADDON};
+use heronite_watch_core::types::{MovieItem, MovieProgress};
 use heronite_watch_state::catalog_cache::CatalogIds;
 use heronite_watch_state::collection::{self, Fetched};
 use heronite_watch_state::placeholders::Placeholder;
@@ -103,6 +103,24 @@ impl Titles {
         &self.items
     }
 
+    /// Folds this machine's own records into the titles.
+    ///
+    /// The projection carries what the provider answered; a mark made on the
+    /// page, or a playback the provider has not been told about yet, lives in
+    /// `movies.json` only. Without this fold a cover says "Not watched" under a
+    /// page that says "Watched".
+    pub fn fold_local_progress(&mut self, local: &crate::progress::LocalProgress) {
+        if local.is_empty() {
+            return;
+        }
+        for title in &mut self.items {
+            let record = title.providers.iter().find_map(|provider| local.for_title(provider.as_str(), title.key.id.as_str()));
+            if let Some(record) = record {
+                fold_watch(title, record);
+            }
+        }
+    }
+
     /// The titles, consuming the container.
     pub fn into_titles(self) -> Vec<Title> {
         self.items
@@ -166,9 +184,9 @@ impl Titles {
 /// The title a projection record is: the read-back adapter.
 ///
 /// `CollectionGame` is upstream's view shape, so this adapter lives here rather
-/// than beside `Title`. It reads the keys the writer froze; the catalogue that
-/// listed a title is not among them, so a reconstructed feed mark has no source
-/// until the writer records one.
+/// than beside `Title`. It reads the keys the writer froze, including the
+/// catalogue that listed the title (`extra.watchSource`), so a feed mark comes
+/// back with its source.
 pub fn title_of_game(game: &CollectionGame) -> Title {
     let extra = game.game.extra.as_ref();
     let field = |key: &str| extra.and_then(|extra| extra.get(key));
@@ -185,16 +203,44 @@ pub fn title_of_game(game: &CollectionGame) -> Title {
         background: game.game.art_background.clone(),
         logo: game.game.art_logo.clone(),
         description: game.metadata.as_ref().and_then(|metadata| metadata.description.clone()),
+        runtime: field(collection::RUNTIME_KEY).and_then(serde_json::Value::as_str).map(str::to_owned),
+        released: field(collection::RELEASED_KEY).and_then(serde_json::Value::as_str).map(str::to_owned),
         genres: game.metadata.as_ref().map(|metadata| metadata.genres.clone()).unwrap_or_default(),
         top: field("stremioTop").and_then(serde_json::Value::as_bool).unwrap_or(false),
         catalog: field(collection::CATALOG_KEY).and_then(serde_json::Value::as_str).map(str::to_owned),
         last_watched: game.last_played.clone(),
         minutes_played: game.playtime_minutes as f64,
+        position_ms: field(collection::POSITION_KEY).and_then(serde_json::Value::as_u64).unwrap_or(0),
+        duration_ms: field(collection::DURATION_KEY).and_then(serde_json::Value::as_u64).unwrap_or(0),
+        finished: field(collection::FINISHED_KEY).and_then(serde_json::Value::as_bool).unwrap_or(false),
         provider: if imported { String::new() } else { game.runner.clone() },
-        addon: if imported { IMPORTED_ADDON.to_owned() } else { String::new() },
-        ..MovieItem::default()
+        addon: if imported {
+            IMPORTED_ADDON.to_owned()
+        } else {
+            field(collection::SOURCE_KEY).and_then(serde_json::Value::as_str).map(str::to_owned).unwrap_or_default()
+        },
     };
     Title::of_item(&item)
+}
+
+/// Folds one local record into a title: the later observation wins, as
+/// [`Title::merge`] decides between two providers' states. The minutes stay the
+/// provider's (a mark made by hand says nothing about time spent); the position,
+/// the length and the flag come from the record this machine wrote.
+fn fold_watch(title: &mut Title, local: &MovieProgress) {
+    let provider = title.watched.take();
+    if provider.as_ref().and_then(|seen| seen.at).is_some_and(|at| at > local.updated_at) {
+        title.watched = provider;
+        return;
+    }
+    let minutes = provider.as_ref().map_or(0.0, |seen| seen.minutes);
+    title.watched = Some(Watched {
+        at: Some(local.updated_at),
+        minutes,
+        position_ms: local.position_ms,
+        duration_ms: local.duration_ms,
+        finished: local.finished,
+    });
 }
 
 /// The item a placeholder is: a title a provider knows and no source here plays.
@@ -258,7 +304,8 @@ fn items(http: &dyn Transport, app: &AppPaths, collections: &[(String, Collectio
     // The collection rails the person turned on: their mark, and the titles they
     // brought that nothing else did. What they did not bring leaves with them.
     let (collections, answered) = collection_rails(http, app, collections);
-    let titles = Titles::from_parts(Parts { rails, collections, shelf: &kept, placeholders: &imported.items });
+    let mut titles = Titles::from_parts(Parts { rails, collections, shelf: &kept, placeholders: &imported.items });
+    titles.fold_local_progress(&crate::progress::LocalProgress::read(app));
     Ok(Fetched { titles: titles.into_titles(), answered })
 }
 
@@ -423,6 +470,32 @@ mod tests {
 
     fn rail(id: &'static str, items: Vec<Title>) -> Rail {
         Rail { catalog: RailDescriptor { id, kind: "movie" }, items }
+    }
+
+    #[test]
+    fn a_mark_made_here_reaches_the_title_the_screens_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = AppPaths::for_data(&DataPaths::at(dir.path().to_path_buf()));
+        // A title the provider never counted, marked watched on its page: the
+        // record lives in `movies.json`, and without the fold the cover would
+        // still say it was never watched.
+        let mut titles = Titles::from_parts(Parts {
+            rails: vec![rail("top", vec![title("tt1", false)])],
+            collections: Vec::new(),
+            shelf: &[],
+            placeholders: &[],
+        });
+        use crate::progress::{Mark, MarkTarget};
+        let mark =
+            Mark { provider: "stremio", id: "tt1", imdb: Some("tt1"), kind: "movie", name: "tt1", year: None, target: MarkTarget::Movie };
+        assert!(crate::progress::set_watched(&app, &mark, true).is_ok());
+
+        titles.fold_local_progress(&crate::progress::LocalProgress::read(&app));
+
+        let seen = titles.get(&TitleKey::of_source("movie", "tt1", &provider())).and_then(|title| title.watched.as_ref());
+        let seen = seen.expect("the mark reaches the title");
+        assert_eq!(seen.state(), heronite_watch_core::progress::WatchedState::Watched);
+        assert_eq!(seen.minutes, 0.0, "a mark by hand says nothing about time spent");
     }
 
     fn shelf_item(id: &str) -> ShelfTitle {
@@ -634,7 +707,7 @@ mod tests {
     }
 
     #[test]
-    fn a_title_comes_back_from_the_projection_with_its_documented_losses() {
+    fn a_title_comes_back_from_the_projection_with_its_catalogue_and_its_state() {
         let dir = tempfile::tempdir().unwrap();
         let mut item = MovieItem {
             id: "tt1".into(),
@@ -665,12 +738,39 @@ mod tests {
         assert_eq!(title.rails.len(), 1, "one record carries one mark");
         assert_eq!(
             title.rails[0],
-            RailMark::feed("", "movie:top:Popular"),
-            "the catalogue that listed it is not in the projection, so a feed mark comes back without its source"
+            RailMark::feed("tmdb", "movie:top:Popular"),
+            "the catalogue that listed it travels in the record's watchSource"
         );
         let stamp = chrono::DateTime::parse_from_rfc3339("2026-11-12T20:00:00Z").expect("an rfc3339 instant");
         assert_eq!(title.watched.as_ref().and_then(|seen| seen.at), Some(stamp.with_timezone(&chrono::Utc)));
         assert_eq!(title.watched.as_ref().map(|seen| seen.minutes), Some(42.0));
+    }
+
+    #[test]
+    fn a_stream_probe_marks_the_record_and_the_writer_reads_it_back() {
+        use heronite_watch_state::streams;
+        let dir = tempfile::tempdir().unwrap();
+        let app = AppPaths::for_data(&DataPaths::at(dir.path().to_path_buf()));
+        // The projection root lives under the cache; a probe is kept beside it.
+        let root = app.cache.join(heronite_watch_state::collection::ROOT);
+        std::fs::create_dir_all(&root).unwrap();
+        streams::note(&app, "stremio", "movie", "tt1", 0).unwrap();
+        let item = MovieItem {
+            id: "tt1".into(),
+            kind: "movie".into(),
+            name: "A Film".into(),
+            provider: "stremio".into(),
+            addon: "cinemeta".into(),
+            catalog: Some("movie:cinemeta:top:Popular".into()),
+            ..MovieItem::default()
+        };
+        heronite_watch_state::collection::write_root(&root, &[Title::of_item(&item)]).unwrap();
+
+        let library = Library::load_with(&DataPaths::at(root.clone()), true).unwrap();
+        let extra = library.games[0].game.extra.as_ref().expect("the record's extra");
+        assert_eq!(extra[heronite_watch_state::collection::SOURCE_KEY], "cinemeta", "where it was listed");
+        assert_eq!(extra[heronite_watch_state::collection::STREAMS_KEY], false, "asked, and no stream answered");
+        assert!(library.games[0].installed, "the record is still playable in principle; the probe is a separate fact");
     }
 
     #[test]
@@ -679,7 +779,15 @@ mod tests {
         let at = chrono::DateTime::parse_from_rfc3339("2026-11-12T20:00:00Z").expect("an rfc3339 instant").with_timezone(&chrono::Utc);
         let mut listed = title("tt1", true);
         listed.rails = vec![RailMark::feed("tmdb", "movie:top:Popular")];
-        listed.watched = Some(heronite_watch_core::title::Watched { at: Some(at), minutes: 42.0 });
+        listed.released = Some("2026-11-14".into());
+        listed.runtime = Some("173 min".into());
+        listed.watched = Some(heronite_watch_core::title::Watched {
+            at: Some(at),
+            minutes: 42.0,
+            position_ms: 2_271_644,
+            duration_ms: 6_628_768,
+            finished: false,
+        });
         let placeholders = vec![placeholder("tt9")];
         let titles = Titles::from_parts(Parts {
             rails: vec![rail("top", vec![listed])],
@@ -697,7 +805,7 @@ mod tests {
                 .iter()
                 .map(|title| {
                     format!(
-                        "{}|{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+                        "{}|{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
                         title.key.id.as_str(),
                         title.available(),
                         title.providers.len(),
@@ -705,6 +813,8 @@ mod tests {
                         title.rails.first().map(RailMark::as_wire),
                         title.name,
                         title.release,
+                        title.released,
+                        title.runtime,
                         title.description,
                         title.genres,
                         title.art,

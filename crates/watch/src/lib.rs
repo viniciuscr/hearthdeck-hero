@@ -56,6 +56,22 @@ pub mod types {
     pub use heronite_watch_core::types::StreamChoice;
 }
 
+/// The keys the projection keeps in a record's `extra` beyond the Heroic shape:
+/// where a provider left off, how long a title runs, when it came out, where it
+/// was listed and what the last stream probe found. The app reads them off the
+/// loaded library and never asks a source for them.
+pub mod projection {
+    pub use heronite_watch_state::collection::{
+        DURATION_KEY, FINISHED_KEY, POSITION_KEY, RELEASED_KEY, RUNTIME_KEY, SOURCE_KEY, STREAMS_KEY,
+    };
+}
+
+/// What the stream addons answered when a title was last asked: the page's own
+/// probe, kept for a week so a card can say a title cannot be played.
+pub mod streams {
+    pub use heronite_watch_state::streams::{availability, note, read, Availability, Probe, FILE, TTL_DAYS};
+}
+
 /// Whether this system ships the Watch space: Linux, with at least one
 /// provider built in.
 pub fn available() -> bool {

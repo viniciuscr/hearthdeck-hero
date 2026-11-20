@@ -46,10 +46,39 @@ const PLAYS_WITH: &str = "stremio";
 const PAGE: u32 = 20;
 /// The last page TMDB answers; past it the API errors instead of ending.
 const MAX_PAGE: u32 = 500;
-/// Years offered as a filter: this year and the 39 before it.
+/// The years offered as a filter: this year and the 39 before it.
 const YEARS: i32 = 40;
 /// A rating order over the whole catalogue is noise without a floor.
 const MIN_VOTES: &str = "200";
+/// The rating floors the filter offers, best first (`vote_average.gte`, without
+/// the sign). A floor alone would let a one-vote title win, so it always travels
+/// with the vote floor above.
+const RATINGS: [&str; 4] = ["9+", "8+", "7+", "6+"];
+/// Length buckets, one choice in the panel and a `with_runtime` pair in the
+/// query. For a show it is the episode's length, which is what TMDB measures.
+const LENGTHS: [&str; 3] = ["short", "medium", "long"];
+/// The original languages the filter offers, in their own words (a language
+/// reads the same in every UI language) and TMDB's code.
+const LANGUAGES: [(&str, &str); 12] = [
+    ("English", "en"),
+    ("Español", "es"),
+    ("Français", "fr"),
+    ("Deutsch", "de"),
+    ("Português", "pt"),
+    ("Italiano", "it"),
+    ("日本語", "ja"),
+    ("한국어", "ko"),
+    ("中文", "zh"),
+    ("हिन्दी", "hi"),
+    ("Русский", "ru"),
+    ("Türkçe", "tr"),
+];
+/// `include_adult`: unset is TMDB's own default (adult titles left out), and the
+/// row offers both answers so the choice is explicit.
+const ADULT: [&str; 2] = ["hide", "show"];
+/// A show's production status (`with_status`): the three a browsing person asks
+/// for. The rest (planned, in production, pilot) are TMDB's and not offered.
+const STATUSES: [(&str, u8); 3] = [("returning", 0), ("ended", 3), ("canceled", 4)];
 
 const DESCRIPTOR: CatalogSourceDescriptor = CatalogSourceDescriptor { id: "tmdb", name: "TMDB" };
 
@@ -77,20 +106,16 @@ impl WatchCatalogSource for Tmdb {
     }
 
     /// One `discover` catalog per kind: the sorts TMDB can order by on the
-    /// server, its genres and a year.
+    /// server, its genres and year, and the discover fields the panel offers —
+    /// a rating floor, a length bucket, an original language and adult titles,
+    /// plus a show's production status (films have none).
     fn catalogs(&self, ctx: &CatalogCtx<'_>) -> Result<Vec<CatalogDescriptor>> {
         let key = api_key(ctx.credentials)?;
         let genres = self.genres(ctx, &key)?;
         Ok(KINDS
             .iter()
-            .map(|kind| CatalogDescriptor {
-                id: "discover".into(),
-                // The chip is the catalogue's name, not the endpoint's: `discover`
-                // is where the page comes from.
-                name: "TMDB".into(),
-                kind: (*kind).to_owned(),
-                sorts: vec![CatalogSort::Popular, CatalogSort::Rating, CatalogSort::Newest, CatalogSort::Title],
-                filters: vec![
+            .map(|kind| {
+                let mut filters = vec![
                     CatalogFilter {
                         id: "genre".into(),
                         label: "genre".into(),
@@ -98,9 +123,50 @@ impl WatchCatalogSource for Tmdb {
                         required: false,
                     },
                     CatalogFilter { id: "year".into(), label: "year".into(), values: years(), required: false },
-                ],
-                search: true,
-                paging: true,
+                    CatalogFilter {
+                        id: "rating".into(),
+                        label: "rating".into(),
+                        values: RATINGS.iter().map(|r| (*r).to_owned()).collect(),
+                        required: false,
+                    },
+                    CatalogFilter {
+                        id: "length".into(),
+                        label: "length".into(),
+                        values: LENGTHS.iter().map(|l| (*l).to_owned()).collect(),
+                        required: false,
+                    },
+                    CatalogFilter {
+                        id: "language".into(),
+                        label: "language".into(),
+                        values: LANGUAGES.iter().map(|(name, _)| (*name).to_owned()).collect(),
+                        required: false,
+                    },
+                    CatalogFilter {
+                        id: "adult".into(),
+                        label: "adult".into(),
+                        values: ADULT.iter().map(|a| (*a).to_owned()).collect(),
+                        required: false,
+                    },
+                ];
+                if *kind == "series" {
+                    filters.push(CatalogFilter {
+                        id: "status".into(),
+                        label: "status".into(),
+                        values: STATUSES.iter().map(|(name, _)| (*name).to_owned()).collect(),
+                        required: false,
+                    });
+                }
+                CatalogDescriptor {
+                    id: "discover".into(),
+                    // The chip is the catalogue's name, not the endpoint's:
+                    // `discover` is where the page comes from.
+                    name: "TMDB".into(),
+                    kind: (*kind).to_owned(),
+                    sorts: vec![CatalogSort::Popular, CatalogSort::Rating, CatalogSort::Newest, CatalogSort::Title],
+                    filters,
+                    search: true,
+                    paging: true,
+                }
             })
             .collect())
     }
@@ -120,10 +186,21 @@ impl WatchCatalogSource for Tmdb {
         let mut query: Vec<(String, String)> =
             vec![("api_key".to_owned(), key.clone()), ("page".to_owned(), page.to_string()), ("language".to_owned(), "en-US".to_owned())];
         if let Some(search) = search {
+            // `/search` takes a query and nothing of the discover grammar: the
+            // panel hides the browse filters while a search is typed.
             query.push(("query".to_owned(), search.to_owned()));
         } else {
             query.push(("sort_by".to_owned(), sort_of(request.sort, kind).to_owned()));
-            if request.sort == CatalogSort::Rating {
+            // A rating order or floor without a vote floor is one ten-vote title
+            // among thousands.
+            let mut vote_floor = request.sort == CatalogSort::Rating;
+            if let Some(rating) = chosen(&request.filters, "rating").map(|value| value.trim_end_matches('+').trim()) {
+                if rating.parse::<f32>().is_ok() {
+                    query.push(("vote_average.gte".to_owned(), rating.to_owned()));
+                    vote_floor = true;
+                }
+            }
+            if vote_floor {
                 query.push(("vote_count.gte".to_owned(), MIN_VOTES.to_owned()));
             }
             if let Some(year) = chosen(&request.filters, "year") {
@@ -135,6 +212,26 @@ impl WatchCatalogSource for Tmdb {
                 if let Some((id, _)) = genres.of(kind).iter().find(|(_, name)| name == genre) {
                     query.push(("with_genres".to_owned(), id.to_string()));
                 }
+            }
+            match chosen(&request.filters, "length") {
+                Some("short") => query.push(("with_runtime.lte".to_owned(), "89".to_owned())),
+                Some("medium") => {
+                    query.push(("with_runtime.gte".to_owned(), "90".to_owned()));
+                    query.push(("with_runtime.lte".to_owned(), "120".to_owned()));
+                }
+                Some("long") => query.push(("with_runtime.gte".to_owned(), "121".to_owned())),
+                _ => {}
+            }
+            if let Some(code) = chosen(&request.filters, "language").and_then(language_code) {
+                query.push(("with_original_language".to_owned(), code.to_owned()));
+            }
+            match chosen(&request.filters, "adult") {
+                Some("hide") => query.push(("include_adult".to_owned(), "false".to_owned())),
+                Some("show") => query.push(("include_adult".to_owned(), "true".to_owned())),
+                _ => {}
+            }
+            if let Some(status) = chosen(&request.filters, "status").and_then(status_number) {
+                query.push(("with_status".to_owned(), status.to_string()));
             }
         }
         url.query_pairs_mut().extend_pairs(query.iter().map(|(key, value)| (key.as_str(), value.as_str())));
@@ -285,6 +382,16 @@ fn sort_of(sort: CatalogSort, kind: &str) -> &'static str {
 /// The value chosen for a filter, when one is.
 fn chosen<'a>(filters: &'a [(String, String)], id: &str) -> Option<&'a str> {
     filters.iter().find(|(filter, _)| filter == id).map(|(_, value)| value.as_str()).filter(|value| !value.is_empty())
+}
+
+/// TMDB's language code for the language filter's value (`日本語` → `ja`).
+fn language_code(value: &str) -> Option<&'static str> {
+    LANGUAGES.iter().find(|(name, _)| *name == value).map(|(_, code)| *code)
+}
+
+/// The number `with_status` takes for the status filter's value.
+fn status_number(value: &str) -> Option<u8> {
+    STATUSES.iter().find(|(name, _)| *name == value).map(|(_, number)| *number)
 }
 
 /// The years the year filter offers, newest first.
@@ -567,9 +674,20 @@ mod tests {
         assert_eq!(genre.values, ["Action", "Science Fiction"], "TMDB's own genres");
         let year = film.filters.iter().find(|filter| filter.id == "year").unwrap();
         assert_eq!(year.values.len(), YEARS as usize);
+        let ids: Vec<&str> = film.filters.iter().map(|filter| filter.id.as_str()).collect();
+        assert_eq!(ids, ["genre", "year", "rating", "length", "language", "adult"], "the discover fields the panel offers");
+        let values = |id: &str| film.filters.iter().find(|filter| filter.id == id).unwrap().values.clone();
+        assert_eq!(values("rating"), RATINGS);
+        assert_eq!(values("length"), LENGTHS);
+        assert_eq!(values("language").len(), LANGUAGES.len());
+        assert!(values("language").iter().any(|name| name == "日本語"), "a language reads in its own words");
+        assert_eq!(values("adult"), ADULT);
         assert_eq!(catalogs[1].kind, "series", "Watch's vocabulary, not TMDB's");
         let tv_genre = catalogs[1].filters.iter().find(|filter| filter.id == "genre").unwrap();
         assert_eq!(tv_genre.values, ["Drama"], "series have their own genre list");
+        let status = catalogs[1].filters.iter().find(|filter| filter.id == "status").expect("a show has a production status");
+        assert_eq!(status.values, ["returning", "ended", "canceled"]);
+        assert!(!ids.contains(&"status"), "a film has none");
     }
 
     #[test]
@@ -605,6 +723,41 @@ mod tests {
         assert!(discover.contains("with_genres=878"), "the genre name became TMDB's id: {discover}");
         assert!(discover.contains("primary_release_year=1999"), "{discover}");
         assert!(discover.contains("page=3"), "skip 40 is page 3 of twenty: {discover}");
+    }
+
+    #[test]
+    fn the_rating_the_length_the_language_and_adult_go_into_the_query() {
+        let http = Fake::new();
+        let credentials = Keyed(Some("test-key"));
+        let mut request = CatalogRequest::first("movie");
+        request.filters = vec![
+            ("rating".into(), "8+".into()),
+            ("length".into(), "medium".into()),
+            ("language".into(), "日本語".into()),
+            ("adult".into(), "show".into()),
+        ];
+        Tmdb::new().catalog(&ctx_with(&http, &credentials), &request).unwrap();
+        let asked = http.seen.lock().unwrap().clone();
+        let discover = asked.iter().find(|url| url.contains("/discover/movie")).expect("a discover request");
+        assert!(discover.contains("vote_average.gte=8"), "the sign is the panel's, not the API's: {discover}");
+        assert!(discover.contains("vote_count.gte=200"), "a floor needs a vote floor too: {discover}");
+        assert!(discover.contains("with_runtime.gte=90") && discover.contains("with_runtime.lte=120"), "{discover}");
+        assert!(discover.contains("with_original_language=ja"), "the endonym became a code: {discover}");
+        assert!(discover.contains("include_adult=true"), "{discover}");
+    }
+
+    #[test]
+    fn a_shows_status_and_hidden_adult_titles_go_into_the_query() {
+        let http = Fake::new();
+        let credentials = Keyed(Some("test-key"));
+        let mut request = CatalogRequest::first("series");
+        request.filters = vec![("status".into(), "canceled".into()), ("adult".into(), "hide".into()), ("length".into(), "long".into())];
+        Tmdb::new().catalog(&ctx_with(&http, &credentials), &request).unwrap();
+        let asked = http.seen.lock().unwrap().clone();
+        let discover = asked.iter().find(|url| url.contains("/discover/tv")).expect("a discover request for the show");
+        assert!(discover.contains("with_status=4"), "canceled is TMDB's 4: {discover}");
+        assert!(discover.contains("include_adult=false"), "{discover}");
+        assert!(discover.contains("with_runtime.gte=121"), "a long episode: {discover}");
     }
 
     #[test]

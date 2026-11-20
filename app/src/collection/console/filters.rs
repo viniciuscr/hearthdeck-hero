@@ -80,6 +80,7 @@ impl CollectionView {
     /// Opens the panel with the search field focused.
     pub(super) fn open_console_filters(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.console.filters = Some(FiltersNav::default());
+        super::watch_panel::filter_panel_opened();
         cx.notify();
     }
 
@@ -105,8 +106,10 @@ impl CollectionView {
             let mut v = vec![Item::Search];
             if let Some(kind) = crate::collection::watch_catalog::feed_kind(&spec.source) {
                 // A catalog tab is browsed by what the provider declares: its
-                // catalogs, the orders it can page by, and its own filters.
-                if !self.watch_catalogs_of(kind).is_empty() {
+                // catalogs, the orders it can page by, and its own filters — none
+                // of which a search carries (TMDB's `/search` takes no discover
+                // filters), so the panel keeps only the field while one is typed.
+                if self.console.search.trim().is_empty() && !self.watch_catalogs_of(kind).is_empty() {
                     v.push(Item::Catalog);
                     let descriptor = self.watch_descriptor(kind);
                     if descriptor.as_ref().is_some_and(|(_, descriptor)| descriptor.sorts.len() > 1) {

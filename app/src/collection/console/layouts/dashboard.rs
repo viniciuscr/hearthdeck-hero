@@ -509,10 +509,23 @@ impl CollectionView {
         let ph = h - 24.;
         let pw = (ph / self.cover_aspect).min(w * 0.4);
         let cover = self.cover(key, pw * kit::scale(), ph * kit::scale(), window.scale_factor(), if on { 200 } else { 50 });
-        let beat = self.wiki.hltb(&game.title, &game.game.title).map(|e| e.main_story).filter(|h| *h > 0.);
-        let line = match beat {
-            Some(hours) => tr!("About {hours} h to beat", hours = hours.round() as u32),
-            None => tr!("Not played yet").to_string(),
+        // HowLongToBeat knows games; a film's line is its own length, a show's
+        // is the whole run, and when neither is known, what the person last
+        // watched.
+        let line = if self.space == crate::collection::Space::Watch {
+            if let Some(binge) = self.watch_card_binge(&game) {
+                format!("{} · {binge}", tr!("Time to binge"))
+            } else if let Some(time) = self.watch_card_runtime(&game) {
+                format!("{} · {time}", crate::fork::watch::sources::length_label(&game))
+            } else {
+                played_line(crate::collection::Space::Watch, &game, false)
+            }
+        } else {
+            let beat = self.wiki.hltb(&game.title, &game.game.title).map(|e| e.main_story).filter(|h| *h > 0.);
+            match beat {
+                Some(hours) => tr!("About {hours} h to beat", hours = hours.round() as u32),
+                None => tr!("Not played yet").to_string(),
+            }
         };
         panel()
             .flex_row()

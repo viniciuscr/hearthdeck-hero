@@ -82,7 +82,7 @@ impl CollectionView {
         };
         let step = |key: &str| lib.get(key).and_then(|g| self.preparing.get(&g.app_name)).map(|s| s.label());
         let smart = if self.ui.group_by == GroupBy::Category { self.smart_sections() } else { Vec::new() };
-        let mut groups = data::build_groups(&lib, &self.ui, &self.search, &keep, &is_playing, &step, &organize, &smart);
+        let mut groups = data::build_groups(&lib, &self.ui, &self.search, &keep, &is_playing, &step, &organize, &smart, self.space);
         if self.ui.group_by == GroupBy::Category {
             // A manual category's header has its colour's dot, a smart one's the sparkle.
             for g in &mut groups {

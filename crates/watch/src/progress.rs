@@ -35,6 +35,31 @@ fn record_for<'a>(movies: &'a store::MoviesFile, provider: &str, id: &str) -> Op
         .or_else(|| movies.progress.iter().find(|record| record.id == id || record.imdb.as_deref() == Some(id)))
 }
 
+/// The stored records, read once so a whole library can be folded into the
+/// projection without reading `movies.json` per title.
+///
+/// The projection carries what the provider answered; a mark made on the page
+/// or a playback the provider has not been told about yet lives only here, and
+/// a cover that read the provider alone would say "Not watched" under a page
+/// that says "Watched".
+pub struct LocalProgress(store::MoviesFile);
+
+impl LocalProgress {
+    pub fn read(app: &AppPaths) -> Self {
+        Self(store::read_movies(app))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.progress.is_empty()
+    }
+
+    /// The record for a title `provider` plays: the same lookup [`local`] makes,
+    /// without the file read.
+    pub fn for_title(&self, provider: &str, id: &str) -> Option<&MovieProgress> {
+        record_for(&self.0, provider, id)
+    }
+}
+
 /// What a mark is about: the film, or one episode of a series.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkTarget<'a> {

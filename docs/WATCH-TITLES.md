@@ -82,12 +82,24 @@ pub enum RailMark {
     Collection(String),                       // a rail the person turned on
 }
 
-pub struct Watched { pub at: Option<DateTime<Utc>>, pub minutes: f64 }
+pub struct Watched {
+    pub at: Option<DateTime<Utc>>,
+    pub minutes: f64,
+    /// `timeOffset` / `duration` / `flaggedWatched`: what says "in progress"
+    /// when `timeWatched` counted nothing (a film that was only started).
+    pub position_ms: u64,
+    pub duration_ms: u64,
+    pub finished: bool,
+}
 
 pub struct Title {
     pub key: TitleKey,
     pub name: String,
     pub release: Option<String>,   // as the library prints it ("1999", "2011–2019")
+    /// The day it came out (`1999-03-31`), when a source says it.
+    pub released: Option<String>,
+    /// How long it runs, in the source's words (`136 min`).
+    pub runtime: Option<String>,
     pub art: Art,
     pub description: Option<String>,
     pub genres: Vec<String>,
@@ -118,20 +130,28 @@ pub struct Title {
   `watch-imported.json` for an import.
 - **`Title::merge` is the only way two observations become one**, one field at a
   time — the `TitleDetails::merge` rule:
-  - name, release, description, genres, art: the **first non-empty** value
-    wins, so a provider that answers with a poster fills a title another left
-    bare; `merge` is therefore idempotent but **not** commutative.
+  - name, release, released, runtime, description, genres, art: the **first
+    non-empty** value wins, so a provider that answers with a poster fills a
+    title another left bare; `merge` is therefore idempotent but **not**
+    commutative.
   - `providers` and `rails`: union, order preserved (`rails` keeps the first
     mark as the one that names the title).
-  - `watched`: the later `at` wins, with its `minutes`; a tie keeps the left.
+  - `watched`: the later `at` wins, with its `minutes`, its position and its
+    flag; a tie keeps the left.
   - `top`: `any`.
 - **Episodes are not a kind.** Catalogue pages carry `movie|series`; an episode
   is a `metadata::Episode` inside a series, with per-episode state in
   `movies.json`. `TitleKind` stays two, because `type:movie`/`type:series` tab
   sources, `stremioType` and the writer's keys all mean the two.
-- **`runtime` is not on a title.** Nothing reads it; the film page takes it from
-  `TitleDetails`. The `MovieItem` wire record still carries the field, which
-  nothing now writes or reads — a leftover, not a decision.
+- **The catalogue's facts travel with the title.** `released` (the day, not the
+  year) and `runtime` are what a card needs: "New" measures the first — a
+  catalogue has no added date, so the library's first load would mark every
+  title new — and the facts line prints the second under its own name (**Runtime**
+  for a film, **Episode runtime** for a show, whose sources never give a whole
+  run), because How Long To Beat knows games. Both come from a catalogue preview
+  and are written into the projection's `extra`; the film page still asks the
+  metadata sources for its own `TitleDetails` when it opens, and the episode
+  count for **Time to binge** is theirs alone.
 - **A catalogue source is not a stream provider.** A catalogue page lists
   titles; the providers that can resolve a stream for a title's id play it —
   today Stremio alone, which is why a Cinemeta or TMDB item is playable by
@@ -167,6 +187,10 @@ all. `MovieItem` survives only as the projection's wire record, between
 | `extra.watchId` | `TitleKey::id` | domain |
 | `extra.stremioType` | `TitleKey::kind` | domain |
 | `extra.watchCatalog` | `Title::rails` | domain |
+| `extra.watchReleased` / `extra.watchRuntime` | `Title::released` / `Title::runtime` | domain |
+| `extra.watchPosition` / `watchDuration` / `watchFinished` | `Watched::state()` (`timeOffset`, `duration`, `flaggedWatched`) | domain |
+| `extra.watchSource` | the first rail's source (`RailMark::Feed::source`): the catalogue that listed the title | domain |
+| `extra.watchStreams` | the stream probe (`watch-state::streams`): `true` a stream, `false` none, absent never asked | domain |
 | `extra.stremioTop` | `Title::top` | domain |
 | `extra.imported` | `Title::providers` is empty | domain |
 | `MovieItem.addon` ("cinemeta") | `RailMark::Feed::source` | domain |
@@ -187,7 +211,14 @@ and never merged with the games' library.
 `art_square`, `art_background`, `art_logo`, `description`, `is_installed`,
 `install.platform: "movie"`, and `extra.{stremioType, stremioTop,
 watchCatalog, provider, watchId, imported}`. A downgrade reads the same file.
-`timestamps.lastPlayed` is normalized to `…T…Z` with milliseconds (§9.9).
+This build also writes `extra.{watchReleased, watchRuntime, watchPosition,
+watchDuration, watchFinished, watchSource, watchStreams}`: a downgrade ignores
+them, and the record keeps them for the screens that read a loaded library.
+`watchSource` is the catalogue or provider that listed the title (restoring what
+the wire key only implies), and `watchStreams` is the page's own probe (`true` a
+stream, `false` none, absent never asked) — the only fact that says a title can
+be played. `timestamps.lastPlayed` is normalized to `…T…Z` with milliseconds
+(§9.9).
 
 **The projection takes titles.** `refresh`, `append`, `replace` and `write_root`
 take `&[Title]` and `titles(root)` returns them. One encode — `record_of(&Title)`
@@ -196,6 +227,14 @@ because the writer reads the raw files (`stored_item`) while the app reads a
 loaded `Library` (`title_of_game`), and the two are held together by a test that
 pits them against each other on one root. `MovieItem` remains as that wire
 record — the Heroic shape — and nothing else builds one.
+
+**This machine's own records are folded in before the write.** A refresh reads
+`movies.json` once (`progress::LocalProgress`) and folds each record into its
+title (`Titles::fold_local_progress`): a mark made on the page, or a playback
+the provider has not been told about yet, is the state the screens show — the
+later stamp wins, the way `Title::merge` decides two providers' states. Without
+it a cover would say "Not watched" under a page that says "Watched", because
+`movies.json` is the only place a hand mark lives.
 
 **5.1a The keys are not the identity.** They are `app_name = {owner}:{id}`,
 `local_meta = app_name`, `metadata = {owner}:{app_name}` (so
