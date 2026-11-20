@@ -199,6 +199,20 @@ date, upstream commit, files, and resolution.
     library" string) and `app/src/quick_launch/window.rs` (the window title is
     `fork_brand::NAME`).
 
+- **2026-11-20, upstream `14562ee6`** (16 commits: animated backgrounds and
+  their ffmpeg pill, SteamGridDB style filters, covers and console background
+  fixes). One file conflicted; the rest auto-merged, the fork's Watch surfaces
+  untouched:
+  - `crates/i18n/locales/fr/common.json`: upstream's new Wine-settings copy
+    (Edit, Remove, "Choose the Wine prefix folder", …) met the rebranded file.
+    Upstream's block was taken whole — none of it carries the app name — and
+    the rest of the file keeps its French.
+  - Rebranded outside the conflict (F-005), in code and locales together: the
+    animated-background description upstream added to
+    `app/src/pages/settings/appearance/look.rs` and
+    `crates/i18n/locales/{de,es,fr,pt-BR}/settings_pages.json` ("Pauses while a
+    game runs or Hearthdeck Hero is in the background.").
+
 ## Releases
 
 - Tag `fork/main` as `v<upstream>-hearthdeck.<n>` (for example
