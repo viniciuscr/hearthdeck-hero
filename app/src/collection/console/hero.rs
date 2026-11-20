@@ -174,6 +174,8 @@ pub(crate) struct PillSize {
 
 impl PillSize {
     pub const LARGE: Self = Self { height: 52., pad: 26., text: 18., icon: 24., fill: 0.12 };
+    /// The film page's marks: round, one icon, a little smaller than Play.
+    pub const MARK: Self = Self { height: 46., pad: 22., text: 16., icon: 22., fill: 0.12 };
 }
 
 /// A round (icon only) or pill (icon and label) button; the focused one

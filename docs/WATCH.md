@@ -4,6 +4,38 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-19 — the details panel reaches the page's top edge, and the
+> marks are icons.** The page's right column was 65 % of the screen: the cover
+> and the title took a band *across the whole page* above both columns, and a
+> 1080p window left the details card ~710 px tall, so the facts scrolled. The
+> header no longer spans the page: it keeps the top of the left column (cover,
+> title, facts, watched line — 560 px), and the details panel, alone in the
+> right column, now runs **from the page's top edge to its bottom** — ~1000 px
+> at 1080p and ~640 at 720p, against ~710 and ~350 before. Nothing else about
+> the page changes shape: the list still sits under the title over the art, the
+> backdrop is the same, and the panel is the card it always was.
+>
+> The watched / watch later / favourite controls are no longer text rows in the
+> list: they are a **row of round icon buttons** under the title (a tick, a
+> bookmark, a heart): the two flags fill theirs while on, the tick stays a tick
+> and its tint says which way — the good green, the console's accent, the games'
+> star. ◀ ▶ move along the row, A presses one, ↑ from the
+> first row of the list reaches it and ↓ (or B) goes back; a click on one makes
+> exactly those presses (`mark_route`, tested per pane), so a click and a press
+> cannot disagree. The label each mark shows is still the state itself (`Add to
+> watch` / `In watchlist`), as a tooltip, and A's mark writes through the same
+> `Flag` the shelf file owns.
+>
+> **Watch later gets a shortcut: R3 (the click of the right stick)**, from
+> anywhere on the page. L3 was already the trailer's, so the right stick's click
+> is the free one — `watch_later_hint` names it (`R3 · Watch later`) and
+> `watch_later_press` takes it, one function per direction. An imported title has
+> no local record to mark: it has no hint, and the press says why
+> (`Not currently present in any available stream source.`) instead of writing
+> nowhere. The press is a console one in the whole input stack: SDL and gilrs
+> report the right thumb click, `Pad::R3` carries it, `R` is its keyboard key,
+> and `Btn::R3` draws `RS` / `R3` in the hint bar.
+>
 > **Revision 2026-11-19 — the trailer moves to L3, on every screen.** Y was the
 > trailer's on the film page, but Y is the list's search: one press cannot be two
 > things, and a person who learned the trailer on the page could not play it

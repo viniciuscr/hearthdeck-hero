@@ -83,6 +83,8 @@ pub enum PadButton {
     Right,
     /// The click of the left stick (L3).
     LeftStick,
+    /// The click of the right stick (R3).
+    RightStick,
 }
 
 /// Stick and hat axes; positive Y points up.
@@ -234,6 +236,7 @@ fn button_pad(b: PadButton, swap_ab: bool) -> Option<Pad> {
         B::Left => Pad::Left,
         B::Right => Pad::Right,
         B::LeftStick => Pad::L3,
+        B::RightStick => Pad::R3,
     })
 }
 
@@ -369,7 +372,7 @@ pub fn start_buttons() -> Option<(PadThread, UnboundedReceiver<PadMsg>)> {
 }
 
 /// Keyboard equivalents in console mode: arrows, Enter/Space (A), Escape /
-/// Backspace (B), X, Y, Q / E (LB / RB), L (L3, the left stick's click),
+/// Backspace (B), X, Y, Q / E (LB / RB), L / R (L3 / R3, the sticks' clicks),
 /// Page Up / Down (scroll), M or F1 (Start, the menu), Tab (Select).
 pub fn pad_from_key(ks: &Keystroke) -> Option<Pad> {
     let m = &ks.modifiers;
@@ -388,6 +391,7 @@ pub fn pad_from_key(ks: &Keystroke) -> Option<Pad> {
         "q" => Pad::LB,
         "e" => Pad::RB,
         "l" => Pad::L3,
+        "r" => Pad::R3,
         "pageup" => Pad::ScrollUp,
         "pagedown" => Pad::ScrollDown,
         "m" | "f1" => Pad::Start,
@@ -421,6 +425,7 @@ pub fn parse_script(text: &str) -> Vec<(Duration, Pad)> {
             "lt" => Pad::LT,
             "rt" => Pad::RT,
             "l3" => Pad::L3,
+            "r3" => Pad::R3,
             "start" => Pad::Start,
             "select" => Pad::Select,
             "sup" => Pad::ScrollUp,

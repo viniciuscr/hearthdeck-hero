@@ -11,13 +11,14 @@ use heronite_i18n::tr;
 use heronite_watch::personal::{self, PersonalLibrary, ShelfTitle};
 
 use super::CollectionView;
+use crate::icons::Icon;
 
-/// One of the person's two flags on a title: what the film page's rows write.
+/// One of the person's two flags on a title: what the film page's marks write.
 ///
-/// The row id lives here and nowhere else: the page draws a row from a `Flag` and
-/// the pad handler reads a press back through [`Flag::of`], so a row cannot be
-/// drawn without its press being understood — which is exactly how "Add to watch"
-/// once repainted and wrote nothing.
+/// The icon and the label live here and nowhere else: the page draws a mark from
+/// a `Flag` and the pad handler reads a press back as a `Flag`, so a mark cannot
+/// be drawn without its press being understood — which is exactly how "Add to
+/// watch" once repainted and wrote nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Flag {
     Watchlist,
@@ -25,29 +26,34 @@ pub(crate) enum Flag {
 }
 
 impl Flag {
-    /// Both flags, in the order the film page's rows show them.
+    /// Both flags, in the order the film page's marks show them.
     pub(crate) const ALL: [Self; 2] = [Self::Watchlist, Self::Favourite];
 
-    /// The row id the film page gives this flag.
-    pub(crate) const fn row(self) -> &'static str {
-        match self {
-            Self::Watchlist => "watch-watchlist",
-            Self::Favourite => "watch-favourite",
+    /// The icon the film page's mark wears: filled while the flag is on.
+    pub(crate) fn icon(self, on: bool) -> Icon {
+        match (self, on) {
+            (Self::Watchlist, true) => Icon::Bookmark,
+            (Self::Watchlist, false) => Icon::BookmarkBorder,
+            (Self::Favourite, true) => Icon::Favorite,
+            (Self::Favourite, false) => Icon::FavoriteBorder,
         }
     }
 
-    /// The flag a row id stands for, when it is one of the two.
-    pub(crate) fn of(row: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|flag| flag.row() == row)
-    }
-
-    /// The label the row shows: the state itself (§7), so the swap is the answer.
+    /// The label the mark reads: the state itself (§7), so the swap is the answer.
     pub(crate) fn label(self, on: bool) -> &'static str {
         match (self, on) {
             (Self::Watchlist, true) => tr!("In watchlist"),
             (Self::Watchlist, false) => tr!("Add to watch"),
             (Self::Favourite, true) => tr!("In favourites"),
             (Self::Favourite, false) => tr!("Add to favourites"),
+        }
+    }
+
+    /// Where this flag stands on the shelf.
+    fn is_on(self, shelf: &PersonalLibrary, item: &ShelfTitle) -> bool {
+        match self {
+            Self::Watchlist => shelf.watchlisted(item),
+            Self::Favourite => shelf.favourited(item),
         }
     }
 
@@ -77,11 +83,11 @@ impl CollectionView {
     /// write path uses, which is why a toggle cannot add a second entry.
     pub(super) fn watch_personal_states(&mut self, item: &ShelfTitle) -> [(Flag, bool); 2] {
         let shelf = self.watch_personal();
-        [(Flag::Watchlist, shelf.watchlisted(item)), (Flag::Favourite, shelf.favourited(item))]
+        Flag::ALL.map(|flag| (flag, flag.is_on(shelf, item)))
     }
 
     /// Adds or removes the title from one of the two flags, then keeps the view in
-    /// step. The file is the truth, so the rows redraw from it.
+    /// step. The file is the truth, so the marks redraw from it.
     pub(super) fn watch_toggle_personal(&mut self, game: &CollectionGame, flag: Flag, cx: &mut Context<Self>) {
         let item = crate::fork::watch::sources::personal_item(game);
         match flag.flip(&self.app_paths, &item) {
@@ -104,8 +110,6 @@ impl CollectionView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::console::list::{ListNav, Outcome, Row, Value};
-    use crate::console::Pad;
     use core::prelude::v1::test;
 
     fn app(dir: &std::path::Path) -> AppPaths {
@@ -123,13 +127,11 @@ mod tests {
     }
 
     #[test]
-    fn a_flag_reads_back_the_row_it_was_drawn_as() {
-        assert_eq!(Flag::ALL.map(Flag::row), ["watch-watchlist", "watch-favourite"], "the page's two rows");
+    fn a_flag_draws_the_icon_its_state_asks_for() {
         for flag in Flag::ALL {
-            assert_eq!(Flag::of(flag.row()), Some(flag), "{:?} understands its own press", flag);
+            assert_ne!(flag.icon(false), flag.icon(true), "{flag:?} wears a filled icon only while it is on");
         }
-        assert_eq!(Flag::of("watch-catalog:tmdb"), None, "another row's id is another row's");
-        assert_eq!(Flag::of("primary"), None);
+        assert_ne!(Flag::ALL[0].icon(true), Flag::ALL[1].icon(true), "the two flags never look alike");
     }
 
     #[test]
@@ -153,25 +155,18 @@ mod tests {
         assert!(!shelf.watchlisted(&item) && shelf.favourited(&item), "and leaves the other flag alone");
     }
 
-    /// The press the film page receives, end to end: the rows it draws, A on one,
-    /// the flag that row names, and the write. This is the path that once
-    /// repainted and wrote nothing, because the page's handler swallowed the
-    /// change and the `watch-` arm it was believed to reach belonged to the games'
-    /// page.
+    /// The write the page's marks end in: each flag in the row's order flips its
+    /// own list in the file, and leaves the other alone. The page's own path
+    /// (mark → `watch_press_mark` → `Flag::flip`) is `watch_page.rs`'s to test;
+    /// this is the half that touches the disk.
     #[test]
-    fn pressing_a_flag_row_writes_that_flag() {
+    fn pressing_a_flag_mark_writes_that_flag() {
         let dir = tempfile::tempdir().unwrap();
         let app = app(dir.path());
         let item = matrix();
-        let rows: Vec<Row> = Flag::ALL.into_iter().map(|flag| Row::toggle(flag.row(), flag.label(false), false)).collect();
-        let mut list = ListNav::default();
 
-        for (index, flag) in Flag::ALL.into_iter().enumerate() {
-            list.focus = index;
-            let Outcome::Changed(id, Value::Toggle(true)) = list.on_pad(Pad::A, &rows) else {
-                panic!("A on a switch row flips it");
-            };
-            assert_eq!(Flag::of(&id), Some(flag), "the page understands the row it drew");
+        assert_eq!(Flag::ALL, [Flag::Watchlist, Flag::Favourite], "the row draws the watchlist before the heart");
+        for flag in Flag::ALL {
             assert!(flag.flip(&app, &item).unwrap());
         }
 

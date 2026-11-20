@@ -188,6 +188,7 @@ fn button(b: Button) -> PadButton {
         Button::LeftShoulder => PadButton::LB,
         Button::RightShoulder => PadButton::RB,
         Button::LeftStick => PadButton::LeftStick,
+        Button::RightStick => PadButton::RightStick,
         Button::DPadUp => PadButton::Up,
         Button::DPadDown => PadButton::Down,
         Button::DPadLeft => PadButton::Left,

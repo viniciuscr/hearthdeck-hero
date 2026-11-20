@@ -252,6 +252,7 @@ pub(crate) fn mark(style: Glyphs, btn: Btn, swap_ab: bool) -> Mark {
         Btn::LT => Mark::Cap(lt),
         // The stick's click: Xbox labels it by the stick, the others number it.
         Btn::L3 => Mark::Cap(if style == Glyphs::Xbox { "LS" } else { "L3" }),
+        Btn::R3 => Mark::Cap(if style == Glyphs::Xbox { "RS" } else { "R3" }),
         Btn::Start => match style {
             Glyphs::PlayStation => Mark::Cap("Options"),
             Glyphs::Nintendo => Mark::Cap("+"),
@@ -379,6 +380,7 @@ pub fn key_glyph(btn: Btn) -> Div {
         Btn::LB => key_cap("Q"),
         Btn::RB => key_cap("E"),
         Btn::L3 => key_cap("L"),
+        Btn::R3 => key_cap("R"),
         Btn::Bumpers => draw(Mark::Pair("Q", "E"), Glyphs::Keyboard),
         Btn::Start => key_cap("M"),
         // No key for these: the pad's own look.
@@ -424,6 +426,7 @@ pub fn btn_pad(btn: Btn) -> Pad {
         Btn::RB | Btn::Bumpers => Pad::RB,
         Btn::LT => Pad::LT,
         Btn::L3 => Pad::L3,
+        Btn::R3 => Pad::R3,
         Btn::Start => Pad::Start,
         Btn::LeftRight => Pad::Right,
     }

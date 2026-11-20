@@ -69,6 +69,8 @@ pub enum Button {
     RightShoulder,
     /// The click of the left stick (L3).
     LeftStick,
+    /// The click of the right stick (R3).
+    RightStick,
     DPadUp,
     DPadDown,
     DPadLeft,
@@ -269,6 +271,7 @@ fn button(b: SDL_GamepadButton) -> Option<Button> {
         SDL_GAMEPAD_BUTTON_LEFT_SHOULDER => Button::LeftShoulder,
         SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER => Button::RightShoulder,
         SDL_GAMEPAD_BUTTON_LEFT_STICK => Button::LeftStick,
+        SDL_GAMEPAD_BUTTON_RIGHT_STICK => Button::RightStick,
         SDL_GAMEPAD_BUTTON_DPAD_UP => Button::DPadUp,
         SDL_GAMEPAD_BUTTON_DPAD_DOWN => Button::DPadDown,
         SDL_GAMEPAD_BUTTON_DPAD_LEFT => Button::DPadLeft,
@@ -416,6 +419,7 @@ mod tests {
         assert_eq!(button(SDL_GAMEPAD_BUTTON_EAST), Some(Button::East));
         assert_eq!(button(SDL_GAMEPAD_BUTTON_GUIDE), Some(Button::Guide));
         assert_eq!(button(SDL_GAMEPAD_BUTTON_LEFT_STICK), Some(Button::LeftStick));
+        assert_eq!(button(SDL_GAMEPAD_BUTTON_RIGHT_STICK), Some(Button::RightStick));
         assert_eq!(button(SDL_GAMEPAD_BUTTON_DPAD_LEFT), Some(Button::DPadLeft));
         assert_eq!(button(SDL_GamepadButton(-1)), None);
         assert_eq!(axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), Some(Axis::RightTrigger));

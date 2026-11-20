@@ -15,6 +15,14 @@
 //! per episode of that season, and the picked episode's streams under them. A
 //! on an episode plays its best stream at once; the card previews what the
 //! picker is on.
+//!
+//! The title, its marks (watched, watch later, favourite) and the list keep the
+//! left column; the details panel takes the right one **from the page's top edge
+//! to its bottom**, so the facts fit with almost no scrolling — it is taller
+//! than a panel set under the title ever was, and nothing else about the page
+//! moved. The marks are icons, not rows: ◀ ▶ move along them, A presses one, and
+//! R3 (the right stick's click) adds the title to the watchlist from anywhere on
+//! the page.
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -29,19 +37,148 @@ use super::super::watch_personal::Flag;
 use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection};
 use super::super::CollectionView;
 use super::game::facts_table;
-use super::hero::{card_surface, fitted_title};
+use super::hero::{card_surface, fitted_title, pill_button, PillSize};
+use crate::collection::focus_left::STAR;
 use crate::console::kit::{self, u};
 use crate::console::list::{Outcome, Row, Value};
 use crate::console::motion;
+use crate::console::pointer::Clickable;
 use crate::console::{hint, Btn, Hint, Pad};
 use crate::icons::Icon;
 use crate::theme;
+
+/// The page's own margins, design px: the console screens' 46 at the sides, 20
+/// under everything, and 40 between the title's column and the panel.
+const PAGE_PAD: f32 = 46.;
+const BOTTOM_PAD: f32 = 20.;
+const COLUMN_GAP: f32 = 40.;
+/// The column the title, its marks and its list take. The details panel takes
+/// the rest of the page, from its top edge to its bottom.
+const LEFT_W: f32 = 560.;
+/// The details panel's corners, design px.
+const PANEL_RADIUS: f32 = 20.;
 
 /// One label / value line of the page's card.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DetailLine {
     label: SharedString,
     value: String,
+}
+
+/// One of the page's three marks: the person's two shelf flags and the watched
+/// mark of the film (or of the episode the card shows).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mark {
+    Watched,
+    Watchlist,
+    Favourite,
+}
+
+impl Mark {
+    /// The icon it wears: the shelf flags fill theirs while the mark is on and
+    /// outline it while off; the watched mark is a tick either way, and its
+    /// tint (green while on, muted while off) is what says where it stands.
+    fn icon(self, on: bool) -> Icon {
+        match self {
+            Self::Watched => Icon::Check,
+            Self::Watchlist => Flag::Watchlist.icon(on),
+            Self::Favourite => Flag::Favourite.icon(on),
+        }
+    }
+
+    /// The colour of a mark that is on: a tick is the good green, a favourite
+    /// the games' star, the watchlist the console's accent.
+    fn tint(self, on: bool) -> Option<Rgba> {
+        match (self, on) {
+            (Self::Watched, true) => Some(theme::success()),
+            (Self::Favourite, true) => Some(rgb(STAR)),
+            (Self::Watchlist, true) => Some(theme::accent()),
+            _ => None,
+        }
+    }
+
+    /// Which mark it is: its place in the row, and its element id.
+    fn rank(self) -> usize {
+        match self {
+            Self::Watched => 0,
+            Self::Watchlist => 1,
+            Self::Favourite => 2,
+        }
+    }
+
+    /// The flag the mark writes, for the two that are shelf flags.
+    fn flag(self) -> Option<Flag> {
+        match self {
+            Self::Watchlist => Some(Flag::Watchlist),
+            Self::Favourite => Some(Flag::Favourite),
+            Self::Watched => None,
+        }
+    }
+}
+
+/// The episode the card shows, named the way a mark and a tracker need it
+/// (never by parsing the provider's id).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Picked<'a> {
+    id: &'a str,
+    season: u32,
+    number: u32,
+}
+
+/// A mark as the page draws it: where it stands and what a press does (the
+/// label is the state itself, §7).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MarkState {
+    mark: Mark,
+    on: bool,
+    label: SharedString,
+}
+
+/// Whether the title has any mark to draw. An imported title has none — there is
+/// no local record to mark — and every other title has at least its two flags.
+fn has_marks(game: &CollectionGame) -> bool {
+    !crate::fork::watch::sources::imported(game)
+}
+
+/// Whether the row draws the watched mark: a film always has one (marked or
+/// not), a series once the page knows its episodes — a film's mark on a show is
+/// not something a tracker can record.
+fn shows_watched(kind: &str, episodes_known: bool) -> bool {
+    kind != "series" || episodes_known
+}
+
+/// How many marks the row draws, for a title that has any (the caller asks
+/// [`has_marks`] first): the watched one when the page draws it, then the two
+/// flags. Reads no record, so the pad can ask it on every press.
+fn marks_len(watched: bool) -> usize {
+    usize::from(watched) + Flag::ALL.len()
+}
+
+/// Where the watched mark stands: the film's own record, or the picked
+/// episode's. `None` when the page has nothing to mark at all (a series whose
+/// episodes it does not know). **No record is a mark that is off**, not a mark
+/// that is missing: that is what a press writes.
+fn watched_state(progress: Option<&heronite_watch::progress::MovieProgress>, picked: Option<Picked<'_>>, kind: &str) -> Option<bool> {
+    match picked {
+        Some(picked) => Some(
+            progress.and_then(|progress| progress.episode(picked.id, picked.season, picked.number)).is_some_and(|record| record.finished),
+        ),
+        None if kind != "series" => Some(progress.is_some_and(|progress| progress.finished)),
+        None => None,
+    }
+}
+
+/// The mark at `index` of the row, for a title whose watched mark is (or is not)
+/// drawn: read back from the same order `watch_marks` draws.
+fn mark_at(index: usize, watched: bool) -> Option<Mark> {
+    let row: &[Mark] = if watched { &[Mark::Watched, Mark::Watchlist, Mark::Favourite] } else { &[Mark::Watchlist, Mark::Favourite] };
+    row.get(index).copied()
+}
+
+/// Why a title has no mark: it is in no source's catalogue here, so the page has
+/// no local record to write (one message for the row and for the R3 press).
+fn not_present() -> &'static str {
+    tr!("Not currently present in any available stream source.")
 }
 
 /// The line under a film's title: who owns it, then what the source knows
@@ -202,15 +339,6 @@ fn episode_row(episode: &Episode, index: usize, state: WatchedState, resuming: b
     Row::action(SharedString::from(format!("episode:{index}")), episode_label(episode)).desc(parts.join(" \u{b7} ")).icon(icon)
 }
 
-/// The mark row: the label says what a press does, the mark says where it stands.
-fn watched_toggle_row(watch: String, unwatch: String, watched: bool) -> Row {
-    Row::action("watched-toggle", SharedString::from(if watched { unwatch } else { watch })).icon(if watched {
-        Icon::Check
-    } else {
-        Icon::PlayArrow
-    })
-}
-
 /// The episode of the row the list is on, when that row is an episode: the
 /// card follows the focus.
 fn focused_episode(rows: &[Row], focus: usize) -> Option<usize> {
@@ -251,12 +379,17 @@ fn episode_card(episode: &Episode, still: Option<ImageSource>, locale: DateLocal
 }
 
 impl CollectionView {
-    /// The console page of a film or a series.
+    /// The console page of a film or a series. The title, its marks and its list
+    /// keep the left column; the details panel beside them runs from the page's
+    /// top edge to its bottom — the room the header band used to sit in.
     pub(super) fn render_watch_game_page(&mut self, key: &SharedString, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(g) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else {
             return kit::empty(Icon::Warning, tr!("This title is gone"), tr!("Press B to go back.")).into_any_element();
         };
         self.console_focus_game(Some(key.clone()), cx);
+        // Another title opens on the list, with the first mark focused: no focus
+        // crosses from one page to the next.
+        self.watch_open_page(key);
         self.watch_ensure_details(&g, cx);
 
         // Everything the page draws is taken before the view is borrowed mutably
@@ -278,11 +411,15 @@ impl CollectionView {
             .map(str::to_owned)
             .filter(|text| !text.trim().is_empty());
 
+        let pane = self.watch_pane();
         let rows = self.watch_rows(&g, details.as_deref(), locale);
-        let list = self.console.game.list.render("console-game-actions", &rows, self.watch_pane() == Pane::List);
+        let list = self.console.game.list.render("console-game-actions", &rows, pane == Pane::List);
+        // After `render`, which clamps the focus to a focusable row: the row the
+        // pad is on is the one the card follows.
+        let list_focus = self.console.game.list.focus;
         // The card follows the list: the row the pad is on decides the episode.
         if let Some(selection) = selection {
-            if let Some(episode) = focused_episode(&rows, self.console.game.list.focus) {
+            if let Some(episode) = focused_episode(&rows, list_focus) {
                 self.watch_pick_episode(&g.key, Selection { season: selection.season, episode });
             }
         }
@@ -291,54 +428,33 @@ impl CollectionView {
             (Some(details), Some(selection)) => picked_episode(details, selection).cloned(),
             _ => None,
         };
+        let header = self.watch_header(key, &g, &facts, watched, &*window);
+
+        let marks = self.watch_marks(
+            &g,
+            progress.as_ref(),
+            picked.as_ref().map(|episode| Picked { id: episode.id.as_str(), season: episode.season, number: episode.number }),
+        );
+        let mark_focus = self.watch_mark_focus(marks.len());
+
         let s = kit::scale();
         let still = picked.as_ref().and_then(|episode| episode.thumbnail.as_deref()).and_then(|url| self.episode_still(url, 420., 236., s));
-        let (cw, ch) = (136., 136. * self.cover_aspect);
-        let cover = self.cover(key, cw * s, ch * s, window.scale_factor(), 300);
-        let title = fitted_title(52., g.title.chars().count());
         let columns = if card_is_wide(window, s) { 2 } else { 1 };
 
-        let header = div()
-            .flex()
-            .items_end()
-            .gap(u(28.))
-            .px(u(46.))
-            .pt(u(64.))
-            .pb(u(24.))
-            .child(
-                div()
-                    .flex_none()
-                    .w(u(cw))
-                    .h(u(ch))
-                    .rounded(u(crate::console::look::tile_radius() + 2.))
-                    .overflow_hidden()
-                    .bg(kit::ink(0.08))
-                    .border_1()
-                    .border_color(kit::ink(0.12))
-                    .shadow(kit::shadow(0.6, 12., 34.))
-                    .children(cover.map(|cover| img(cover).size_full().object_fit(ObjectFit::Cover))),
-            )
-            .child(motion::enter(
-                SharedString::from(format!("watch-head-{key}")),
-                div()
-                    .relative()
-                    .flex()
-                    .flex_col()
-                    .gap(u(8.))
-                    .min_w_0()
-                    .max_w(u(900.))
-                    .pb(u(4.))
-                    .child(kit::title(g.title.clone(), title).line_clamp(2))
-                    .child(div().text_size(u(16.)).text_color(theme::text_muted()).child(facts))
-                    .children(watched.map(|line| div().text_size(u(14.)).text_color(theme::text_dim()).child(line))),
-                320,
-                0.,
-                10.,
-            ));
+        // The marks: icons, not rows. ◀ ▶ move along them, A presses one; ↑ from
+        // the first row of the list arrives here, ↓ (or B) goes back.
+        let marks_row = div().flex().items_center().gap(u(10.)).children(marks.into_iter().enumerate().map(|(index, state)| {
+            let focused = pane == Pane::Marks && index == mark_focus;
+            pill_button(focused, state.mark.icon(state.on), None, state.mark.tint(state.on), PillSize::MARK)
+                .id(SharedString::from(format!("watch-mark-{}", state.mark.rank())))
+                .tooltip(crate::ui::tooltip(state.label))
+                .on_pads(mark_route(pane, list_focus, mark_focus, index))
+        }));
 
         // The card's two sides: what the title or the picked episode is, and the
         // streams it can be played from. The trailer is not a card: it is a press
-        // of Y (the triangle), offered in the hint bar while there is one.
+        // of L3 (the left stick's click), offered in the hint bar while there is
+        // one.
         let tab = self.watch_tab();
         let tabs: Vec<SharedString> = [tr!("Details"), tr!("Streams")].into_iter().map(SharedString::from).collect();
         let (active, body) = match tab {
@@ -371,73 +487,161 @@ impl CollectionView {
                 let video = picked.as_ref().map(|episode| episode.id.clone());
                 self.watch_ensure_streams(&g, video.as_deref(), cx);
                 let rows = self.watch_stream_rows(&g, video.as_deref());
-                let focused = self.watch_pane() == Pane::Card;
+                let focused = pane == Pane::Card;
                 let list = self.watch_streams_nav().render("console-watch-streams", &rows, focused);
                 (1, list.flex_1().min_h_0().into_any_element())
             }
         };
 
         div()
-            .flex()
-            .flex_col()
+            .relative()
             .size_full()
-            .child(header)
-            .child(self.console.game.about.driver())
+            .flex()
+            .gap(u(COLUMN_GAP))
+            .px(u(PAGE_PAD))
+            .pb(u(BOTTOM_PAD))
             .child(
                 div()
-                    .flex()
-                    .flex_1()
+                    .flex_none()
+                    .w(u(LEFT_W))
                     .min_h_0()
-                    .gap(u(40.))
-                    .px(u(46.))
-                    .pb(u(20.))
-                    .child(div().flex_none().w(u(560.)).flex().flex_col().child(list.flex_1().min_h_0()))
-                    .child(
-                        card_surface()
-                            .flex_1()
-                            .min_w_0()
-                            .p(u(26.))
-                            .rounded(u(20.))
-                            .flex()
-                            .flex_col()
-                            .gap(u(18.))
-                            .when(self.watch_pane() == Pane::Card, |card| card.border_color(theme::console_focus()))
-                            .child(kit::tabs(&tabs, active))
-                            .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
-                    ),
+                    .flex()
+                    .flex_col()
+                    .gap(u(14.))
+                    .child(header)
+                    .child(marks_row)
+                    // The list is the scrolling element itself (as it was when the
+                    // list had the column to itself): `flex_1` + `min_h_0` on the
+                    // row that owns the scroll, never on a wrapper, or the scroll
+                    // area is sized by its content and the episodes run off screen.
+                    .child(list.flex_1().min_h_0()),
             )
+            // The panel runs from the page's top edge to its bottom: that is the
+            // whole point (the title no longer takes a band above it).
+            .child(
+                card_surface()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .p(u(26.))
+                    .rounded(u(PANEL_RADIUS))
+                    .shadow(kit::shadow(0.5, 12., 44.))
+                    .flex()
+                    .flex_col()
+                    .gap(u(16.))
+                    .when(pane == Pane::Card, |card| card.border_color(theme::console_focus()))
+                    .child(kit::tabs(&tabs, active))
+                    .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
+            )
+            .child(self.console.game.about.driver())
             .into_any_element()
+    }
+
+    /// The title's band at the top of the left column: the cover, the title, who
+    /// owns it and what the source knows, and the line about what was watched.
+    /// It is the page's own header, unchanged by the panel beside it.
+    fn watch_header(&mut self, key: &SharedString, g: &CollectionGame, facts: &str, watched: Option<String>, window: &Window) -> Div {
+        let s = kit::scale();
+        let (cw, ch) = (136., 136. * self.cover_aspect);
+        let cover = self.cover(key, cw * s, ch * s, window.scale_factor(), 300);
+        let title = fitted_title(42., g.title.chars().count());
+        div()
+            .flex()
+            .items_end()
+            .gap(u(28.))
+            .pt(u(64.))
+            .child(
+                div()
+                    .flex_none()
+                    .w(u(cw))
+                    .h(u(ch))
+                    .rounded(u(crate::console::look::tile_radius() + 2.))
+                    .overflow_hidden()
+                    .bg(kit::ink(0.08))
+                    .border_1()
+                    .border_color(kit::ink(0.12))
+                    .shadow(kit::shadow(0.6, 12., 34.))
+                    .children(cover.map(|cover| img(cover).size_full().object_fit(ObjectFit::Cover))),
+            )
+            .child(motion::enter(
+                SharedString::from(format!("watch-head-{key}")),
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(u(8.))
+                    .min_w_0()
+                    .child(kit::title(g.title.clone(), title).line_clamp(2))
+                    .child(div().text_size(u(15.)).text_color(theme::text_muted()).child(facts.to_owned()))
+                    .children(watched.map(|line| div().text_size(u(13.)).text_color(theme::text_dim()).child(line))),
+                320,
+                0.,
+                10.,
+            ))
+    }
+
+    /// The marks the page draws, in the order it draws them: the watched mark
+    /// of the film (or of the picked episode) first, then the person's two shelf
+    /// flags. A series whose episode list the page does not have yet has nothing
+    /// to mark, and a title no source here has has no local record to mark at
+    /// all: its row is the page, and the icon row stays empty.
+    fn watch_marks(
+        &mut self,
+        game: &CollectionGame,
+        progress: Option<&heronite_watch::progress::MovieProgress>,
+        picked: Option<Picked<'_>>,
+    ) -> Vec<MarkState> {
+        if !has_marks(game) {
+            return Vec::new();
+        }
+        // No record is a mark that is off, not one that is missing: a film nobody
+        // has played is exactly what "Mark as watched" is for, and so is an
+        // episode watched elsewhere.
+        let watched = watched_state(progress, picked, crate::fork::watch::sources::kind(game));
+        let item = crate::fork::watch::sources::personal_item(game);
+        let personal = self.watch_personal_states(&item);
+        let mut marks = Vec::with_capacity(1 + Flag::ALL.len());
+        // A film's watched mark, and the picked episode's: local first, the
+        // trackers get it from the outbox afterwards.
+        if let Some(on) = watched {
+            let label = if on { tr!("Mark as not watched") } else { tr!("Mark as watched") };
+            marks.push(MarkState { mark: Mark::Watched, on, label: label.into() });
+        }
+        for (flag, on) in personal {
+            let mark = match flag {
+                Flag::Watchlist => Mark::Watchlist,
+                Flag::Favourite => Mark::Favourite,
+            };
+            marks.push(MarkState { mark, on, label: flag.label(on).into() });
+        }
+        marks
+    }
+
+    /// A press on one of the marks, or the R3 shortcut: the watchlist's own, and
+    /// A's for whichever mark has the focus.
+    fn watch_press_mark(&mut self, game: &CollectionGame, mark: Mark, cx: &mut Context<Self>) {
+        match mark.flag() {
+            Some(flag) => self.watch_toggle_personal(game, flag, cx),
+            None => self.watch_toggle_watched(game, cx),
+        }
     }
 }
 
 impl CollectionView {
-    /// The page's rows: Play, then for a series the season row, that season's
-    /// episodes and the picked episode's streams; a film lists its own streams.
+    /// The page's rows: Play, then for a series the season row and that
+    /// season's episodes. The marks and the streams are not rows: the marks are
+    /// the icons above the list, and the streams are the card's second tab.
     fn watch_rows(&mut self, game: &CollectionGame, details: Option<&TitleDetails>, locale: DateLocale) -> Vec<Row> {
         // A title no source here has: one line, and nothing that pretends it can
         // play or be marked (there is no local record to mark).
         if crate::fork::watch::sources::imported(game) {
-            return vec![Row::info("watch-unavailable", tr!("Playback"), tr!("Not currently present in any available stream source."))];
+            return vec![Row::info("watch-unavailable", tr!("Playback"), not_present())];
         }
         let (label, icon) = self.primary_state(game);
         let mut rows = vec![Row::action("primary", label).icon(icon)];
-        // The person's two flags: local, instant, and the label is the state.
-        let item = crate::fork::watch::sources::personal_item(game);
-        for (flag, on) in self.watch_personal_states(&item) {
-            rows.push(Row::toggle(flag.row(), flag.label(on), on));
-        }
-        // The local record: a film's own mark, and a series' per-episode states.
+        // The local record: a series' per-episode states. A film's streams are
+        // the card's second tab, and its mark is the tick of the icon row.
         let progress = heronite_watch::progress::local(&self.app_paths, &game.runner, crate::fork::watch::sources::id(game));
-        // A film's streams are the card's second tab, not rows of the list.
         let Some(details) = details.filter(|details| !details.episodes.is_empty()) else {
-            // A film's mark, by hand: local first, the trackers get it from the
-            // outbox afterwards. The tick and the half mark say which way it goes.
-            // A series whose episode list is not here yet has nothing to mark:
-            // a film's mark on a show is not something a tracker can record.
-            if crate::fork::watch::sources::kind(game) != "series" {
-                let watched = progress.as_ref().is_some_and(|progress| progress.finished);
-                rows.push(watched_toggle_row(tr!("Mark as watched").to_string(), tr!("Mark as not watched").to_string(), watched));
-            }
             return rows;
         };
         let selection = self.watch_ensure_selection(&game.key, details);
@@ -445,19 +649,6 @@ impl CollectionView {
         let season = seasons.get(selection.season).copied().unwrap_or(1);
         let options: Vec<SharedString> = seasons.iter().map(|number| SharedString::from(tr!("Season {n}", n = number))).collect();
         rows.push(Row::choice("season", tr!("Season"), options, selection.season));
-        // The picked episode's own mark, for a person who watched it elsewhere.
-        if let Some(episode) = picked_episode(details, selection) {
-            let watched = progress
-                .as_ref()
-                .and_then(|progress| progress.episode(&episode.id, episode.season, episode.number))
-                .is_some_and(|record| record.finished);
-            let code = episode.code();
-            rows.push(watched_toggle_row(
-                tr!("Mark {episode} as watched", episode = code.clone()).to_string(),
-                tr!("Mark {episode} as not watched", episode = code).to_string(),
-                watched,
-            ));
-        }
         // A tick means this episode was finished, taken from the per-episode
         // records: the resume pointer only says where playback starts, so it
         // cannot stand for "watched" (it moves to the next episode the moment
@@ -487,9 +678,6 @@ impl CollectionView {
         }
         if let Some(index) = id.strip_prefix("episode:").and_then(|index| index.parse::<usize>().ok()) {
             self.watch_press_episode(game, index, cx);
-        }
-        if id == "watched-toggle" {
-            self.watch_toggle_watched(game, cx);
         }
     }
 
@@ -525,6 +713,18 @@ impl CollectionView {
             self.watch_play_trailer(&game, cx);
             return true;
         }
+        // R3 (the right stick's click) is the watchlist's, from anywhere on the
+        // page: the hint bar names it (`watch_later_hint`), and this is the
+        // press that promise takes. An imported title has no local record to
+        // mark, and the page says so instead of writing a mark nowhere.
+        if watch_later_press(pad) {
+            if !has_marks(&game) {
+                self.show_toast(not_present(), true, cx);
+            } else {
+                self.watch_toggle_personal(&game, Flag::Watchlist, cx);
+            }
+            return true;
+        }
         // LB / RB: the other card, with the pad where that card expects it.
         if matches!(pad, Pad::LB | Pad::RB) {
             self.watch_switch_tab();
@@ -547,6 +747,49 @@ impl CollectionView {
                 self.console.game.about.by(if down { step } else { -step });
                 return true;
             }
+        }
+        // The marks row: ◀ ▶ move along it, A presses the mark, ↓ (or B) leaves
+        // it for the list. Nothing under it runs while it has the pad.
+        if self.watch_pane() == Pane::Marks && has_marks(&game) {
+            // The row's shape, not its contents: a press moves along the marks
+            // the page drew, and reading the record again would be a disk read
+            // per cursor move.
+            let watched = shows_watched(
+                crate::fork::watch::sources::kind(&game),
+                details.as_deref().is_some_and(|details| !details.episodes.is_empty()),
+            );
+            let len = marks_len(watched);
+            let focus = self.watch_mark_focus(len);
+            return match pad {
+                Pad::Left => {
+                    self.watch_move_mark(false, len);
+                    cx.notify();
+                    true
+                }
+                Pad::Right => {
+                    self.watch_move_mark(true, len);
+                    cx.notify();
+                    true
+                }
+                Pad::A => {
+                    if let Some(mark) = mark_at(focus, watched) {
+                        self.watch_press_mark(&game, mark, cx);
+                    }
+                    cx.notify();
+                    true
+                }
+                // X starts the title from this row too: the hint bar promises it.
+                Pad::X => {
+                    self.watch_play_picked(&game, picked_video.as_deref(), cx);
+                    true
+                }
+                Pad::Down | Pad::B => {
+                    self.watch_focus_pane(Pane::List);
+                    cx.notify();
+                    true
+                }
+                _ => true,
+            };
         }
         if self.watch_pane() == Pane::Card {
             return match tab {
@@ -611,13 +854,13 @@ impl CollectionView {
                 }
                 true
             }
-            // A on one of the person's two flags: a local write, and the row is
-            // rebuilt from the file on the next paint, its label the new state.
-            Outcome::Changed(id, Value::Toggle(_)) => {
-                match Flag::of(&id) {
-                    Some(flag) => self.watch_toggle_personal(&game, flag, cx),
-                    None => cx.notify(),
+            // ↑ on the first row: the marks above it, when the title has any
+            // (an imported title has no local record to mark).
+            Outcome::Edge(Pad::Up) => {
+                if has_marks(&game) {
+                    self.watch_focus_pane(Pane::Marks);
                 }
+                cx.notify();
                 true
             }
             Outcome::Edge(Pad::Right) => {
@@ -639,15 +882,18 @@ impl CollectionView {
         }
     }
 
-    /// The page's hint bar: what A, the bumpers, X and L3 do on the card shown.
-    /// X starts the title, as it does on the list; L3 is the trailer while the
-    /// title has one, so each press and its label agree.
+    /// The page's hint bar: what A, the bumpers, X, L3 and R3 do on the card
+    /// shown. X starts the title, as it does on the list; L3 is the trailer while
+    /// the title has one, and R3 adds the title to the watchlist. Each press and
+    /// its label come from one function, so they cannot disagree.
     pub(super) fn watch_page_hints(&self, key: &SharedString) -> Vec<Hint> {
         let primary = self.lib.as_ref().and_then(|lib| lib.get(key)).map(|game| self.primary_label(game)).unwrap_or(tr!("Play"));
         let has_trailer = self.watch_details(key).is_some_and(|details| !details.trailers.is_empty());
+        let on_the_shelf = self.lib.as_ref().and_then(|lib| lib.get(key)).is_some_and(|game| has_marks(game));
         let mut hints = vec![hint(Btn::A, tr!("Select")), hint(Btn::LeftRight, tr!("Panels")), hint(Btn::Bumpers, tr!("Tabs"))];
         hints.push(hint(Btn::X, primary));
         hints.extend(trailer_hint(has_trailer));
+        hints.extend(watch_later_hint(on_the_shelf));
         hints.push(hint(Btn::B, tr!("Back")));
         hints.push(hint(Btn::Start, tr!("Menu")));
         hints
@@ -674,11 +920,46 @@ fn trailer_press(pad: Pad) -> bool {
     pad == Pad::L3
 }
 
+/// The hint bar's R3: the watch-later press, named as `watch_later_press` takes
+/// it, so the label and what it does cannot drift apart.
+const WATCH_LATER_BTN: Btn = Btn::R3;
+
+/// The hint bar's R3, on a title the shelf can hold: the press adds it to (or
+/// takes it from) the watchlist. An imported title has no local record to mark,
+/// so it has no hint either.
+fn watch_later_hint(on_the_shelf: bool) -> Option<Hint> {
+    on_the_shelf.then(|| hint(WATCH_LATER_BTN, tr!("Watch later")))
+}
+
+/// Whether `pad` is the watch-later press: the click of the right stick, never
+/// the left one (that is the trailer's).
+fn watch_later_press(pad: Pad) -> bool {
+    pad == kit::btn_pad(WATCH_LATER_BTN)
+}
+
+/// The presses a click on mark `to` makes, from wherever the pad is: back to
+/// the list, up its rows to the first, then up into the marks row, across it and
+/// A — one route per state of the page, so a click and a press cannot disagree.
+fn mark_route(pane: Pane, list_focus: usize, mark_focus: usize, to: usize) -> Vec<Pad> {
+    let mut pads = Vec::new();
+    if pane != Pane::Marks {
+        // ◀ leaves the card for the list, at the row it was on.
+        if pane == Pane::Card {
+            pads.push(Pad::Left);
+        }
+        // Up the list to its first row, then up once more into the marks.
+        pads.extend(crate::console::pointer::repeat(Pad::Up, list_focus + 1));
+    }
+    pads.extend(crate::console::pointer::along(mark_focus, to, Pad::Left, Pad::Right));
+    pads.push(Pad::A);
+    pads
+}
+
 /// Whether the card has room for two columns of facts (design px, as the
 /// games' page measures it).
 fn card_is_wide(window: &Window, scale: f32) -> bool {
     let viewport = f32::from(crate::ui::content_size(window).width) / scale;
-    viewport - 2. * 46. - 560. - 40. > 760.
+    viewport - 2. * PAGE_PAD - LEFT_W - COLUMN_GAP > 760.
 }
 
 #[cfg(test)]
@@ -871,5 +1152,97 @@ mod tests {
         assert_eq!(title_status(Some(&progress), "series", Some(&details)).as_deref(), Some("3 of 8 episodes watched"));
         assert_eq!(title_status(Some(&progress), "series", None), Some(trn!(3, "{n} episode watched", "{n} episodes watched")));
         assert_eq!(title_status(None, "movie", None), None, "no record, no line");
+    }
+
+    #[test]
+    fn a_mark_is_filled_and_coloured_only_while_it_is_on() {
+        for mark in [Mark::Watched, Mark::Watchlist, Mark::Favourite] {
+            assert_eq!(mark.tint(false), None, "{mark:?} is untinted while it is off");
+            assert!(mark.tint(true).is_some(), "{mark:?} is coloured while it is on");
+        }
+        // The two shelf flags swap their outline for the full icon; the watched
+        // mark stays a tick, and its colour is what says where it stands.
+        for mark in [Mark::Watchlist, Mark::Favourite] {
+            assert_ne!(mark.icon(false), mark.icon(true), "{mark:?} fills its icon with its state");
+        }
+        assert_eq!(Mark::Watched.icon(false), Icon::Check, "a tick either way: the tint says which");
+        assert_ne!(Mark::Watchlist.icon(true), Mark::Favourite.icon(true), "the two shelf flags never look alike");
+        assert_eq!([Mark::Watched.rank(), Mark::Watchlist.rank(), Mark::Favourite.rank()], [0, 1, 2], "the row's order");
+    }
+
+    #[test]
+    fn a_title_nobody_has_played_still_has_a_watched_mark() {
+        assert_eq!(watched_state(None, None, "movie"), Some(false), "a film never played can be marked");
+        let episode = Picked { id: "tt1:1:2", season: 1, number: 2 };
+        assert_eq!(watched_state(None, Some(episode), "series"), Some(false), "an episode watched elsewhere can be marked");
+        assert_eq!(watched_state(None, None, "series"), None, "a show without its episodes has nothing to mark");
+
+        let played = heronite_watch::progress::MovieProgress { finished: true, ..Default::default() };
+        assert_eq!(watched_state(Some(&played), None, "movie"), Some(true), "a finished film is the tick");
+
+        let mut episodes = played;
+        episodes.episodes.insert(
+            "tt1:1:2".into(),
+            heronite_watch::progress::EpisodeProgress {
+                finished: true,
+                season: Some(1),
+                number: Some(2),
+                updated_at: chrono::Utc::now(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(watched_state(Some(&episodes), Some(episode), "series"), Some(true), "its own record is the tick");
+        let other = Picked { id: "tt1:1:3", season: 1, number: 3 };
+        assert_eq!(watched_state(Some(&episodes), Some(other), "series"), Some(false), "another episode is its own mark");
+    }
+
+    #[test]
+    fn a_press_on_a_mark_writes_the_flag_it_draws() {
+        assert_eq!(Mark::Watchlist.flag(), Some(Flag::Watchlist));
+        assert_eq!(Mark::Favourite.flag(), Some(Flag::Favourite));
+        assert_eq!(Mark::Watched.flag(), None, "the watched mark writes the record, not a shelf");
+    }
+
+    #[test]
+    fn the_row_lists_the_watched_mark_then_the_two_flags() {
+        assert!(shows_watched("movie", false), "a film always has a mark, played or not");
+        assert!(shows_watched("series", true));
+        assert!(!shows_watched("series", false), "a show whose episodes are not here has nothing to mark");
+
+        assert_eq!(marks_len(true), 3, "the tick and the two flags");
+        assert_eq!(marks_len(false), 2, "a series without its episodes keeps its two flags");
+
+        assert_eq!(mark_at(0, true), Some(Mark::Watched));
+        assert_eq!(mark_at(1, true), Some(Mark::Watchlist));
+        assert_eq!(mark_at(2, true), Some(Mark::Favourite));
+        assert_eq!(mark_at(3, true), None);
+        assert_eq!(mark_at(0, false), Some(Mark::Watchlist), "the row closes over a missing watched mark");
+        assert_eq!(mark_at(1, false), Some(Mark::Favourite));
+        assert_eq!(mark_at(2, false), None);
+    }
+
+    #[test]
+    fn a_click_on_a_mark_makes_the_presses_that_reach_it() {
+        // The marks have the pad: a click on another one moves along and presses.
+        assert_eq!(mark_route(Pane::Marks, 4, 0, 2), [Pad::Right, Pad::Right, Pad::A]);
+        assert_eq!(mark_route(Pane::Marks, 0, 1, 0), [Pad::Left, Pad::A]);
+        // The list has it: up its rows to the first, then up into the marks.
+        assert_eq!(mark_route(Pane::List, 0, 1, 0), [Pad::Up, Pad::Left, Pad::A]);
+        assert_eq!(mark_route(Pane::List, 2, 0, 1), [Pad::Up, Pad::Up, Pad::Up, Pad::Right, Pad::A]);
+        // The card has it: ◀ back to the list, then up.
+        assert_eq!(mark_route(Pane::Card, 0, 0, 0), [Pad::Left, Pad::Up, Pad::A]);
+    }
+
+    #[test]
+    fn the_watch_later_hint_names_the_press_that_writes_it() {
+        assert!(watch_later_hint(false).is_none(), "an imported title has no record to mark");
+        let offered = watch_later_hint(true).expect("the shelf holds what a source here has");
+        assert_eq!(offered.btn, Btn::R3, "the right stick's click");
+        assert_eq!(offered.label, "Watch later");
+        assert!(watch_later_press(Pad::R3), "the hint's press is the one the page takes");
+        for pad in [Pad::L3, Pad::X, Pad::A, Pad::B, Pad::Left, Pad::Right, Pad::Start] {
+            assert!(!watch_later_press(pad), "{pad:?} keeps its own job");
+        }
+        assert!(!trailer_press(Pad::R3), "the two sticks' clicks do different things");
     }
 }

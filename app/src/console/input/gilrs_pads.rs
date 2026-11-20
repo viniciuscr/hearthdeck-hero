@@ -61,6 +61,7 @@ fn button(b: gilrs::Button) -> Option<PadButton> {
         B::DPadLeft => PadButton::Left,
         B::DPadRight => PadButton::Right,
         B::LeftThumb => PadButton::LeftStick,
+        B::RightThumb => PadButton::RightStick,
         _ => return None,
     })
 }
@@ -209,6 +210,7 @@ mod tests {
         assert_eq!(button(B::Mode), Some(PadButton::Guide));
         assert_eq!(button(B::DPadLeft), Some(PadButton::Left));
         assert_eq!(button(B::LeftThumb), Some(PadButton::LeftStick));
+        assert_eq!(button(B::RightThumb), Some(PadButton::RightStick));
         assert_eq!(button(B::C), None);
         assert_eq!(axis(gilrs::Axis::DPadY), Some(StickAxis::DPadY));
         assert_eq!(axis(gilrs::Axis::LeftZ), None);

@@ -62,6 +62,8 @@ pub enum Pad {
     RT,
     /// The click of the left stick (L3).
     L3,
+    /// The click of the right stick (R3).
+    R3,
     /// Menu (opens the sidebar).
     Start,
     Select,
@@ -96,6 +98,8 @@ pub enum Btn {
     LT,
     /// The click of the left stick.
     L3,
+    /// The click of the right stick.
+    R3,
     Start,
     /// "◀ ▶".
     LeftRight,

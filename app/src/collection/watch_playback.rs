@@ -40,10 +40,14 @@ pub(super) struct WatchPlayback {
     /// Which card the page shows beside the list: the title's details or its
     /// streams.
     tab: DetailTab,
-    /// Which side the pad drives: the title's list or the card.
+    /// Which side the pad drives: the title's list, its marks or the card.
     pane: Pane,
     /// The focus of the card's stream list.
     streams_nav: ListNav,
+    /// The mark of the page's icon row the pad is on (`console/watch_page.rs`).
+    mark: usize,
+    /// The title the page last opened: another one starts on the list.
+    page: Option<String>,
     /// Play the first stream as soon as this title/episode's list arrives (A on
     /// an episode, or Play, starts the best at once). `Some(None)` is a film.
     pending: Option<Option<String>>,
@@ -70,11 +74,14 @@ pub(super) enum DetailTab {
 }
 
 /// Which side of the film page the pad drives: the title's list (Play, season,
-/// episodes) or the card beside it (the details to scroll, or the streams).
+/// episodes), its row of marks (watched, watch later, favourite) or the card
+/// beside it (the details to scroll, or the streams).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Pane {
     #[default]
     List,
+    /// The watched / watch later / favourite icons above the list.
+    Marks,
     Card,
 }
 
@@ -466,6 +473,33 @@ impl CollectionView {
         &mut self.watch.streams_nav
     }
 
+    /// Opens the page of `key`: a title the page was not on starts with the list
+    /// in hand and the first mark focused, so no focus crosses from one page to
+    /// the next (a shorter row would otherwise open with the pad outside it).
+    pub(super) fn watch_open_page(&mut self, key: &str) {
+        if self.watch.page.as_deref() == Some(key) {
+            return;
+        }
+        self.watch.page = Some(key.to_owned());
+        self.watch.pane = Pane::List;
+        self.watch.mark = 0;
+    }
+
+    /// The mark of the icon row the pad is on (clamped to `len`).
+    pub(super) fn watch_mark_focus(&self, len: usize) -> usize {
+        self.watch.mark.min(len.saturating_sub(1))
+    }
+
+    /// ◀ ▶ on the icon row: the mark beside it, around the ends.
+    pub(super) fn watch_move_mark(&mut self, right: bool, len: usize) {
+        if len == 0 {
+            self.watch.mark = 0;
+            return;
+        }
+        let at = self.watch_mark_focus(len);
+        self.watch.mark = if right { (at + 1) % len } else { (at + len - 1) % len };
+    }
+
     /// The episode the picker shows, when the title is a series with episodes.
     pub(super) fn watch_picked_video(&mut self, game: &CollectionGame) -> Option<String> {
         let details = self.watch_details(&game.key)?;
@@ -513,7 +547,13 @@ impl CollectionView {
         let progress = heronite_watch::progress::local(&self.app_paths, &provider, &id);
         let (target, watched) = match &episode {
             Some((video_id, season, number)) => {
-                let watched = progress.as_ref().and_then(|progress| progress.episodes.get(video_id)).is_some_and(|record| record.finished);
+                // The same lookup the page draws the mark from: by the video id,
+                // then by season and number, so a record an import keyed the
+                // second way is un-marked by the press that showed it watched.
+                let watched = progress
+                    .as_ref()
+                    .and_then(|progress| progress.episode(video_id, *season, *number))
+                    .is_some_and(|record| record.finished);
                 (MarkTarget::Episode { video_id, season: *season, number: *number }, !watched)
             }
             None => {

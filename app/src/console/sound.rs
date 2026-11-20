@@ -72,11 +72,11 @@ impl Sound {
     }
 }
 
-/// What a press sounds like (`None`: silent, like the right stick).
+/// What a press sounds like (`None`: silent, like the right stick's scroll).
 pub fn for_pad(pad: Pad) -> Option<Sound> {
     match pad {
         Pad::Up | Pad::Down | Pad::Left | Pad::Right => Some(Sound::Move),
-        Pad::A | Pad::X | Pad::Y | Pad::Start | Pad::Select | Pad::LT | Pad::RT | Pad::L3 => Some(Sound::Confirm),
+        Pad::A | Pad::X | Pad::Y | Pad::Start | Pad::Select | Pad::LT | Pad::RT | Pad::L3 | Pad::R3 => Some(Sound::Confirm),
         Pad::B => Some(Sound::Back),
         Pad::LB | Pad::RB => Some(Sound::Tab),
         Pad::ScrollUp | Pad::ScrollDown => None,
