@@ -34,6 +34,14 @@ pub(super) fn focused_episode(rows: &[Row], focus: usize) -> Option<usize> {
     rows.get(focus)?.id.strip_prefix("episode:")?.parse().ok()
 }
 
+/// The card a press on a rail opens: the one the focus is on, `None` when the
+/// rail holds fewer cards than the focus (a title the library lost mid-render).
+/// The render, the focus count and the press read the same list, so this cannot
+/// name a card that was not drawn.
+pub(super) fn rail_press(len: usize, focus: usize) -> Option<usize> {
+    (focus < len).then_some(focus)
+}
+
 /// The presses a click on a rail's card `to` makes: into the card from the list
 /// when it does not hold the pad, along the rail, then A — the same presses the
 /// pad would make, so a click and a press cannot disagree.
@@ -103,6 +111,14 @@ mod tests {
         assert_eq!(rows[0].id.as_ref(), "season", "the picker's first row is the season, not a playable row");
         assert_eq!(focused_episode(&rows, 0), None, "a season row names no episode");
         assert_eq!(focused_episode(&rows, 1), Some(3), "an episode row names the episode it plays");
+    }
+
+    #[test]
+    fn a_press_on_a_rail_opens_only_a_card_that_was_drawn() {
+        assert_eq!(rail_press(3, 0), Some(0));
+        assert_eq!(rail_press(3, 2), Some(2), "the last drawn card opens");
+        assert_eq!(rail_press(3, 3), None, "a focus past the list opens nothing");
+        assert_eq!(rail_press(0, 0), None, "an empty rail opens nothing");
     }
 
     #[test]

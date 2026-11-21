@@ -34,7 +34,7 @@ use heronite_watch::metadata::{Episode, Rail, Related, TitleDetails};
 use heronite_watch::progress::WatchedState;
 
 mod engine;
-use engine::{focused_episode, mark_at, mark_route, marks_len, rail_route};
+use engine::{focused_episode, mark_at, mark_route, marks_len, rail_press, rail_route};
 
 mod sections;
 use sections::details::{detail_lines, facts_line, title_status, watched_line};
@@ -846,8 +846,10 @@ impl CollectionView {
                 }
                 return match pad {
                     Pad::A => {
-                        if let Some((_, related)) = keyed.get(focus) {
-                            self.watch_open_related(related, cx);
+                        if let Some(index) = rail_press(len, focus) {
+                            if let Some((_, related)) = keyed.get(index) {
+                                self.watch_open_related(related, cx);
+                            }
                         }
                         true
                     }
