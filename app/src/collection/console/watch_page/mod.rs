@@ -36,6 +36,9 @@ use heronite_watch::progress::WatchedState;
 mod engine;
 use engine::{focused_episode, mark_at, mark_route, marks_len, rail_route};
 
+mod sections;
+use sections::episode::{episode_card, episode_row};
+
 use super::super::watch_personal::Flag;
 use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection, DETAIL_TABS};
 use super::super::CollectionView;
@@ -307,86 +310,6 @@ fn fact_label(fact: &Fact) -> SharedString {
         _ if fact.label.trim().is_empty() => SharedString::from(fact.id.clone()),
         _ => SharedString::from(fact.label.clone()),
     }
-}
-
-/// "Winter Is Coming", or "Episode 3" when the source has no name.
-fn episode_name(episode: &Episode) -> String {
-    match episode.name.trim() {
-        "" => tr!("Episode {n}", n = episode.number).to_string(),
-        name => name.to_owned(),
-    }
-}
-
-/// "1 · Winter Is Coming": the picker row's label.
-fn episode_label(episode: &Episode) -> String {
-    format!("{} · {}", episode.number, episode_name(episode))
-}
-
-/// "S1E2 · 18 Apr 2011": the picker row's second line.
-fn episode_desc(episode: &Episode, locale: DateLocale) -> String {
-    let mut parts = vec![episode.code()];
-    parts
-        .extend(episode.released.as_deref().map(|at| heronite_data::text::format_timestamp(at, locale)).filter(|at| !at.trim().is_empty()));
-    parts.join(" \u{b7} ")
-}
-
-/// One row of a season's episodes ("episode:{index}" in the list). A tick means
-/// finished, the half mark means it was started and left, and a play mark means
-/// nothing was played yet; the row says how far in when it knows.
-fn episode_row(episode: &Episode, index: usize, state: WatchedState, resuming: bool, locale: DateLocale) -> Row {
-    let mut parts = vec![episode_desc(episode, locale)];
-    match state {
-        WatchedState::InProgress { .. } => {
-            let percent = state.percent().unwrap_or_default();
-            parts.push(if resuming {
-                tr!("Resume from here · {percent}%", percent = percent).to_string()
-            } else {
-                tr!("In progress · {percent}%", percent = percent).to_string()
-            });
-        }
-        WatchedState::Unwatched if resuming => parts.push(tr!("Resume from here").to_string()),
-        WatchedState::Watched | WatchedState::Unwatched => {}
-    }
-    let icon = match state {
-        WatchedState::Watched => Icon::Check,
-        // A clock for "started, not finished" — the set already has one.
-        WatchedState::InProgress { .. } => Icon::AccessTime,
-        WatchedState::Unwatched => Icon::PlayArrow,
-    };
-    Row::action(SharedString::from(format!("episode:{index}")), episode_label(episode)).desc(parts.join(" \u{b7} ")).icon(icon)
-}
-
-/// The picked episode above the title's own details: still, code, name, date,
-/// rating and what it is about.
-fn episode_card(episode: &Episode, still: Option<ImageSource>, locale: DateLocale) -> Div {
-    let mut line = vec![episode.code()];
-    line.extend(episode.released.as_deref().map(|at| heronite_data::text::format_timestamp(at, locale)).filter(|at| !at.trim().is_empty()));
-    line.extend(episode.rating.as_ref().map(|rating| tr!("IMDb {rating}", rating = rating).to_string()));
-    div()
-        .flex()
-        .flex_col()
-        .gap(u(10.))
-        .child(
-            div()
-                .flex_none()
-                .w(u(420.))
-                .h(u(236.))
-                .rounded(u(14.))
-                .overflow_hidden()
-                .bg(kit::ink(0.08))
-                .children(still.map(|still| img(still).size_full().object_fit(ObjectFit::Cover))),
-        )
-        .child(div().text_size(u(20.)).font_weight(theme::W_BOLD).text_color(theme::text_primary()).child(format!(
-            "{} \u{b7} {}",
-            episode.code(),
-            episode_name(episode)
-        )))
-        .children((!line.is_empty()).then(|| div().text_size(u(14.)).text_color(theme::text_muted()).child(line.join(" \u{b7} "))))
-        .children(
-            episode.overview.clone().filter(|overview| !overview.trim().is_empty()).map(|overview| {
-                div().max_w(u(640.)).text_size(u(15.)).line_height(u(22.)).text_color(theme::text_primary()).child(overview)
-            }),
-        )
 }
 
 /// One far side of the page's two rails, as the tab that shows it.
@@ -1230,6 +1153,7 @@ fn card_is_wide(window: &Window, scale: f32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::sections::episode::{episode_desc, episode_label, episode_name};
     use super::*;
     // `gpui_kit::*` brings gpui's `test` macro into scope.
     use core::prelude::v1::test;
