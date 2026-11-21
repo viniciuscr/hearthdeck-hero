@@ -23,10 +23,12 @@ pub const ROOT: &str = "watch-details";
 pub const FRESH_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// The shape of what is cached. Bumped when `TitleDetails` gains something a
-/// screen shows (the trailers in 2, their wide stills in 3): an answer written by
-/// an older build lacks it, and a week of freshness must not hide it. An answer
-/// of another shape is only ever served when no source can be asked.
-pub const SCHEMA: u32 = 3;
+/// screen shows (the trailers in 2, their wide stills in 3, the film page's two
+/// rails in 4): an answer written by an older build lacks it, and a week of
+/// freshness must not hide it — which is what a details page kept saying
+/// "nothing similar" for, on a title Simkl has both lists for. An answer of
+/// another shape is only ever served when no source can be asked.
+pub const SCHEMA: u32 = 4;
 
 /// One cached answer: the details, when they were fetched, and which shape of
 /// them they are.
@@ -130,6 +132,13 @@ mod tests {
         std::fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
         let cached = read(dir.path(), &title("tt0133093"), "cinemeta").expect("still readable");
         assert!(!cached.is_current(), "same details, older shape: the page asks again");
+
+        // The shape from before the page's two rails: its answer has no lists,
+        // and a week of freshness must not keep them empty.
+        let mut value = serde_json::to_value(read(dir.path(), &title("tt0133093"), "cinemeta").expect("written")).unwrap();
+        value["schema"] = serde_json::json!(SCHEMA - 1);
+        std::fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(!read(dir.path(), &title("tt0133093"), "cinemeta").expect("still readable").is_current());
     }
 
     #[test]

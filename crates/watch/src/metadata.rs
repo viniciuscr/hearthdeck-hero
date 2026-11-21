@@ -62,8 +62,10 @@ pub fn details_with(http: &dyn Transport, app: &AppPaths, title: &TitleRef) -> R
     // Fresh **and** of the shape this build draws: an answer from before a
     // screen gained a field (the trailers) must not hide it for a week.
     if cached.as_ref().is_some_and(|cached| cached.is_fresh(Utc::now()) && cached.is_current()) {
+        log::debug!("watch details cache: {}:{} answered ({sources})", title.provider, title.id);
         return Ok(cached.map(|cached| cached.details));
     }
+    log::debug!("watch details cache: {}:{} asked ({sources})", title.provider, title.id);
     // The machine's own credentials are adopted here too, not only when Settings
     // opens: a page must not go without a source because nobody visited it — the
     // bootstrap's key and client id are files waiting for a reader.

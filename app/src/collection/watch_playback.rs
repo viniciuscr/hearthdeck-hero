@@ -254,6 +254,9 @@ impl CollectionView {
         let app = self.app_paths.clone();
         let provider = game.runner.clone();
         let id = crate::fork::watch::sources::id(game).to_owned();
+        // What the log names: the title's own id (`stremio:tt0149460`), never the
+        // library key, whose `stremio_stremio:` prefix reads like a provider id.
+        let label = format!("{provider}:{id}");
         let title = TitleRef::new(&provider, &id, crate::fork::watch::sources::kind(game))
             .named(&game.title, crate::fork::watch::sources::year(game));
         cx.spawn(async move |this, cx| {
@@ -280,7 +283,7 @@ impl CollectionView {
                     Ok((Some(details), resume)) => {
                         log::info!(
                             target: "heronite_app",
-                            "watch details: {key} answered — similar {}, recommended {}",
+                            "watch details: {label} answered — similar {}, recommended {}",
                             details.similar.len(),
                             details.recommended.len()
                         );
