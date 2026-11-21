@@ -85,27 +85,27 @@ cargo build --release --locked -p heronite -p heronite-epic-login
 install -Dm0755 target/release/heronite-rs %{buildroot}%{_bindir}/heronite-rs
 # Found next to heronite-rs by the Epic page.
 install -Dm0755 target/release/heronite-epic-login %{buildroot}%{_bindir}/heronite-epic-login
-install -Dm0644 packaging/linux/app.heronite.Heronite.desktop \
-    %{buildroot}%{_datadir}/applications/app.heronite.Heronite.desktop
-install -Dm0644 packaging/linux/app.heronite.Heronite.png \
-    %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/app.heronite.Heronite.png
-install -Dm0644 packaging/linux/app.heronite.Heronite.metainfo.xml \
-    %{buildroot}%{_metainfodir}/app.heronite.Heronite.metainfo.xml
+install -Dm0644 packaging/linux/app.hearthdeck.Hero.desktop \
+    %{buildroot}%{_datadir}/applications/app.hearthdeck.Hero.desktop
+install -Dm0644 packaging/linux/app.hearthdeck.Hero.png \
+    %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/app.hearthdeck.Hero.png
+install -Dm0644 packaging/linux/app.hearthdeck.Hero.metainfo.xml \
+    %{buildroot}%{_metainfodir}/app.hearthdeck.Hero.metainfo.xml
 # Tells the app that dnf updates it (Package::MARKER in crates/update).
 install -dm0755 %{buildroot}%{_datadir}/heronite
 echo copr > %{buildroot}%{_datadir}/heronite/package-format
 
 %check
-desktop-file-validate %{buildroot}%{_datadir}/applications/app.heronite.Heronite.desktop
-appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/app.heronite.Heronite.metainfo.xml
+desktop-file-validate %{buildroot}%{_datadir}/applications/app.hearthdeck.Hero.desktop
+appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/app.hearthdeck.Hero.metainfo.xml
 
 %files
 %license LICENSE licenses/
 %doc THIRD-PARTY-NOTICES.md
 %{_bindir}/heronite-rs
-%{_datadir}/applications/app.heronite.Heronite.desktop
-%{_datadir}/icons/hicolor/256x256/apps/app.heronite.Heronite.png
-%{_metainfodir}/app.heronite.Heronite.metainfo.xml
+%{_datadir}/applications/app.hearthdeck.Hero.desktop
+%{_datadir}/icons/hicolor/256x256/apps/app.hearthdeck.Hero.png
+%{_metainfodir}/app.hearthdeck.Hero.metainfo.xml
 %{_datadir}/heronite/
 
 %files epic-login
