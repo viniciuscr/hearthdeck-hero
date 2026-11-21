@@ -95,6 +95,17 @@ mod tests {
     }
 
     #[test]
+    fn the_picker_lists_a_season_choice_and_episode_rows() {
+        // The two row kinds `watch_rows` builds for a series.
+        let season = Row::choice("season", "Season", vec!["Season 1".into()], 0);
+        let episode = Row::action("episode:3", "Episode 4");
+        let rows = [season, episode];
+        assert_eq!(rows[0].id.as_ref(), "season", "the picker's first row is the season, not a playable row");
+        assert_eq!(focused_episode(&rows, 0), None, "a season row names no episode");
+        assert_eq!(focused_episode(&rows, 1), Some(3), "an episode row names the episode it plays");
+    }
+
+    #[test]
     fn a_click_on_a_rail_card_walks_its_rows_then_its_columns() {
         // Two columns a row: card 4 sits under card 0, so the route is rows only.
         assert_eq!(rail_route(Pane::Card, 0, 4, 2), vec![Pad::Down, Pad::Down, Pad::A]);
