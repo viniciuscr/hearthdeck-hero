@@ -158,7 +158,8 @@ impl CollectionView {
             },
             split: i == 0,
         });
-        let at = vm.details.iter().position(|r| r.label.as_ref() == tr!("Playtime")).map_or(vm.details.len(), |i| i + 1);
+        // By field: the Watch space renames this row (`collection/watch_facts.rs`).
+        let at = vm.details.iter().position(|r| r.field == super::vm::DetailField::Playtime).map_or(vm.details.len(), |i| i + 1);
         vm.details.splice(at..at, rows.collect::<Vec<_>>());
         vm
     }

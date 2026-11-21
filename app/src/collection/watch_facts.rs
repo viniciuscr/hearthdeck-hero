@@ -28,18 +28,24 @@ pub(super) fn time_label(space: Space, time: &str) -> String {
     }
 }
 
+/// The "when" half of a played line: "Last played 3 days ago" for a game,
+/// "Last watched 3 days ago" for a film, and the never-started wording.
+pub(super) fn when_label(space: Space, ago: Option<&str>, long: bool) -> String {
+    let watch = space == Space::Watch;
+    match ago {
+        Some(ago) if long && watch => tr!("Last watched {at}", at = ago.to_lowercase()),
+        Some(ago) if long => tr!("Last played {when}", when = ago.to_lowercase()),
+        Some(ago) => ago.to_owned(),
+        None if watch => tr!("Not watched yet").to_string(),
+        None => tr!("Not played yet").to_string(),
+    }
+}
+
 /// "3 days ago · 12h 40m"; `long` says "Last played 3 days ago · 12h 40m"
 /// ("Last watched" and "watched" in the Watch space). "Not played yet" (or
 /// "Not watched yet") for a title never started.
 pub(super) fn played_line(space: Space, g: &CollectionGame, long: bool) -> String {
-    let watch = space == Space::Watch;
-    let when = match g.last_played.as_deref().and_then(played_ago) {
-        Some(ago) if long && watch => tr!("Last watched {at}", at = ago.to_lowercase()),
-        Some(ago) if long => tr!("Last played {when}", when = ago.to_lowercase()),
-        Some(ago) => ago,
-        None if watch => tr!("Not watched yet").to_string(),
-        None => tr!("Not played yet").to_string(),
-    };
+    let when = when_label(space, g.last_played.as_deref().and_then(played_ago).as_deref(), long);
     let time = watched_time(g).map(|time| time_label(space, &time));
     let parts: Vec<String> = Some(when).into_iter().chain(time).collect();
     parts.join(" \u{b7} ")
@@ -102,6 +108,15 @@ pub(super) fn library_line(space: Space, library: &str, installed: bool) -> Stri
     }
 }
 
+/// The Store row of the details panel. A film names the catalogues it was listed
+/// in, as its hero line does — not the projection's fallback source label.
+pub(super) fn store_line(space: Space, g: &CollectionGame, library: &str, installed: bool) -> String {
+    match space {
+        Space::Games => library_line(Space::Games, library, installed),
+        Space::Watch => crate::fork::watch::sources::origins(g).join(" \u{b7} "),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +148,15 @@ mod tests {
         let mut games = vec![row(DetailField::Playtime, "Playtime")];
         relabel(Space::Games, &mut games);
         assert_eq!(games[0].label.as_ref(), "Playtime");
+    }
+
+    #[test]
+    fn a_film_says_last_watched_where_a_game_says_last_played() {
+        assert_eq!(when_label(Space::Watch, Some("3 days ago"), true), "Last watched 3 days ago");
+        assert_eq!(when_label(Space::Games, Some("3 days ago"), true), "Last played 3 days ago");
+        assert_eq!(when_label(Space::Watch, None, true), "Not watched yet");
+        assert_eq!(when_label(Space::Games, None, true), "Not played yet");
+        assert_eq!(when_label(Space::Games, Some("3 days ago"), false), "3 days ago", "the short form is the same in both spaces");
     }
 
     #[test]

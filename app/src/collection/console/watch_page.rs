@@ -687,7 +687,13 @@ impl CollectionView {
         }
         let (tile_w, tile_h) = self.console_tile_size();
         let room = super::tile::label_room();
-        let focus = self.watch_rail_focus(items.len());
+        // Only the titles the library already holds are drawn: a key that is
+        // still missing has nothing to open, and an empty box would be a press
+        // that goes nowhere. The count is over what is drawn, so the focus and
+        // the pad routes agree row for row.
+        let keyed: Vec<(SharedString, &Related)> =
+            items.iter().filter_map(|related| self.rail_key(related).map(|key| (key, related))).collect();
+        let focus = self.watch_rail_focus(keyed.len());
         let columns = rail_columns(window, tile_w);
         let line_w = rail_line_width(columns, tile_w);
         let pane = self.watch_pane();
@@ -712,16 +718,12 @@ impl CollectionView {
             .gap(u(RAIL_ROW_GAP))
             .overflow_y_scroll()
             .track_scroll(self.console.game.about.handle());
-        for (row, chunk) in items.chunks(columns).enumerate() {
+        for (row, chunk) in keyed.chunks(columns).enumerate() {
             let mut tiles: Vec<AnyElement> = Vec::with_capacity(chunk.len());
-            for (in_row, related) in chunk.iter().enumerate() {
+            for (in_row, (key, related)) in chunk.iter().enumerate() {
                 let index = row * columns + in_row;
                 let on = pane == Pane::Card && index == focus;
-                // A card with no library key is not drawn: an empty box would be
-                // a press that goes nowhere. The caller shows "loading" or
-                // "failed" instead while any are missing.
-                let Some(key) = self.rail_key(related) else { continue };
-                let face = self.console_tile(&key, tile_w, tile_h, on, true, window);
+                let face = self.console_tile(key, tile_w, tile_h, on, true, window);
                 tiles.push(
                     div()
                         .id(SharedString::from(format!("watch-rail-{}", related.id)))

@@ -46,7 +46,7 @@ const SEAMS: &[Seam] = &[
             "watch_console_rows",
             "self.space == super::super::Space::Watch",
             "pub(super) use hero::facts_table",
-            "fn classic_facts",
+            "DetailField::LastPlayed | DetailField::Playtime",
         ],
         why: "the detail page's dispatch: the seven questions the shell asks (the space branch answers them), and the facts table the page reuses",
     },
@@ -127,7 +127,7 @@ const SEAMS: &[Seam] = &[
     Seam {
         file: "app/src/collection/console/layouts/spotlight/mod.rs",
         register: &["F-012", "F-010"],
-        sites: &["Fork-Seam: F-012", "played_line(self.space, g, true)", "watch_facts::library_line"],
+        sites: &["Fork-Seam: F-012", "played_line(self.space, g, true)", "watch_facts::store_line"],
         why: "the film page's own line and its trailer hint",
     },
     Seam {

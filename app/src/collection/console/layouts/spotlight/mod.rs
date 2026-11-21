@@ -427,7 +427,7 @@ impl CollectionView {
             rows.push((Icon::FaHardDrive, tr!("Size on disk").into(), size.to_string()));
         }
         // A catalogue lists a title; it does not install one (`watch_facts`).
-        let store = crate::collection::watch_facts::library_line(self.space, &f.library, f.installed);
+        let store = crate::collection::watch_facts::store_line(self.space, g, &f.library, f.installed);
         rows.push((Icon::Folder, tr!("Store").into(), store));
         if let Some(score) = f.score.filter(|s| *s > 0.) {
             let from = f.score_source.as_ref().map_or(String::new(), |s| format!(" \u{b7} {s}"));
@@ -440,7 +440,8 @@ impl CollectionView {
     /// page, as far as the game has them (How Long To Beat has its card).
     fn spotlight_links(&self, g: &CollectionGame) -> Vec<Link> {
         let mut links = Vec::new();
-        if g.installed {
+        // A film has no install folder to open (`watch_facts`).
+        if g.installed && self.space.capabilities().install {
             links.push(Link::Folder);
         }
         if details_url(g).is_some() {
