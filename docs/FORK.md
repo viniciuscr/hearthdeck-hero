@@ -78,7 +78,7 @@ with a red gate.
 - A new capability lives in a new crate (`crates/<name>`, no GPUI) plus a thin
   adapter in `app/src`. Edit upstream code only at registered seams.
 - Fork-owned code is not registered: `crates/watch*`, `app/src/fork/**`,
-  `app/src/collection/watch_playback.rs`,
+  `app/src/collection/watch_playback.rs`, `app/src/collection/watch_facts.rs`,
   `app/src/collection/console/watch_page*` (the film page, once it becomes a
   directory), `app/src/collection/console/watch_panel.rs` and `docs/WATCH*.md`
   are additions, not deviations. The register lists only upstream files a fork

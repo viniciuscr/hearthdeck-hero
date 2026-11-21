@@ -2,10 +2,10 @@
 //! title's name, and the labels its detail rows carry.
 //!
 //! Fork-owned, an addition rather than a deviation (`docs/FORK.md`). The console
-//! layouts and the desktop panel both print these strings, so a new upstream
-//! surface asks here instead of growing its own `match self.space`
-//! (`docs/WATCH-PAGE.md` §6, Phase 1). Games keep saying played and Playtime; a
-//! film or a series says watched and Watched.
+//! layouts print these strings, and the desktop panel's rows carry the labels
+//! `relabel` writes, so a new upstream surface asks here instead of growing its
+//! own `match self.space` (`docs/WATCH-PAGE.md` §6, Phase 1). Games keep saying
+//! played and Playtime; a film or a series says watched and Watched.
 
 use heronite_data::organize::release_year;
 use heronite_data::CollectionGame;
@@ -95,24 +95,18 @@ pub(super) fn relabel(space: Space, rows: &mut [DetailRow]) {
     }
 }
 
-/// "Cinemeta · Installed" for a game; the catalogue's name alone for a film. A
-/// catalogue lists a title, it does not install one, and a film has no folder to
-/// open.
-pub(super) fn library_line(space: Space, library: &str, installed: bool) -> String {
-    match space {
-        Space::Games => {
-            let place = if installed { tr!("Installed") } else { tr!("Not installed") };
-            format!("{library} \u{b7} {place}")
-        }
-        Space::Watch => library.to_string(),
-    }
+/// "Steam · Installed" for a game. A film's Store row is its catalogues
+/// (`store_line`): a catalogue lists a title, it does not install one.
+pub(super) fn library_line(library: &str, installed: bool) -> String {
+    let place = if installed { tr!("Installed") } else { tr!("Not installed") };
+    format!("{library} \u{b7} {place}")
 }
 
 /// The Store row of the details panel. A film names the catalogues it was listed
 /// in, as its hero line does — not the projection's fallback source label.
 pub(super) fn store_line(space: Space, g: &CollectionGame, library: &str, installed: bool) -> String {
     match space {
-        Space::Games => library_line(Space::Games, library, installed),
+        Space::Games => library_line(library, installed),
         Space::Watch => crate::fork::watch::sources::origins(g).join(" \u{b7} "),
     }
 }
@@ -160,9 +154,8 @@ mod tests {
     }
 
     #[test]
-    fn a_catalogue_lists_a_film_and_does_not_install_it() {
-        assert_eq!(library_line(Space::Watch, "Cinemeta", true), "Cinemeta");
-        assert_eq!(library_line(Space::Games, "Steam", true), "Steam \u{b7} Installed");
-        assert_eq!(library_line(Space::Games, "Steam", false), "Steam \u{b7} Not installed");
+    fn a_game_names_where_it_comes_from_and_whether_it_is_installed() {
+        assert_eq!(library_line("Steam", true), "Steam \u{b7} Installed");
+        assert_eq!(library_line("Steam", false), "Steam \u{b7} Not installed");
     }
 }

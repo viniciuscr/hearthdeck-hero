@@ -163,7 +163,12 @@ Found while reviewing the page and independent of the refactor:
 2. `classic_facts` filters the facts table on the literal labels "Last Played"
    and "Playtime" (`console/game/mod.rs`), so renaming those rows for Watch
    changes which facts Classic shows;
-3. a rail title with no library key yet draws a blank tile with a dead press;
+3. a rail's cards, its focus count and its pad routes were two sources of truth
+   (a drawn filter on one side, `details.rail(rail).len()` on the other); they
+   are one list now, so a title the library does not hold yet cannot leave a gap
+   or a press that goes nowhere. The empty box the earlier code could draw was
+   already unreachable behind the "missing" guard — the disagreement was the
+   real risk;
 4. `watch_rows`, `watch_press_row` and `watch_page_pad` have no tests today —
    the only net over the dispatch this design creates.
 

@@ -687,12 +687,9 @@ impl CollectionView {
         }
         let (tile_w, tile_h) = self.console_tile_size();
         let room = super::tile::label_room();
-        // Only the titles the library already holds are drawn: a key that is
-        // still missing has nothing to open, and an empty box would be a press
-        // that goes nowhere. The count is over what is drawn, so the focus and
-        // the pad routes agree row for row.
-        let keyed: Vec<(SharedString, &Related)> =
-            items.iter().filter_map(|related| self.rail_key(related).map(|key| (key, related))).collect();
+        // One list for the render and for the pad: the focus count, the routes
+        // and the cards drawn all read it, so they cannot disagree.
+        let keyed = self.rail_cards(rail, details);
         let focus = self.watch_rail_focus(keyed.len());
         let columns = rail_columns(window, tile_w);
         let line_w = rail_line_width(columns, tile_w);
@@ -742,6 +739,14 @@ impl CollectionView {
 
     /// The library key of a rail's card, once the reload has brought it in: a
     /// tile is drawn (and opened) by the key the library knows.
+    /// The cards of a rail the library already holds, in display order. The
+    /// render, the focus count and the pad routes all read this list, so they
+    /// cannot disagree about how many cards there are.
+    fn rail_cards<'a>(&self, rail: Rail, details: Option<&'a TitleDetails>) -> Vec<(SharedString, &'a Related)> {
+        let items = details.map_or(&[][..], |details| details.rail(rail));
+        items.iter().filter_map(|related| self.rail_key(related).map(|key| (key, related))).collect()
+    }
+
     fn rail_key(&self, related: &Related) -> Option<SharedString> {
         self.lib
             .as_ref()?
@@ -1064,7 +1069,8 @@ impl CollectionView {
             // first leaves for the list (as it does on every card).
             if tab.is_rail() {
                 let rail = rail_of(tab);
-                let len = details.as_deref().map_or(0, |details| details.rail(rail).len());
+                let keyed = self.rail_cards(rail, details.as_deref());
+                let len = keyed.len();
                 let focus = self.watch_rail_focus(len);
                 let columns = rail_columns(window, self.console_tile_size().0);
                 // The right stick scrolls the grid, as it scrolls the details.
@@ -1075,8 +1081,8 @@ impl CollectionView {
                 }
                 return match pad {
                     Pad::A => {
-                        if let Some(related) = details.as_deref().and_then(|details| details.rail(rail).get(focus)).cloned() {
-                            self.watch_open_related(&related, cx);
+                        if let Some((_, related)) = keyed.get(focus) {
+                            self.watch_open_related(related, cx);
                         }
                         true
                     }

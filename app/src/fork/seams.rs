@@ -25,15 +25,15 @@
 #[derive(Debug)]
 struct Seam {
     /// Workspace-relative path of the upstream-owned file.
-    pub file: &'static str,
+    file: &'static str,
     /// The `docs/FORK.md` rows that justify the edit.
-    pub register: &'static [&'static str],
+    register: &'static [&'static str],
     /// The fork's own lines: text that only the fork wrote. A rename on either
     /// side breaks the test, which is the point — the table is the source of
     /// truth for the deviation surface.
-    pub sites: &'static [&'static str],
+    sites: &'static [&'static str],
     /// What the file carries, in one line.
-    pub why: &'static str,
+    why: &'static str,
 }
 
 /// Every seam of the Watch space, page first.
@@ -97,8 +97,8 @@ const SEAMS: &[Seam] = &[
     Seam {
         file: "app/src/collection/console/hero.rs",
         register: &["F-016", "F-021"],
-        sites: &["pub(crate) fn watched_or_played"],
-        why: "the hero's lines say watched or played, and name the time the space keeps",
+        sites: &["pub(crate) fn watched_or_played", "pub(crate) fn played_line"],
+        why: "the hero's lines say watched or played, name the time the space keeps, and carry its facts",
     },
     Seam {
         file: "app/src/collection/console/tile.rs",
