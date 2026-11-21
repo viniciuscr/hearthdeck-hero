@@ -25,7 +25,7 @@ cargo test -p heronite fork::watch::prefs  # 3 tests
 | 2 — engine + sections | **done, reviewed** | `8fa89b8d`, `b9406d5e`, `711d9c6c`, `97c93b76`, `5018e018`, `70894e35`, `9d1f5798` |
 | 3 — page styles (Film first) | not started | — |
 | 4 — page config in `console-watch.json` | **partly** (config + isolation + the page reads it) | `8221227d`, `584e7de3` |
-| 5 — retire the scaffolding; offer upstream an extension point | **partly** (proposal written; the rest is the section move + the maintainer's PR) | `docs/UPSTREAM-EXTENSION-POINT.md` |
+| 5 — retire the scaffolding | **partly** (style vocabulary collapsed, the marks section moved; the rails renderer remains) | `44445aa2`, `c768056f` |
 
 Phase 2's six gates are all green and runnable:
 `cargo test -p heronite watch_page` (24), `fork::seams` (8),
@@ -65,8 +65,7 @@ visibility, the mark-count doc) are done.
   containment list names the page and `watch_facts.rs` as additions; the register
   is measured against **`upstream/main`** because `main` lags one sync.
 - `docs/WATCH-TITLES.md` — the reversed decisions (the film page stays ours as a
-  subsystem; one extension point is offered upstream; the budget is seam sites
-  per file, not lines).
+  subsystem; the budget is seam sites per file, not lines).
 
 ### What Phase 1 landed
 
@@ -186,9 +185,9 @@ a dependency.
   and `changes.rs`); the preview keys on the literal id `"game_page"`
   (`pages/settings/console_mode/mod.rs`), so the new row needs its own preview or
   none.
-- **Phase 5.** Remove the scaffolding left in `mod.rs`; then open a branch off
-  `upstream/main` offering a generic space/section extension point (fork's
-  upstream-first rule). Never a dependency.
+- **Phase 5.** Remove the scaffolding left in `mod.rs`: the rails renderer and
+  its geometry helpers are the last of it. Nothing is proposed upstream —
+  upstream contact happens only when the maintainer asks (`docs/FORK.md`).
 
 ## Conventions and gotchas (learned the hard way)
 

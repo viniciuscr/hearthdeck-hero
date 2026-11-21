@@ -307,8 +307,10 @@ date, upstream commit, files, and resolution.
   modifications in this file, and publish the source for every distributed
   binary.
 
-## Upstream-first rule
+## Upstream contact
 
-Generic fixes and features are offered upstream on a branch cut from
-`upstream/main`; fork-only work stays on `fork/main`. Never mix the two in one
-change request. Cherry-pick when a change must live in both.
+Upstream contact happens only when the maintainer asks for it. The fork does not
+open issues, pull requests or branches on upstream on its own initiative, and
+nothing is prepared for upstream unless it was asked for. Everything the fork
+changes in upstream's files is a fork-side patch recorded in the register and in
+`app/src/fork/seams.rs`, merged by us at each reconciliation.

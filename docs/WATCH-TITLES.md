@@ -27,9 +27,9 @@ Watch's: **stream providers** and **movies/series**.
 The binding constraint is upstream. Every line we add in a shared file is a
 conflict to reconcile at every merge, so the plan keeps that surface to an
 explicit, registered budget (§2), machine-checked in `app/src/fork/seams.rs`.
-One request is made upstream, deliberately: a generic extension point for the
-console's detail page, offered as a branch cut from `upstream/main` under the
-fork's upstream-first rule (`docs/WATCH-PAGE.md`). The fork never depends on it.
+Nothing is proposed upstream: upstream contact happens only when the maintainer
+asks for it (`docs/FORK.md`), so every seam here is a fork-side patch we register
+and merge ourselves.
 
 ## 2. Ours and upstream's
 
@@ -449,11 +449,9 @@ shows, +12/−6. Committed at `fork/main` it is still +19/−6 until this lands.
 - **Move the film page onto upstream.** It stays fork-owned, as one subsystem
   (`docs/WATCH-PAGE.md`): hosting it inside upstream's five detail-page layouts
   was measured larger and lands in the files upstream rewrites every sync.
-- **Send anything upstream.** No issue and no pull request for the fork's own
-  features: the seams of §2 are fork-side patches we register and merge
-  ourselves. The single exception is the generic console extension point
-  `docs/WATCH-PAGE.md` offers under the upstream-first rule, which the fork
-  never depends on.
+- **Send anything upstream.** No issue, no pull request, no branch: the seams of
+  §2 are fork-side patches we register and merge ourselves, and upstream contact
+  happens only when the maintainer asks for it.
 
 ## 8. Risks and mitigations
 

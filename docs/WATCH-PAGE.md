@@ -61,10 +61,10 @@ layout bodies. It was rejected.
 5. **The page owns view state only.** `watch_playback.rs` keeps the data
    (details, streams, the rail keep/load machine) and the desktop detail panel
    keeps rendering from it. The page does not become a second data owner.
-6. **The fork offers upstream a generic extension point** (a space or section
-   hook for the console page) on a branch cut from `upstream/main`, under the
-   fork's upstream-first rule. Never a dependency: if upstream declines, the
-   fork already ships the page.
+6. **Nothing is proposed upstream.** The fork does not send upstream an issue, a
+   pull request or a branch; its upstream contact happens only when the
+   maintainer asks for it (`docs/FORK.md`). The page is the fork's own and is
+   built to work against upstream as it is.
 
 ### Rejected shapes
 
@@ -134,7 +134,7 @@ arrangement; **Film** is the fork's own, and it is the default.
 | 2 | engine + sections; the page file becomes the host; six new tests before any monolith code is deleted | film output identical (the acceptance, not "looks fine") |
 | 3 | page styles, Film first; the parity policy for any other style | per-style screenshot check against the committed reference |
 | 4 | page configuration in `console-watch.json`; the Watch row with reset/diff; the isolation test | Games prefs byte-identical after every Watch edit |
-| 5 | the leftover scaffolding removed; the upstream extension point attempted | the seam table shrinks or stays; never grows |
+| 5 | the leftover scaffolding removed | the seam table shrinks or stays; never grows |
 
 Every phase runs `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets -- -D warnings` and
@@ -234,10 +234,8 @@ fork never *dispatches* its page from upstream's detail-page layouts —
 `app/src/fork/seams.rs` fails the build if one tries. (The layouts may still word
 things per space under F-016/F-021; that is not a dispatch.)
 
-**Offering upstream an extension point.** Phase 5 offers upstream a generic
-space/section **hook** for this screen — an interface, not the fork's drawing
-code (`§7`: the two share no code by design) — under the fork's upstream-first
-rule. If it is accepted, the seven dispatch answers collapse and the fork's page
-plugs in as a section set; this section is then superseded by upstream's own
-contract. If it is declined, nothing was blocked — the fork already ships the
-page.
+**No upstream proposal.** The fork does not offer this screen, or a hook for it,
+to upstream: its upstream contact happens only when the maintainer asks for it
+(`docs/FORK.md`). If that ever changes, the interface worth proposing is the
+seven questions the shell already asks — a trait with a default-empty registry —
+but nothing is prepared or sent on the fork's own initiative.
