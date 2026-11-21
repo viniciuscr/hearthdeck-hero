@@ -103,7 +103,8 @@ pub(super) fn library_line(library: &str, installed: bool) -> String {
 }
 
 /// The Store row of the details panel. A film names the catalogues it was listed
-/// in, as its hero line does — not the projection's fallback source label.
+/// in, as its hero line does — not the projection's fallback source label. The
+/// catalogues themselves are `fork::watch::sources::origins`, tested there.
 pub(super) fn store_line(space: Space, g: &CollectionGame, library: &str, installed: bool) -> String {
     match space {
         Space::Games => library_line(library, installed),

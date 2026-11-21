@@ -737,8 +737,6 @@ impl CollectionView {
         grid.flex_1().min_h_0().into_any_element()
     }
 
-    /// The library key of a rail's card, once the reload has brought it in: a
-    /// tile is drawn (and opened) by the key the library knows.
     /// The cards of a rail the library already holds, in display order. The
     /// render, the focus count and the pad routes all read this list, so they
     /// cannot disagree about how many cards there are.
@@ -747,6 +745,8 @@ impl CollectionView {
         items.iter().filter_map(|related| self.rail_key(related).map(|key| (key, related))).collect()
     }
 
+    /// The library key of a rail's card, once the reload has brought it in: a
+    /// tile is drawn (and opened) by the key the library knows.
     fn rail_key(&self, related: &Related) -> Option<SharedString> {
         self.lib
             .as_ref()?
