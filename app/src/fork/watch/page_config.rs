@@ -20,20 +20,25 @@ pub enum PageStyle {
     /// panel of sections.
     #[default]
     Film,
+    /// The details on the left and a narrow panel on the right holding the title,
+    /// its marks and its list — the compact reading, over the art.
+    Compact,
 }
 
 impl PageStyle {
-    pub const ALL: &'static [PageStyle] = &[PageStyle::Film];
+    pub const ALL: &'static [PageStyle] = &[PageStyle::Film, PageStyle::Compact];
 
     pub fn as_str(self) -> &'static str {
         match self {
             PageStyle::Film => "film",
+            PageStyle::Compact => "compact",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "film" => Some(PageStyle::Film),
+            "compact" => Some(PageStyle::Compact),
             _ => None,
         }
     }
