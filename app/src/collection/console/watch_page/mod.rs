@@ -64,8 +64,12 @@ const COLUMN_GAP: f32 = 40.;
 /// The column the title, its marks and its list take. The details panel takes
 /// the rest of the page, from its top edge to its bottom.
 const LEFT_W: f32 = 560.;
-/// The list's column when the panel leads (Compact), design px.
-const COMPACT_W: f32 = 420.;
+/// The single panel's width in Compact, design px.
+const COMPACT_W: f32 = 520.;
+/// The list's height inside Compact's panel: the details keep the rest.
+const COMPACT_LIST_H: f32 = 240.;
+/// The list card's width in Cinema, design px.
+const CINEMA_LIST_W: f32 = 460.;
 /// The details panel's corners and its own padding, design px.
 const PANEL_RADIUS: f32 = 20.;
 const PANEL_PAD: f32 = 26.;
@@ -398,53 +402,118 @@ impl CollectionView {
             DetailTab::Similar => self.watch_rail(Rail::Similar, details.as_deref(), window),
         };
 
-        // The two halves, built once each; the arrangement decides which leads.
-        let list_column = div()
-            .flex_none()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .gap(u(14.))
-            .child(header)
-            .child(marks_row)
-            // The list is the scrolling element itself (as it was when the list
-            // had the column to itself): `flex_1` + `min_h_0` on the row that owns
-            // the scroll, never on a wrapper, or the scroll area is sized by its
-            // content and the episodes run off screen.
-            .child(list.flex_1().min_h_0());
-        // The panel runs from the page's top edge to its bottom: that is the whole
-        // point (the title no longer takes a band above it).
-        let panel = card_surface()
-            .flex_1()
-            .min_w_0()
-            .min_h_0()
-            .p(u(PANEL_PAD))
-            .rounded(u(PANEL_RADIUS))
-            .shadow(kit::shadow(0.5, 12., 44.))
-            .flex()
-            .flex_col()
-            .gap(u(16.))
-            .when(pane == Pane::Card, |card| card.border_color(theme::console_focus()))
-            .child(kit::tabs(&tabs, active))
-            .child(div().flex_1().min_h_0().flex().flex_col().child(body));
-        // Film: the title and its list lead, the panel reads beside them.
-        // Compact: the panel leads and the list narrows — the same screen read
-        // from the details outwards, over the art.
-        let (first, second) = match layout {
-            crate::fork::watch::page_config::PageStyle::Film => (list_column.w(u(LEFT_W)), panel),
-            crate::fork::watch::page_config::PageStyle::Compact => (panel, list_column.w(u(COMPACT_W))),
+        // Each arrangement assembles the same pieces its own way: the title and
+        // its marks, the list, and the details. Only one arm runs, so the pieces
+        // are moved there and nowhere else.
+        let page = match layout {
+            // Film: the title, its marks and its list lead; the details read
+            // beside them.
+            crate::fork::watch::page_config::PageStyle::Film => div()
+                .relative()
+                .size_full()
+                .flex()
+                .gap(u(COLUMN_GAP))
+                .px(u(PAGE_PAD))
+                .pb(u(BOTTOM_PAD))
+                .child(
+                    div()
+                        .flex_none()
+                        .w(u(LEFT_W))
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .gap(u(14.))
+                        .child(header)
+                        .child(marks_row)
+                        // The list is the scrolling element itself: `flex_1` +
+                        // `min_h_0` on the row that owns the scroll, never on a
+                        // wrapper, or the scroll area is sized by its content.
+                        .child(list.flex_1().min_h_0()),
+                )
+                .child(
+                    card_surface()
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .p(u(PANEL_PAD))
+                        .rounded(u(PANEL_RADIUS))
+                        .shadow(kit::shadow(0.5, 12., 44.))
+                        .flex()
+                        .flex_col()
+                        .gap(u(16.))
+                        .when(pane == Pane::Card, |card| card.border_color(theme::console_focus()))
+                        .child(kit::tabs(&tabs, active))
+                        .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
+                ),
+            // Compact: one panel on the right holding everything — the title, its
+            // marks, the list and the details under them — with the art alone on
+            // the left.
+            crate::fork::watch::page_config::PageStyle::Compact => {
+                div().relative().size_full().flex().justify_end().px(u(PAGE_PAD)).pb(u(BOTTOM_PAD)).child(
+                    card_surface()
+                        .w(u(COMPACT_W))
+                        .min_h_0()
+                        .p(u(PANEL_PAD))
+                        .rounded(u(PANEL_RADIUS))
+                        .shadow(kit::shadow(0.5, 12., 44.))
+                        .flex()
+                        .flex_col()
+                        .gap(u(16.))
+                        .when(pane == Pane::Card, |card| card.border_color(theme::console_focus()))
+                        .child(header)
+                        .child(marks_row)
+                        .child(div().flex_none().h(u(COMPACT_LIST_H)).flex().flex_col().child(list.flex_1().min_h_0()))
+                        .child(div().h(px(1.)).flex_none().bg(kit::ink(0.08)))
+                        .child(kit::tabs(&tabs, active))
+                        .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
+                )
+            }
+            // Cinema: a title band across the top, then two full-width cards —
+            // the details and the list side by side under it.
+            crate::fork::watch::page_config::PageStyle::Cinema => div()
+                .relative()
+                .size_full()
+                .flex()
+                .flex_col()
+                .gap(u(18.))
+                .px(u(PAGE_PAD))
+                .pb(u(BOTTOM_PAD))
+                .child(div().flex().items_end().gap(u(28.)).child(header).child(marks_row))
+                .child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_h_0()
+                        .gap(u(COLUMN_GAP))
+                        .child(
+                            card_surface()
+                                .flex_1()
+                                .min_w_0()
+                                .min_h_0()
+                                .p(u(PANEL_PAD))
+                                .rounded(u(PANEL_RADIUS))
+                                .shadow(kit::shadow(0.5, 12., 44.))
+                                .flex()
+                                .flex_col()
+                                .gap(u(16.))
+                                .when(pane == Pane::Card, |card| card.border_color(theme::console_focus()))
+                                .child(kit::tabs(&tabs, active))
+                                .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
+                        )
+                        .child(
+                            card_surface()
+                                .w(u(CINEMA_LIST_W))
+                                .min_h_0()
+                                .p(u(18.))
+                                .rounded(u(PANEL_RADIUS))
+                                .shadow(kit::shadow(0.5, 12., 44.))
+                                .flex()
+                                .flex_col()
+                                .child(list.flex_1().min_h_0()),
+                        ),
+                ),
         };
-        div()
-            .relative()
-            .size_full()
-            .flex()
-            .gap(u(COLUMN_GAP))
-            .px(u(PAGE_PAD))
-            .pb(u(BOTTOM_PAD))
-            .child(first)
-            .child(second)
-            .child(self.console.game.about.driver())
-            .into_any_element()
+        page.child(self.console.game.about.driver()).into_any_element()
     }
 
     /// One of the page's two rails: the cards a source's list holds, with the pad
