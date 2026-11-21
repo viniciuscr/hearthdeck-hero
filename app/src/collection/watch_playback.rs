@@ -417,6 +417,11 @@ impl CollectionView {
                     }
                     Err(error) => {
                         log::warn!(target: "heronite_app", "watch rails: keeping {page}'s titles failed: {error:#}");
+                        // The page is marked as asked-for even when the ask failed:
+                        // otherwise the per-page reset below runs on every render,
+                        // zeroing the retry count and clearing the failure the rail
+                        // draws — an endless retry with no way out.
+                        this.watch.rails_page = Some(page);
                         this.watch.rails_failed = true;
                     }
                 }
@@ -440,6 +445,18 @@ impl CollectionView {
     /// Says it: the next render of this wait is silent.
     pub(super) fn watch_rails_say(&mut self) {
         self.watch.rails_spoke = true;
+    }
+
+    /// The load the keep asked for failed: clear the latch so the next render may
+    /// ask again (the retry bound decides when to stop), instead of waiting for a
+    /// load that will never come.
+    pub(super) fn watch_rails_reload_failed(&mut self) {
+        if !self.watch.rails_waiting_reload {
+            return;
+        }
+        self.watch.rails_waiting_reload = false;
+        self.watch.rails_spoke = false;
+        log::warn!(target: "heronite_app", "watch rails: the reload the keep asked for failed; the page asks again");
     }
 
     /// A reload landed: say what the library holds of the page's rails, so the

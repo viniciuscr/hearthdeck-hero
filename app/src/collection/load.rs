@@ -123,6 +123,8 @@ impl CollectionView {
                     }
                     Err(err) => {
                         log::error!("loading library: {err:#}");
+                        // A rail may be waiting for this load: it will not arrive.
+                        this.watch_rails_reload_failed();
                         if this.lib.is_some() {
                             this.show_toast(tr!("Could not reload the library: {err}", err = format!("{err:#}")), true, cx);
                         } else {
