@@ -66,11 +66,28 @@ pub fn refresh<F>(root: &Path, rails: &[String], fetch: F) -> Result<()>
 where
     F: FnOnce() -> Result<Fetched>,
 {
-    let Fetched { mut titles, answered } = fetch()?;
-    for kept in stored(root).into_iter().filter(|title| kept(title, rails, &answered)) {
-        merge(&mut titles, kept);
+    let Fetched { titles: mut fresh, answered } = fetch()?;
+    let kept: Vec<Title> = stored(root).into_iter().filter(|title| kept(title, rails, &answered)).collect();
+    // The order on screen is the file's, not the response's: a title the library
+    // already holds keeps its place and the fresh observation only updates it,
+    // and whatever is new is appended. A rail is a live feed — its order can
+    // change between two fetches — and re-sorting what the person is scrolling
+    // is exactly what a grid must never do.
+    let mut ordered = Vec::with_capacity(kept.len() + fresh.len());
+    for old in kept {
+        match fresh.iter().position(|title| title.key == old.key) {
+            Some(at) => {
+                let mut title = fresh.remove(at);
+                // The fresh card wins where it knows a field; the file says where
+                // it sits, and its rails and providers are kept.
+                let _ = title.merge(old);
+                ordered.push(title);
+            }
+            None => ordered.push(old),
+        }
     }
-    write_root(root, &titles)
+    ordered.append(&mut fresh);
+    write_root(root, &ordered)
 }
 
 /// Whether a stored title outlives the refresh that is writing now: a catalogue
@@ -701,6 +718,28 @@ mod tests {
         let carrying = timestamps.as_object().expect("the timestamps map").values().filter(|stamp| stamp["lastPlayed"].is_string()).count();
         assert_eq!(carrying, 1, "one copy carries the watch state, so the copies total does not double");
         assert_eq!(timestamps["stremio:tt1"]["totalPlayed"], 42.0);
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_order_the_screen_already_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let mut first = title("tt1", "A Film");
+        first.rails = vec![RailMark::feed("cinemeta", "movie:top:Popular")];
+        let mut second = title("tt2", "B Film");
+        second.rails = vec![RailMark::feed("cinemeta", "movie:top:Popular")];
+        write_root(root, &[first, second]).unwrap();
+
+        // The rail answered in another order, and brought one more title.
+        let mut a = title("tt1", "A Film");
+        a.rails = vec![RailMark::feed("cinemeta", "movie:top:Popular")];
+        let mut b = title("tt2", "B Film");
+        b.rails = vec![RailMark::feed("cinemeta", "movie:top:Popular")];
+        let mut c = title("tt3", "C Film");
+        c.rails = vec![RailMark::feed("cinemeta", "movie:top:Popular")];
+        refresh(root, &[], || Ok(Fetched { titles: vec![b, a, c], answered: Vec::new() })).unwrap();
+
+        assert_eq!(ids(&stored(root)), ["tt1", "tt2", "tt3"], "the file's order wins; the new title goes last");
     }
 
     #[test]

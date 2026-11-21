@@ -101,12 +101,26 @@ impl Filters {
     /// from an edited file, reads as the first), any status and category.
     pub(crate) fn from_kept(k: KeptFilters) -> Self {
         let pick = |v: usize, n: usize| if v < n { v } else { 0 };
-        Self { show: pick(k.show, SHOW.len()), sort: pick(k.sort, SORT.len()), favourites: k.favourites, ..Self::default() }
+        Self { show: pick(k.show, SHOW.len()), sort: pick(k.sort, WATCH_SORT.len()), favourites: k.favourites, ..Self::default() }
     }
 }
 
 pub(crate) const SHOW: [&str; 3] = [n_!("All games"), n_!("Installed"), n_!("Not installed")];
 const SORT: [&str; 3] = [n_!("A\u{2013}Z"), n_!("Last played"), n_!("Most played")];
+/// The Watch grid's orders, in the order `fork/watch/filters.rs` reads them:
+/// `Popular` keeps the order the feed sent (a catalogue tab must not re-sort what
+/// the person is scrolling), then the three sorts a title can be ordered by.
+const WATCH_SORT: [&str; 4] = [n_!("Popular"), n_!("A\u{2013}Z"), n_!("Newest"), n_!("Last played")];
+
+/// The sort chip's labels for a space: a Watch title is ordered by a feed's
+/// popularity, a game by when it was played.
+fn sort_labels(watch: bool) -> &'static [&'static str] {
+    if watch {
+        &WATCH_SORT
+    } else {
+        &SORT
+    }
+}
 /// The steps of the Show chip (`show`, `favourites`): all, installed,
 /// favourites, not installed.
 const SHOW_STEPS: [(usize, bool); 4] = [(0, false), (1, false), (0, true), (2, false)];
@@ -248,9 +262,11 @@ impl Nav {
             (s, true) => format!("{} \u{b7} {}", heronite_i18n::tr(SHOW[s]), tr!("Favourites")),
             (s, false) => heronite_i18n::tr(SHOW[s]).to_string(),
         };
+        let labels = sort_labels(watch);
+        let sort = labels.get(f.sort).copied().unwrap_or(labels[0]);
         [
             (tr!("Show").into(), show.into()),
-            (tr!("Sort").into(), heronite_i18n::tr(SORT[f.sort]).into()),
+            (tr!("Sort").into(), heronite_i18n::tr(sort).into()),
             (tr!("Status").into(), status.get(f.status).cloned().unwrap_or_default()),
             (tr!("Category").into(), category.into()),
             (tr!("Search").into(), if search.is_empty() { "\u{2014}".into() } else { search.to_string().into() }),
@@ -646,6 +662,7 @@ impl CollectionView {
         let pick_n = category_n + self.smart_groups.groups.len();
         let wrap = look::theme().nav.wrap;
         let by_letter = self.grid_letters(tab);
+        let watch = self.space == crate::collection::Space::Watch;
         let nav = &mut self.tab_nav(tab).grid;
         let cols = nav.cols.max(1);
         let before = (nav.filters.show, nav.filters.favourites);
@@ -661,7 +678,7 @@ impl CollectionView {
                             let at = SHOW_STEPS.iter().position(|s| *s == (f.show, f.favourites)).map_or(0, |i| i + 1);
                             (f.show, f.favourites) = SHOW_STEPS[at % SHOW_STEPS.len()];
                         }
-                        1 => f.sort = (f.sort + 1) % SORT.len(),
+                        1 => f.sort = (f.sort + 1) % sort_labels(watch).len(),
                         2 => f.status = (f.status + 1) % status_n,
                         3 => f.set_category_pick((f.category_pick(category_n) + 1) % pick_n, category_n),
                         _ => {

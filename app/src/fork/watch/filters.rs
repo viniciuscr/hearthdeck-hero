@@ -32,9 +32,10 @@ pub fn retain_and_sort(
     if let Some(selected) = provider.checked_sub(1).and_then(|i| providers.get(i)) {
         games.retain(|g| g.source_label == *selected);
     }
-    // "Popular" (0) keeps the order the provider sent (the library's own): a
-    // catalog tab sorts by title would move every row whenever a page lands,
-    // which is what a scrolling grid must not do.
+    // The chip order the Watch grid draws (`WATCH_SORT`: Popular, A–Z, Newest,
+    // Last played). "Popular" (0) keeps the order the feed sent — the library's
+    // own, which a page only ever appends to — because re-sorting by title would
+    // move every row whenever a page landed.
     match sort {
         1 => games.sort_by(|a, b| a.title_lower.cmp(&b.title_lower)),
         2 => games.sort_by(|a, b| release_key(b).cmp(release_key(a)).then_with(|| a.title_lower.cmp(&b.title_lower))),

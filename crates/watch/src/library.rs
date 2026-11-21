@@ -13,6 +13,8 @@
 //! `heronite-watch-state::collection` takes the titles and writes the records.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use heronite_data::paths::AppPaths;
@@ -258,6 +260,23 @@ fn placeholder_item(placeholder: &Placeholder) -> MovieItem {
 
 /// The movies Collection, refreshed from the providers when possible. A
 /// provider failure keeps the last good library instead of emptying the screen.
+/// How long a rails refresh stays good for.
+///
+/// A page landing reloads the library so the grid can show what was just
+/// appended, and re-fetching every rail on each page is what made the grid
+/// rebuild under the person scrolling (a live rail answers in another order
+/// seconds later) — besides costing a request per page. Within this window a
+/// reload only re-reads the file; a rail turned on or off refreshes at once.
+const REFRESH_AFTER: Duration = Duration::from_secs(120);
+
+/// Whether the rails are due a refresh: never fetched, fetched long enough ago,
+/// or the set the person turned on changed.
+fn refresh_due(last: Option<&(Instant, Vec<String>)>, rails: &[String]) -> bool {
+    last.is_none_or(|(at, seen)| at.elapsed() >= REFRESH_AFTER || seen.as_slice() != rails)
+}
+
+/// The movies Collection, refreshed from the providers when possible. A
+/// provider failure keeps the last good library instead of emptying the screen.
 pub fn library(app: &AppPaths, include_hidden: bool) -> Result<Library> {
     let root = app.cache.join(ROOT);
     let http = UreqTransport::new();
@@ -266,8 +285,19 @@ pub fn library(app: &AppPaths, include_hidden: bool) -> Result<Library> {
     // rail no longer holds — or a rail that is now off — with the rail.
     let rails = crate::collections::enabled(app);
     let ids: Vec<String> = rails.iter().map(|(_, rail)| rail.id.clone()).collect();
-    if let Err(error) = collection::refresh(&root, &ids, || items(&http, app, &rails)) {
-        log::warn!("movies provider: {error:#}; keeping the last library");
+    static LAST_REFRESH: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
+    let due = {
+        let last = LAST_REFRESH.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        refresh_due(last.as_ref(), &ids)
+    };
+    if due {
+        match collection::refresh(&root, &ids, || items(&http, app, &rails)) {
+            Ok(()) => {
+                let mut last = LAST_REFRESH.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                *last = Some((Instant::now(), ids));
+            }
+            Err(error) => log::warn!("movies provider: {error:#}; keeping the last library"),
+        }
     }
     Library::load_with(&DataPaths::at(root), include_hidden)
 }
@@ -678,6 +708,17 @@ mod tests {
         assert!(!titles.titles()[0].available(), "a title a provider knows and no source here plays");
         assert_eq!(titles.titles()[0].key.id.as_str(), "tt9");
         assert_eq!(titles.titles()[0].release.as_deref(), Some("2020"));
+    }
+
+    #[test]
+    fn a_page_reload_does_not_refetch_the_rails_but_a_new_rail_does() {
+        let rails = vec!["tmdb:top-rated:movie".to_owned()];
+        assert!(refresh_due(None, &rails), "the first load fetches");
+        let just_now = (Instant::now(), rails.clone());
+        assert!(!refresh_due(Some(&just_now), &rails), "a page landing reloads the file, not the rails");
+        let stale = (Instant::now() - REFRESH_AFTER - Duration::from_secs(1), rails.clone());
+        assert!(refresh_due(Some(&stale), &rails), "the window passes");
+        assert!(refresh_due(Some(&just_now), &["other:rail".to_owned()]), "turning a rail on refreshes at once");
     }
 
     #[test]
