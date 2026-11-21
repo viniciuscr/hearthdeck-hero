@@ -165,6 +165,40 @@ pub struct TitleDetails {
     /// more adds more rows without the page changing.
     #[serde(default)]
     pub extras: Vec<Fact>,
+    /// Titles the sources say are alike (Simkl's `similar`), as the rail the page
+    /// draws. A source that knows none leaves it empty and the rail with it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub similar: Vec<Related>,
+    /// Titles people recommend alongside this one (Simkl's community list). Its
+    /// entries carry how many people did, which the rail says.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommended: Vec<Related>,
+}
+
+/// A title a source points at, with just what it takes to draw its card and open
+/// it afterwards.
+///
+/// Keyed by IMDb id — the space every other title here is keyed by — so the page
+/// can turn one into a library title and open it like any other. A source's own
+/// id would need a lookup first, which is the thing a rail cannot afford.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Related {
+    /// The IMDb id (`tt0944947`).
+    pub id: String,
+    /// `movie` or `series`.
+    #[serde(default)]
+    pub kind: String,
+    pub name: String,
+    #[serde(default)]
+    pub year: Option<String>,
+    #[serde(default)]
+    pub poster: Option<String>,
+    #[serde(default)]
+    pub background: Option<String>,
+    /// How many people recommend it: community lists carry it, similar ones do
+    /// not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub users: Option<u32>,
 }
 
 /// One display-only fact: a label and its value, and the source that gave it.
@@ -278,6 +312,11 @@ impl TitleDetails {
         if self.trailers.is_empty() {
             self.trailers = other.trailers;
         }
+        // The rails are a list, not a single answer: the first source to fill
+        // each is what the page shows, and a second one adds the titles it knows
+        // that the first did not (one title, one card).
+        merge_related(&mut self.similar, other.similar);
+        merge_related(&mut self.recommended, other.recommended);
         for fact in other.extras {
             if !self.extras.iter().any(|kept| kept.id == fact.id) {
                 self.extras.push(fact);
@@ -315,6 +354,33 @@ impl TitleDetails {
     /// The episode with this video id, when the source lists it.
     pub fn episode_with_id(&self, id: &str) -> Option<&Episode> {
         self.episodes.iter().find(|episode| episode.id == id)
+    }
+
+    /// The titles one of the page's two rails draws, in the order the sources
+    /// answered.
+    pub fn rail(&self, rail: Rail) -> &[Related] {
+        match rail {
+            Rail::Similar => &self.similar,
+            Rail::Community => &self.recommended,
+        }
+    }
+}
+
+/// Which rail a page shows: the titles a source calls alike, or the ones people
+/// recommend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rail {
+    Similar,
+    Community,
+}
+
+/// Joins a second source's rail into the first's: one card per title, in the
+/// order the sources answered.
+fn merge_related(mine: &mut Vec<Related>, theirs: Vec<Related>) {
+    for related in theirs {
+        if !mine.iter().any(|kept| kept.id == related.id) {
+            mine.push(related);
+        }
     }
 }
 
@@ -359,6 +425,31 @@ mod merge_tests {
         assert_eq!(first.cast.len(), 1, "a list the first source gave is not replaced");
         let extras: Vec<(&str, &str)> = first.extras.iter().map(|fact| (fact.id.as_str(), fact.source.as_str())).collect();
         assert_eq!(extras, [("tagline", "tmdb"), ("awards", "cinemeta")], "extras are joined, the first of each id winning");
+    }
+
+    fn related(id: &str) -> Related {
+        Related { id: id.into(), kind: "series".into(), name: id.into(), ..Related::default() }
+    }
+
+    #[test]
+    fn the_two_rails_join_without_repeating_a_title() {
+        let mut first = TitleDetails { similar: vec![related("tt1"), related("tt2")], ..TitleDetails::default() };
+        first.merge(TitleDetails {
+            similar: vec![related("tt2"), related("tt3")],
+            recommended: vec![related("tt9")],
+            ..TitleDetails::default()
+        });
+        let ids: Vec<&str> = first.rail(Rail::Similar).iter().map(|related| related.id.as_str()).collect();
+        assert_eq!(ids, ["tt1", "tt2", "tt3"], "the first source keeps its order, the second adds what is new");
+        assert_eq!(first.rail(Rail::Community).first().map(|related| related.id.as_str()), Some("tt9"));
+        assert!(first.similar.iter().all(|related| related.kind == "series"), "a card keeps what the source said it is");
+    }
+
+    #[test]
+    fn a_similar_list_and_a_community_list_are_not_the_same_rail() {
+        let details = TitleDetails { recommended: vec![related("tt2")], ..TitleDetails::default() };
+        assert!(details.rail(Rail::Similar).is_empty());
+        assert_eq!(details.rail(Rail::Community).len(), 1);
     }
 
     #[test]

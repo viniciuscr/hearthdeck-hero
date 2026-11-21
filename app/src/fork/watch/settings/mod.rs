@@ -1699,11 +1699,11 @@ mod tests {
         let cinemeta = find("cinemeta");
         assert!(cinemeta.catalog && cinemeta.metadata, "a source that is no account at all");
         let simkl = find("simkl");
-        assert!(simkl.account && simkl.metadata && !simkl.media && !simkl.catalog, "a tracker that can also describe a title");
+        assert!(simkl.account && simkl.metadata && simkl.catalog && !simkl.media, "a tracker that also lists and describes titles");
         assert_eq!(
             capabilities(simkl),
-            format!("{} \u{b7} {}", tr!("Metadata"), tr!("Account")),
-            "it describes titles and holds an account"
+            format!("{} \u{b7} {} \u{b7} {}", tr!("Catalogs"), tr!("Metadata"), tr!("Account")),
+            "it lists titles, describes them and holds an account"
         );
         let ids: Vec<&str> = all.iter().map(|provider| provider.id.as_str()).collect();
         // The Accounts page: the streaming service, TMDB's session and Simkl's
@@ -1714,6 +1714,10 @@ mod tests {
         let streams: Vec<&str> = heronite_watch::registry::providers().iter().map(|provider| provider.id()).collect();
         assert_eq!(streams, ["stremio"], "one streaming service to switch");
         assert!(heronite_watch::catalog::sources().iter().any(|source| source.descriptor().id == "cinemeta"));
+        assert!(
+            heronite_watch::catalog::sources().iter().any(|source| source.descriptor().id == "simkl"),
+            "Simkl's free lists are a catalogue, opt-in"
+        );
         assert!(
             heronite_watch::metadata::sources().iter().any(|source| source.descriptor().id == "simkl"),
             "Simkl describes titles, opt-in"

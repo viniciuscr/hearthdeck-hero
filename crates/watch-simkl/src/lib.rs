@@ -1,22 +1,29 @@
-//! Simkl as a Watch account: the client id this application carries, and the
-//! device ("PIN") flow a TV signs in with.
+//! Simkl as a Watch account, a metadata source and a catalog.
 //!
-//! Simkl is a **tracker**, not a media provider: it keeps what a person watched
-//! in step across devices. Like TMDB, it authenticates every call with an
-//! *application* credential — a **client id**, which belongs to the app and is
-//! asked for once (the bootstrap writes it, or the build carries it) — and the
-//! person's part is a short code, typed on their phone. Neither the client id
-//! nor the resulting tokens are ever logged.
+//! Simkl is **not a media provider**: it plays nothing and owns no library. It is
+//! three things here, one per module:
 //!
-//! Only signing in lives here for now: the API calls the tokens unlock come
-//! later, in their own slice.
+//! - a **tracker** and an **import** ([`sync`], [`pull`]) — what a person watched
+//!   in step across devices;
+//! - a **metadata** source ([`meta`]) — what a title is, asked by IMDb id through
+//!   `/redirect` and the detail records;
+//! - a **catalog** source ([`catalog`]) — its airing calendar, browsed from the
+//!   free `data.simkl.in` file, with no token and no quota.
+//!
+//! Like TMDB, it authenticates every user-scoped call with an *application*
+//! credential — a **client id**, which belongs to the app and is asked for once
+//! (the bootstrap writes it, or the build carries it) — and the person's part is
+//! a short code, typed on their phone. Neither the client id nor the resulting
+//! tokens are ever logged.
 
 pub mod auth;
+pub mod catalog;
 pub mod meta;
 pub mod pull;
 pub mod sync;
 
 pub use auth::{DeviceCode, Session, Step, Tokens};
+pub use catalog::SimklCatalog;
 pub use meta::SimklMeta;
 pub use sync::SimklTracker;
 
@@ -33,6 +40,14 @@ pub const CLIENT_ID_FILE: &str = "simkl-client-id";
 /// anonymous way in — so the application is what holds one.
 pub fn built_in_client_id() -> Option<&'static str> {
     option_env!("HEARTHDECK_SIMKL_CLIENT_ID").map(str::trim).filter(|id| !id.is_empty())
+}
+
+/// The client id stored for the account, when one was written.
+///
+/// A catalog of the free lists browses without one; every user-scoped call needs
+/// it (see [`crate::catalog`] and [`crate::meta`]).
+pub(crate) fn stored_client_id(credentials: &dyn heronite_watch_core::provider::Credentials) -> Option<String> {
+    credentials.get(PROVIDER).ok().flatten().and_then(|secret| auth::client_id_of(&secret))
 }
 
 /// The client id in `dir/` ([`CLIENT_ID_FILE`]), when the file is there and

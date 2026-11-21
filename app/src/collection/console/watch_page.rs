@@ -30,11 +30,11 @@ use heronite_data::text::DateLocale;
 use heronite_data::CollectionGame;
 use heronite_i18n::{tr, trn};
 use heronite_images::{ImageRef, Variant};
-use heronite_watch::metadata::{Episode, Fact, TitleDetails};
+use heronite_watch::metadata::{Episode, Fact, Rail, Related, TitleDetails};
 use heronite_watch::progress::WatchedState;
 
 use super::super::watch_personal::Flag;
-use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection};
+use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection, DETAIL_TABS};
 use super::super::CollectionView;
 use super::game::facts_table;
 use super::hero::{card_surface, fitted_title, pill_button, PillSize};
@@ -57,6 +57,11 @@ const COLUMN_GAP: f32 = 40.;
 const LEFT_W: f32 = 560.;
 /// The details panel's corners, design px.
 const PANEL_RADIUS: f32 = 20.;
+/// The gaps between two of a rail's tiles, side by side and row under row. The
+/// tile itself is the theme's own (`console_tile_size`), never a size of this
+/// page's.
+const RAIL_GAP: f32 = 16.;
+const RAIL_ROW_GAP: f32 = 18.;
 
 /// One label / value line of the page's card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -400,6 +405,45 @@ fn episode_card(episode: &Episode, still: Option<ImageSource>, locale: DateLocal
         )
 }
 
+/// One far side of the page's two rails, as the tab that shows it.
+fn rail_of(tab: DetailTab) -> Rail {
+    match tab {
+        DetailTab::Community => Rail::Community,
+        _ => Rail::Similar,
+    }
+}
+
+/// The presses a click on a rail's card `to` makes: into the card from the list
+/// when it does not hold the pad, along the rail, then A — the same presses the
+/// pad would make, so a click and a press cannot disagree.
+fn rail_route(pane: Pane, focus: usize, to: usize, columns: usize) -> Vec<Pad> {
+    let columns = columns.max(1);
+    let mut pads = Vec::new();
+    if pane != Pane::Card {
+        pads.push(Pad::Left);
+    }
+    // Rows first, then across the row the card is on.
+    let (from_row, to_row) = (focus / columns, to / columns);
+    if to_row > from_row {
+        pads.extend(crate::console::pointer::repeat(Pad::Down, to_row - from_row));
+    } else {
+        pads.extend(crate::console::pointer::repeat(Pad::Up, from_row - to_row));
+    }
+    pads.extend(crate::console::pointer::along(focus % columns, to % columns, Pad::Left, Pad::Right));
+    pads.push(Pad::A);
+    pads
+}
+
+/// How many of the theme's tiles a rail's row holds, by the page's own
+/// arithmetic (`card_is_wide` counts the same panel). The tile's width is the
+/// theme's (`console_tile_size`), so a square or wide tile makes fewer columns;
+/// at least two, and the grid scrolls when the list is long.
+fn rail_columns(window: &Window, tile_w: f32) -> usize {
+    let viewport = f32::from(crate::ui::content_size(window).width) / kit::scale();
+    let panel = viewport - 2. * PAGE_PAD - LEFT_W - COLUMN_GAP - 2. * 26.;
+    ((panel / (tile_w + RAIL_GAP)).floor() as usize).max(2)
+}
+
 impl CollectionView {
     /// The console page of a film or a series. The title, its marks and its list
     /// keep the left column; the details panel beside them runs from the page's
@@ -413,6 +457,13 @@ impl CollectionView {
         // crosses from one page to the next.
         self.watch_open_page(key);
         self.watch_ensure_details(&g, cx);
+        // A page can open on a rail (the card survives a page change), so the
+        // titles a rail draws are asked for here and not only when the card is
+        // switched to. The ask is latched: a render that arrives while it is in
+        // flight does nothing.
+        if self.watch_tab().is_rail() {
+            self.watch_ensure_rails(cx);
+        }
 
         // Everything the page draws is taken before the view is borrowed mutably
         // (the list, the cover and the scroll driver all need `&mut self`).
@@ -491,8 +542,19 @@ impl CollectionView {
         // of L3 (the left stick's click), offered in the hint bar while there is
         // one.
         let tab = self.watch_tab();
-        let tabs: Vec<SharedString> = [tr!("Details"), tr!("Streams")].into_iter().map(SharedString::from).collect();
-        let (active, body) = match tab {
+        let tabs: Vec<SharedString> = DETAIL_TABS
+            .iter()
+            .map(|tab| {
+                SharedString::from(match tab {
+                    DetailTab::Details => tr!("Details"),
+                    DetailTab::Streams => tr!("Streams"),
+                    DetailTab::Community => tr!("Community"),
+                    DetailTab::Similar => tr!("Similar"),
+                })
+            })
+            .collect();
+        let active = DETAIL_TABS.iter().position(|known| *known == tab).unwrap_or(0);
+        let body = match tab {
             DetailTab::Details => {
                 let mut about = div()
                     .id("console-watch-about")
@@ -516,7 +578,7 @@ impl CollectionView {
                 if failed {
                     about = about.child(div().text_size(u(14.)).text_color(theme::text_dim()).child(tr!("Details unavailable right now.")));
                 }
-                (0, about.into_any_element())
+                about.into_any_element()
             }
             DetailTab::Streams => {
                 let video = picked.as_ref().map(|episode| episode.id.clone());
@@ -524,8 +586,10 @@ impl CollectionView {
                 let rows = self.watch_stream_rows(&g, video.as_deref());
                 let focused = pane == Pane::Card;
                 let list = self.watch_streams_nav().render("console-watch-streams", &rows, focused);
-                (1, list.flex_1().min_h_0().into_any_element())
+                list.flex_1().min_h_0().into_any_element()
             }
+            DetailTab::Community => self.watch_rail(Rail::Community, details.as_deref(), window),
+            DetailTab::Similar => self.watch_rail(Rail::Similar, details.as_deref(), window),
         };
 
         div()
@@ -570,6 +634,141 @@ impl CollectionView {
             )
             .child(self.console.game.about.driver())
             .into_any_element()
+    }
+
+    /// One of the page's two rails: the cards a source's list holds, with the pad
+    /// on one of them. An empty list says so instead of drawing nothing.
+    fn watch_rail(&mut self, rail: Rail, details: Option<&TitleDetails>, window: &Window) -> AnyElement {
+        let items = details.map_or(&[][..], |details| details.rail(rail));
+        if items.is_empty() {
+            let (title, hint) = match rail {
+                Rail::Similar => (tr!("Nothing similar yet"), tr!("Simkl knows nothing alike for this title.")),
+                Rail::Community => (tr!("No recommendations yet"), tr!("Nobody has recommended a title beside this one.")),
+            };
+            return kit::empty(Icon::GridView, title, hint).into_any_element();
+        }
+        // A rail's cards are library tiles: until the reload brings their titles
+        // in there is no tile to draw, and an empty box is not a card.
+        if self.watch_rails_failed() {
+            return kit::empty(Icon::Warning, tr!("Simkl's lists could not be loaded."), tr!("The app's log says why.")).into_any_element();
+        }
+        let missing = items.iter().filter(|related| self.rail_key(related).is_none()).count();
+        if missing > 0 {
+            // Said once per keep, not once per frame: the reload is fast, and a
+            // debug log does not need forty copies of the same line.
+            if !self.watch_rails_spoke() {
+                log::debug!(target: "heronite_app", "watch rails: {missing} of {} titles have no library key yet", items.len());
+                self.watch_rails_say();
+            }
+            return kit::empty(Icon::GridView, tr!("Loading titles…"), tr!("Asking Simkl for its lists.")).into_any_element();
+        }
+        let (tile_w, tile_h) = self.console_tile_size();
+        let room = super::tile::label_room();
+        let focus = self.watch_rail_focus(items.len());
+        let columns = rail_columns(window, tile_w);
+        let pane = self.watch_pane();
+        // A browser page, not a shelf: the theme's tiles fill the panel row
+        // under row, and the panel scrolls (the right stick, or the pad moving
+        // between rows). Each card is `console_tile`, so it wears the theme's
+        // shape, corners, focus effect, title placement and badges like every
+        // other cover on the console.
+        let id = match rail {
+            Rail::Similar => "console-watch-similar",
+            Rail::Community => "console-watch-community",
+        };
+        let mut grid = div()
+            .id(SharedString::from(id))
+            .flex()
+            .flex_col()
+            .gap(u(RAIL_ROW_GAP))
+            .overflow_y_scroll()
+            .track_scroll(self.console.game.about.handle());
+        for (row, chunk) in items.chunks(columns).enumerate() {
+            let mut tiles: Vec<AnyElement> = Vec::with_capacity(chunk.len());
+            for (in_row, related) in chunk.iter().enumerate() {
+                let index = row * columns + in_row;
+                let on = pane == Pane::Card && index == focus;
+                let key = self.rail_key(related);
+                let face = match &key {
+                    Some(key) => self.console_tile(key, tile_w, tile_h, on, true, window),
+                    // The library has it not yet (the reload is on its way): an
+                    // empty box of the right size, never a card of another shape.
+                    None => div().flex_none().w(u(tile_w)).h(u(tile_h)),
+                };
+                tiles.push(
+                    div()
+                        .id(SharedString::from(format!("watch-rail-{}", related.id)))
+                        .flex_none()
+                        .w(u(tile_w))
+                        .h(u(tile_h + room))
+                        .on_pads(rail_route(pane, focus, index, columns))
+                        .child(face)
+                        .into_any_element(),
+                );
+            }
+            grid = grid.child(div().flex().gap(u(RAIL_GAP)).children(tiles));
+        }
+        grid.flex_1().min_h_0().into_any_element()
+    }
+
+    /// The library key of a rail's card, once the reload has brought it in: a
+    /// tile is drawn (and opened) by the key the library knows.
+    fn rail_key(&self, related: &Related) -> Option<SharedString> {
+        self.lib
+            .as_ref()?
+            .games
+            .iter()
+            .find(|game| crate::fork::watch::sources::id(game) == related.id)
+            .map(|game| SharedString::from(game.key.clone()))
+    }
+
+    /// A rail's card was pressed: the title becomes a library title of its own
+    /// (`simkl/opened`) and the page turns to it.
+    ///
+    /// The adoption is what keeps the title alive: until it happens the title is
+    /// the **page's** scratch feed, and the next page's rails would take it away —
+    /// which is exactly how a title opened from a rail used to vanish under the
+    /// page ("This title is gone"). A press that beats the keep still works: the
+    /// title is written (adopted) and the page turns when the load lands.
+    fn watch_open_related(&mut self, related: &Related, cx: &mut Context<Self>) {
+        let title = heronite_watch::metadata::related_title(related);
+        if let Some(key) = self.rail_key(related) {
+            log::info!(target: "heronite_app", "watch rails: opening {} ({}) at {key}", related.name, related.id);
+            self.watch_adopt_related(title, false, cx);
+            self.open_game_page(key, cx);
+            return;
+        }
+        log::info!(
+            target: "heronite_app",
+            "watch rails: {} ({}) is not in the library yet; keeping it and opening when the load lands",
+            related.name,
+            related.id
+        );
+        self.watch_open_soon(&related.id);
+        self.watch_adopt_related(title, true, cx);
+    }
+
+    /// Writes `title` as a title the person opened (`simkl/opened`), and reloads
+    /// when the page is waiting for it to exist before it can turn to it.
+    fn watch_adopt_related(&mut self, title: heronite_watch::types::Title, reload: bool, cx: &mut Context<Self>) {
+        let app = self.app_paths.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { heronite_watch::catalog::adopt_related(&app, title) }).await;
+            this.update(cx, |this, cx| match result {
+                Ok(_) => {
+                    if reload {
+                        this.reload(cx);
+                    }
+                }
+                Err(error) => {
+                    this.watch_take_opening();
+                    log::warn!(target: "heronite_app", "watch rails: adopting the opened title failed: {error:#}");
+                    this.show_toast(tr!("Could not open that title: {error}", error = format!("{error:#}")), true, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// The title's band at the top of the left column: the cover, the title, who
@@ -736,7 +935,7 @@ impl CollectionView {
         self.images.get_or_request(&id, || vec![chain], pw, ph, Variant::Cover, 200).map(ImageSource::Render)
     }
 
-    pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, _window: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub(super) fn watch_page_pad(&mut self, key: &SharedString, pad: Pad, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(game) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else { return false };
         let details = self.watch_details(key);
         let tab = self.watch_tab();
@@ -761,10 +960,14 @@ impl CollectionView {
             }
             return true;
         }
-        // LB / RB: the other card, with the pad where that card expects it.
+        // LB / RB: the card beside this one, with the pad where that card
+        // expects it.
         if matches!(pad, Pad::LB | Pad::RB) {
-            self.watch_switch_tab();
-            if self.watch_tab() == DetailTab::Streams {
+            let tab = self.watch_switch_tab(pad == Pad::RB, cx);
+            // The panel is one scroller shared by the cards: each one opens at
+            // its top.
+            self.console.game.about.reset();
+            if tab == DetailTab::Streams {
                 let video = self.watch_picked_video(&game);
                 self.watch_ensure_streams(&game, video.as_deref(), cx);
             }
@@ -828,6 +1031,51 @@ impl CollectionView {
             };
         }
         if self.watch_pane() == Pane::Card {
+            // A rail: ◀ ▶ walk its cards, A opens the one the pad is on, ◀ on the
+            // first leaves for the list (as it does on every card).
+            if tab.is_rail() {
+                let rail = rail_of(tab);
+                let len = details.as_deref().map_or(0, |details| details.rail(rail).len());
+                let focus = self.watch_rail_focus(len);
+                let columns = rail_columns(window, self.console_tile_size().0);
+                // The right stick scrolls the grid, as it scrolls the details.
+                if matches!(pad, Pad::ScrollUp | Pad::ScrollDown) {
+                    let step = f32::from(u(160.));
+                    self.console.game.about.by(if pad == Pad::ScrollDown { step } else { -step });
+                    return true;
+                }
+                return match pad {
+                    Pad::A => {
+                        if let Some(related) = details.as_deref().and_then(|details| details.rail(rail).get(focus)).cloned() {
+                            self.watch_open_related(&related, cx);
+                        }
+                        true
+                    }
+                    Pad::B => {
+                        self.watch_focus_pane(Pane::List);
+                        cx.notify();
+                        true
+                    }
+                    Pad::Left | Pad::Right | Pad::Up | Pad::Down => {
+                        match crate::collection::watch_playback::rail_step(focus, columns, len, pad) {
+                            Some(next) => {
+                                self.watch_set_rail(next);
+                                // The row the pad is on stays in view.
+                                self.console.game.about.go(motion::Goal::Reveal { ix: next / columns.max(1), margin: 8. });
+                                cx.notify();
+                                true
+                            }
+                            // The grid's edge goes back to the title's list.
+                            None => {
+                                self.watch_focus_pane(Pane::List);
+                                cx.notify();
+                                true
+                            }
+                        }
+                    }
+                    _ => false,
+                };
+            }
             return match tab {
                 DetailTab::Details => match pad {
                     Pad::Left => {
@@ -841,6 +1089,7 @@ impl CollectionView {
                     }
                     _ => false,
                 },
+                DetailTab::Community | DetailTab::Similar => false,
                 DetailTab::Streams => {
                     self.watch_ensure_streams(&game, picked_video.as_deref(), cx);
                     let rows = self.watch_stream_rows(&game, picked_video.as_deref());
@@ -926,7 +1175,9 @@ impl CollectionView {
         let primary = self.lib.as_ref().and_then(|lib| lib.get(key)).map(|game| self.primary_label(game)).unwrap_or(tr!("Play"));
         let has_trailer = self.watch_details(key).is_some_and(|details| !details.trailers.is_empty());
         let on_the_shelf = self.lib.as_ref().and_then(|lib| lib.get(key)).is_some_and(|game| has_marks(game));
-        let mut hints = vec![hint(Btn::A, tr!("Select")), hint(Btn::LeftRight, tr!("Panels")), hint(Btn::Bumpers, tr!("Tabs"))];
+        // On a rail, A opens the card the pad is on rather than selecting a row.
+        let primary_hint = if self.watch_tab().is_rail() { tr!("Open") } else { tr!("Select") };
+        let mut hints = vec![hint(Btn::A, primary_hint), hint(Btn::LeftRight, tr!("Panels")), hint(Btn::Bumpers, tr!("Tabs"))];
         hints.push(hint(Btn::X, primary));
         hints.extend(trailer_hint(has_trailer));
         hints.extend(watch_later_hint(on_the_shelf));

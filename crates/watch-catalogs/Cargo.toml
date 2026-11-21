@@ -3,12 +3,13 @@ name = "heronite-watch-catalogs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "What Watch lets you browse: the catalog sources (Cinemeta, TMDB) and their registry"
+description = "What Watch lets you browse: the catalog sources (Cinemeta, TMDB, Simkl airing) and their registry"
 
 [dependencies]
 heronite-watch-core = { path = "../watch-core" }
 heronite-watch-addon = { path = "../watch-addon" }
 heronite-watch-tmdb = { path = "../watch-tmdb" }
+heronite-watch-simkl = { path = "../watch-simkl" }
 anyhow.workspace = true
 serde_json.workspace = true
 

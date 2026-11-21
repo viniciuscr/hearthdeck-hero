@@ -1,10 +1,11 @@
 //! Simkl as a **metadata** source: what a title is, as its catalog knows it.
 //!
-//! Simkl is not a catalog source here — it never fills a tab — and not a media
-//! provider: this asks one title, by the IMDb id the rest of Watch resolves
-//! titles by. Catalog lookups are the one thing Simkl exempts from the user
-//! token, so this works even signed out: it needs only the app's client id, the
-//! same one the sign-in uses.
+//! This is Simkl as a **metadata** source and not a media provider: it asks one
+//! title, by the IMDb id the rest of Watch resolves titles by. (Its catalogs are
+//! a source of their own — [`crate::catalog`], from the free CDN lists.) Detail
+//! lookups are the other thing Simkl exempts from the user token, so this works
+//! even signed out: it needs only the app's client id, the same one the sign-in
+//! uses.
 //!
 //! One title costs three requests at most: `/search/id` names Simkl's own id and
 //! which of its catalogs the title lives in (`movie`, `tv`, `anime`), the record
@@ -16,9 +17,10 @@ use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use url::Url;
 
-use heronite_watch_core::metadata::{Episode, Fact, MetaCtx, MetaDescriptor, TitleDetails, TitleRef, Trailer, WatchMetadataSource};
+use heronite_watch_core::metadata::{
+    Episode, Fact, MetaCtx, MetaDescriptor, Related, TitleDetails, TitleRef, Trailer, WatchMetadataSource,
+};
 
-use crate::auth::client_id_of;
 use crate::sync::{API, APP_NAME, APP_VERSION};
 
 const DESCRIPTOR: MetaDescriptor = MetaDescriptor { id: "simkl", name: "Simkl", applies_to: &[] };
@@ -57,14 +59,8 @@ impl WatchMetadataSource for SimklMeta {
 /// The client id this source signs its catalog lookups with: the one stored for
 /// the account, else the build's own.
 fn client_id(ctx: &MetaCtx<'_>) -> Result<String> {
-    if let Some(credentials) = ctx.credentials {
-        if let Ok(Some(secret)) = credentials.get("simkl") {
-            if let Some(client_id) = client_id_of(&secret) {
-                return Ok(client_id);
-            }
-        }
-    }
-    crate::built_in_client_id().map(str::to_owned).ok_or_else(|| {
+    let stored = ctx.credentials.and_then(crate::stored_client_id);
+    stored.or_else(|| crate::built_in_client_id().map(str::to_owned)).ok_or_else(|| {
         anyhow!("Simkl needs this app's client id: the bootstrap sets it (or a file in ~/.config/hearthdeck/simkl-client-id).")
     })
 }
@@ -113,10 +109,11 @@ fn movie(ctx: &MetaCtx<'_>, client_id: &str, found: Found, title: &TitleRef) -> 
     let runtime = runtime_of(record.runtime);
     let rating = record.rating();
     let description = text(record.overview.take());
-    let poster = image(record.poster.as_deref(), "posters", "_w.webp");
-    let background = image(record.fanart.as_deref(), "fanart", "_d.jpg");
+    let poster = image(record.poster.as_deref(), "posters", crate::catalog::POSTER);
+    let background = image(record.fanart.as_deref(), "fanart", crate::catalog::FANART);
     let trailers = trailers(&record);
     let extras = facts(DESCRIPTOR.id, &record);
+    let (similar, recommended) = rails(&record);
     Ok(Some(TitleDetails {
         source: DESCRIPTOR.id.to_owned(),
         id: title.id.clone(),
@@ -140,6 +137,8 @@ fn movie(ctx: &MetaCtx<'_>, client_id: &str, found: Found, title: &TitleRef) -> 
         logo: None,
         trailers,
         extras,
+        similar,
+        recommended,
     }))
 }
 
@@ -155,11 +154,12 @@ fn series(ctx: &MetaCtx<'_>, client_id: &str, found: Found, title: &TitleRef) ->
     let runtime = runtime_of(record.runtime);
     let rating = record.rating();
     let description = text(record.overview.take());
-    let poster = image(record.poster.as_deref(), "posters", "_w.webp");
-    let background = image(record.fanart.as_deref(), "fanart", "_d.jpg");
+    let poster = image(record.poster.as_deref(), "posters", crate::catalog::POSTER);
+    let background = image(record.fanart.as_deref(), "fanart", crate::catalog::FANART);
     let series_status = status_of(record.status.as_deref());
     let trailers = trailers(&record);
     let extras = facts(DESCRIPTOR.id, &record);
+    let (similar, recommended) = rails(&record);
     Ok(Some(TitleDetails {
         source: DESCRIPTOR.id.to_owned(),
         id: title.id.clone(),
@@ -183,7 +183,42 @@ fn series(ctx: &MetaCtx<'_>, client_id: &str, found: Found, title: &TitleRef) ->
         logo: None,
         trailers,
         extras,
+        similar,
+        recommended,
     }))
+}
+
+/// The page's two rails: Simkl's `similar` list and its community
+/// recommendations, as cards keyed by IMDb id.
+///
+/// A title with no IMDb id is left out — it could not be opened here, and a rail
+/// is a list of things to open.
+fn rails(record: &Record) -> (Vec<Related>, Vec<Related>) {
+    let rail = |list: Option<&Vec<RelatedRecord>>, community: bool| {
+        list.into_iter().flatten().filter_map(|item| related_of(item, community)).collect()
+    };
+    (rail(record.similar.as_ref(), false), rail(record.users_recommendations.as_ref(), true))
+}
+
+/// One card of a rail; `None` when Simkl names no IMDb id or no name for it.
+fn related_of(item: &RelatedRecord, community: bool) -> Option<Related> {
+    let id = item.ids.as_ref()?.imdb.as_deref().map(str::trim).filter(|id| id.starts_with("tt"))?;
+    let name = item.title.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(Related {
+        id: id.to_owned(),
+        // Watch has two kinds: an anime series is a series.
+        kind: if item.kind.as_deref() == Some("movie") { "movie" } else { "series" }.to_owned(),
+        name: name.to_owned(),
+        year: item.year.map(|year| year.to_string()),
+        poster: image(item.poster.as_deref(), "posters", crate::catalog::POSTER),
+        background: image(item.fanart.as_deref(), "fanart", crate::catalog::FANART),
+        // Only the community list says how many people; a similar list has no
+        // count to show.
+        users: community.then_some(item.users_count).flatten().filter(|users| *users > 0),
+    })
 }
 
 /// "148 min", or nothing when Simkl has no length.
@@ -366,6 +401,40 @@ struct Record {
     /// YouTube videos: trailers, teasers, clips. Simkl orders them itself.
     #[serde(default)]
     trailers: Option<Vec<TrailerRecord>>,
+    /// Titles Simkl calls alike; the page's "Similar" rail.
+    #[serde(default)]
+    similar: Option<Vec<RelatedRecord>>,
+    /// Titles people recommend alongside this one; the page's "Community" rail.
+    #[serde(default)]
+    users_recommendations: Option<Vec<RelatedRecord>>,
+}
+
+/// One title of a `similar` / `users_recommendations` list: enough for a card,
+/// keyed by the IMDb id the rest of Watch resolves titles by.
+#[derive(Deserialize)]
+struct RelatedRecord {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    year: Option<u32>,
+    #[serde(default)]
+    poster: Option<String>,
+    #[serde(default)]
+    fanart: Option<String>,
+    /// Simkl's own word for the kind: `movie`, `tv`, `anime`.
+    #[serde(rename = "type", default)]
+    kind: Option<String>,
+    /// How many people recommend it; only the community list carries it.
+    #[serde(default)]
+    users_count: Option<u32>,
+    #[serde(default)]
+    ids: Option<RelatedIds>,
+}
+
+#[derive(Deserialize)]
+struct RelatedIds {
+    #[serde(default)]
+    imdb: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -450,7 +519,19 @@ mod tests {
                     "poster":"74/74415673dcdc9cdd","fanart":"a0/a0bc38fad2b1ded3",
                     "ratings":{"simkl":{"rating":8.6,"votes":100},"imdb":{"rating":8.8,"votes":200}},
                     "trailers":[{"name":"Official Trailer","youtube":"YoHD9XEInc0","size":1080,"type":"trailer"},
-                                {"name":null,"youtube":"","type":"teaser"}]
+                                {"name":null,"youtube":"","type":"teaser"}],
+                    "similar":[
+                        {"title":"Interstellar","year":2014,"poster":"11/111","fanart":"22/222","type":"movie",
+                         "ids":{"simkl":1,"imdb":"tt0816692","tmdb":"157336"}},
+                        {"title":"No IMDb Here","type":"movie","ids":{"simkl":2}},
+                        {"title":"","year":2020,"ids":{"imdb":"tt0000001"}},
+                        {"title":"Memento","year":2000,"type":"movie","ids":{"imdb":"tt0209144"}}
+                    ],
+                    "users_recommendations":[
+                        {"title":"The Prestige","year":2006,"type":"movie","users_count":42,"users_percent":37,
+                         "ids":{"imdb":"tt0482571"}},
+                        {"title":"Anime Pick","type":"anime","users_count":0,"ids":{"imdb":"tt9999999"}}
+                    ]
                 }"#,
             );
             Self { location: "https://simkl.com/movies/472214/inception", answers, seen: Mutex::new(Vec::new()) }
@@ -573,7 +654,7 @@ mod tests {
             ],
             "wide sizes only, best first"
         );
-        assert_eq!(details.poster.as_deref(), Some("https://wsrv.nl/?url=https://simkl.in/posters/74/74415673dcdc9cdd_w.webp&q=90"));
+        assert_eq!(details.poster.as_deref(), Some("https://wsrv.nl/?url=https://simkl.in/posters/74/74415673dcdc9cdd_m.webp&q=90"));
         assert!(details.background.is_some());
         let facts: Vec<(&str, &str)> = details.extras.iter().map(|fact| (fact.id.as_str(), fact.value.as_str())).collect();
         assert_eq!(
@@ -644,6 +725,35 @@ mod tests {
         title.id = "simkl:42".into();
         assert_eq!(SimklMeta.details(&ctx, &title).unwrap(), None);
         assert!(fake.asked().is_empty(), "no request for an id the redirect cannot take");
+    }
+
+    #[test]
+    fn the_record_carries_simkls_two_rails_as_cards() {
+        let http = Fake::new();
+        let credentials = credentials();
+        let ctx = MetaCtx { http: &http, credentials: Some(&credentials) };
+        let details = SimklMeta.details(&ctx, &title("movie")).unwrap().unwrap();
+
+        let similar: Vec<(&str, &str, Option<&str>)> =
+            details.similar.iter().map(|related| (related.id.as_str(), related.kind.as_str(), related.year.as_deref())).collect();
+        assert_eq!(
+            similar,
+            [("tt0816692", "movie", Some("2014")), ("tt0209144", "movie", Some("2000"))],
+            "a title with no IMDb id or no name is no card"
+        );
+        let poster = details.similar[0].poster.as_deref().unwrap_or_default();
+        assert!(poster.contains("posters/11/111_m.webp"), "a portrait poster, like every other Simkl image: {poster}");
+        assert_eq!(details.similar[0].users, None, "a similar list has no vote count");
+
+        let recommended: Vec<(&str, Option<u32>)> =
+            details.recommended.iter().map(|related| (related.id.as_str(), related.users)).collect();
+        assert_eq!(
+            recommended,
+            [("tt0482571", Some(42)), ("tt9999999", None)],
+            "a community card says how many people recommend it, and an anime is a series"
+        );
+        assert_eq!(details.recommended[1].kind, "series", "Simkl's `anime` is Watch's series");
+        assert_eq!(details.recommended[0].kind, "movie");
     }
 
     #[test]

@@ -5,6 +5,11 @@
 //! for a stream. Settings → Watch → Sources (Catalogs) turns them on and off by id, which
 //! is why a source's id is all the settings file stores.
 //!
+//! Three live here: Cinemeta's manifest, TMDB's discover, and Simkl's airing
+//! calendar — the last needs no key and no account, which is why only its CDN
+//! file is browsed (`heronite-watch-simkl`'s `catalog` module says what the
+//! counted endpoints would have cost).
+//!
 //! [`WatchCatalogSource`]: heronite_watch_core::catalog::WatchCatalogSource
 
 use heronite_watch_core::catalog::WatchCatalogSource;
@@ -23,7 +28,8 @@ pub fn collection_sources() -> &'static [&'static dyn WatchCollectionSource] {
 
 static CINEMETA: cinemeta::Cinemeta = cinemeta::Cinemeta::builtin();
 static TMDB: heronite_watch_tmdb::Tmdb = heronite_watch_tmdb::Tmdb::new();
-static SOURCES: [&dyn WatchCatalogSource; 2] = [&CINEMETA, &TMDB];
+static SIMKL: heronite_watch_simkl::SimklCatalog = heronite_watch_simkl::SimklCatalog::new();
+static SOURCES: [&dyn WatchCatalogSource; 3] = [&CINEMETA, &TMDB, &SIMKL];
 
 /// Every catalog source this build has, in the order they are listed.
 pub fn sources() -> &'static [&'static dyn WatchCatalogSource] {
@@ -48,11 +54,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_sources_are_cinemeta_then_tmdb_and_are_found_by_id() {
+    fn the_sources_are_cinemeta_then_tmdb_then_simkl_and_are_found_by_id() {
         let ids: Vec<&str> = sources().iter().map(|source| source.descriptor().id).collect();
-        assert_eq!(ids, ["cinemeta", "tmdb"]);
+        assert_eq!(ids, ["cinemeta", "tmdb", "simkl"]);
         assert_eq!(find("cinemeta").map(|source| source.descriptor().name), Some("Cinemeta"));
         assert_eq!(find("tmdb").map(|source| source.descriptor().name), Some("TMDB"));
+        assert_eq!(find("simkl").map(|source| source.descriptor().name), Some("Simkl"));
         assert!(find("nope").is_none());
     }
 

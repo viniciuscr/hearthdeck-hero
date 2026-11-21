@@ -4,6 +4,143 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-20 — the film page gains Simkl's two lists: Community and
+> Similar.**
+> Simkl's detail record carries two lists the page had nowhere to put:
+> `similar` (what its catalog calls alike — nine titles) and
+> `users_recommendations` (what people recommend alongside it — up to twelve).
+> Both now ride the metadata answer as `TitleDetails::similar` /
+> `recommended`: cards keyed by the IMDb id the rest of Watch resolves titles by,
+> with the name, the kind, the year, the poster (`_m`, portrait) and the fanart
+> (`_medium`). Two sources' lists merge one card per title in source order, so a
+> second source can only add. The film page shows them as two more cards in its
+> tab bar, beside Details and Streams. LB / RB walk all four cards and wrap; each
+> card opens at the top of the panel it shares.
+> A rail is a **page, not a shelf**: the tiles fill the panel row under row and
+> the panel scrolls (the right stick, or the pad moving between rows), which is
+> what a twelve-title list needs — a single strip showing three of them was a
+> strip that hid nine. The grid's shape comes from the panel's width and the
+> tile's, and one function holds the arithmetic both the drawing and the presses
+> use (`rail_step`): ◀ ▶ walk a row, ▲ ▼ a row at a time, ◀ on the first card or
+> ▲ on the top row goes back to the title's list, B as anywhere does the same,
+> and A opens the title under the pad. A click routes through exactly those
+> presses.
+> Each card is **the app's own tile** (`console/tile.rs`, `console_tile`), not a
+> card this page invented: the theme's shape and size (`console_tile_size`, so a
+> portrait, square or wide tile all work), its corners, its focus effect (ring,
+> glow, lift or underline), its title placement (below, in a bar, or only while
+> focused) and its badges. A tile is drawn by a **library key** — its art comes
+> from the library's cover chains, its name and state from the `CollectionGame` —
+> so a rail's titles are **kept in the library**, exactly as a catalogue page's
+> titles land, and the page reloads once, which is what gives every card its art.
+> The keep is **lazy and scoped**: it runs the first time a rail is shown (a
+> person who never opens Community or Similar never pays for its titles, and a
+> trailer press on a cover adds nothing), and the set wears the mark
+> `simkl` / `related:{imdb of the page}`. The next page's keep **replaces** the
+> previous page's set (`collection::replace_scoped`), so the library holds one
+> page's recommendations at a time instead of growing with every page ever
+> looked at; a title that also carries another feed's mark is left alone, because
+> it belongs to that feed.
+> The mark is not decoration: the library's refresh **drops** a title no mark
+> names (no mark means "what the sources answered just now", which these are not),
+> and a catalogue page's replacement only removes the feed keys of its own kind.
+> The mark is also what the card's origin line reads ("Simkl"). Until the reload
+> lands a rail says "Loading titles…" rather than drawing empty boxes; the keep is
+> asked once, not once per frame, and the page waits for the load it asked for
+> (`rails_waiting_reload`, cleared by `apply_loaded`, which logs how many of the
+> rails' titles came back).
+> Two rules keep a title from vanishing under the person. The scoped replacement
+> **never** drops the title the page is open on (it is usually one of the last
+> page's recommendations), and pressing a rail's card **adopts** it: its mark
+> becomes `simkl / opened`, which no replacement owns — not the page's scratch
+> feed, not a catalogue's — so a title the person opened stays in the library
+> (`collection::adopt`, `catalog::adopt_related`). Without those two, opening a
+> recommendation marked it for deletion by its own page's keep and the screen read
+> "This title is gone".
+> `heronite_watch_state` and `catalog::keep_related` are tested for all three
+> rules: the keep outlives a refresh, a catalogue page leaves it alone, and the
+> next page's keep takes it away — and that the kept titles come back as games
+> from the load the screens use, which is the line that fails when a rail can only
+> say "Loading titles…".
+> Everything on the way is logged under the `heronite_app` target at **info**
+> (stderr and the app's `hearthdeck-<date>.log`, `RUST_LOG=debug` for more): what
+> the details answered (how many similar / recommended), that a keep was asked for
+> and how many new titles it wrote and where, that the press opened a title (or
+> had to keep it first), and a **warning** when the keep fails or a pressed title
+> never reaches the library. `RUST_LOG=debug` adds the per-step detail (the keep's
+> latch, how many keys a render is still missing, the tile size and columns); the
+> file is the launcher log under the data folder's `logs/launcher/`.
+> Two things the source decides. A title with no IMDb id cannot be a card (it
+> could not be opened here), so those rows are left out. And Simkl answers
+> `users_count: 0` and `users_percent: null` on **every** recommendation it
+> sends today: the count is parsed and kept with the card, but nothing is drawn
+> from it — a tile's own line is the theme's (the year is in the title's data,
+> the count would have been a caption of this page's invention). Both kinds get
+> both lists; a list that is empty says so in words rather than drawing an empty
+> grid.
+>
+> **Revision 2026-11-20 — Simkl as a catalog: what airs, and the pictures fixed.**
+> Simkl is a **catalog source** beside Cinemeta and TMDB, and it is the one that
+> needs neither a key nor an account: it browses `data.simkl.in/calendar/v2/
+> tv.json`, the rolling schedule behind `simkl.com/tv/airing/`. That file is
+> exempt from both of Simkl's limits (the daily allowance and the per-second
+> rate), so browsing it spends nothing of the person's quota and works signed out.
+> The live endpoints that page calls were deliberately **not** used: `/tv/airing`
+> is uncached and needs the person's token under AUTH V2 — Simkl's own reference
+> sends high-traffic clients to this calendar file — and `/genres`, `/best` and
+> `/search` are counted per user, the genre ones answering a thin row.
+> **One catalog**: "Airing on Simkl" on the Series tab, with the filters the airing
+> page has (`network`, `country`, `genre`, `year`), search across a show's name,
+> network, country or genre, and four orders (what airs next, IMDb rating with a
+> 50-vote floor, premiere year, name). Settings → Watch → Sources → **Catalogs**
+> gained a `Simkl` switch (off, like every source, until chosen). The
+> Most-Watched, by-genre and DVD catalogs this source first shipped with are gone:
+> the airing page is what it is for. One page can be a whole ~2.5 MB file, so the
+> catalog transport keeps up to 8 MiB — and the screens now ask the catalog facade
+> (`catalog::replace` / `catalog::more`), which builds that transport itself: they
+> used to hand it the app's default one, where such a file was cut at a megabyte.
+>
+> The airing catalog's shape comes from the file. It keeps the schedule apart from
+> the shows (`calendar` lists every airing, `metadata` describes each show once),
+> so the rows are the shows, joined on the nearest airing. The filter row offers
+> the busiest thirty of Simkl's 415 networks and 60 countries — a row the panel
+> cycles cannot hold hundreds — and the rest are reached by search; genres are
+> all of them, minus the adult and gameplay ones a general-audience app leaves
+> out. Two properties of the source show here: the window is about a month, so
+> this is "what is on now", not every show a network ever made; and a row without
+> an IMDb id cannot be played, so it is dropped — 325 of the 1,572 shows today,
+> about a fifth. The calendar carries no `overview`, so a card's description comes
+> from the metadata source, like every other listing. One download of ~2.5 MB,
+> kept by the source for the run.
+>
+> Two corrections ride along, both from reading the providers' own references.
+> **Simkl's images**: the cover was `_w`, which is a **600 × 338 landscape crop**
+> meant for banners — a poster stretched into a portrait tile. A cover is now
+> `_m` (340 × *, medium portrait) and a background is fanart `_medium`
+> (1920 × 1080), in the catalog and the metadata source alike; episode stills stay
+> `_w`, which is right for 16:9. **TMDB's adult row**: `include_adult` is a yes/no,
+> so the row is one too — **Hide** (the default, and what a missing choice means)
+> or **Show**, never an "All" that would be a second name for Hide. The panel's
+> **required** filters lost their empty step to make that visible: a required
+> filter shows one of its values, and its arrows appear only when there is more
+> than one to pick (Cinemeta's `year` reads the same way now). Measured against
+> the live API, Show admits nine more titles out of fifteen thousand, so the row
+> is a switch for the people who want it rather than something that changes a
+> page's character.
+>
+> **Revision 2026-11-20 — the catalog stops moving under the person scrolling.**
+> Loading a page reloaded the library, and loading the library re-fetched every
+> rail: a live rail answers in another order seconds later, so titles already on
+> screen moved while the person read them. Two changes, both in the space's own
+> code. A page landing still reloads the file, but the rails refresh at most every
+> two minutes — at once when the set the person turned on changes — so scrolling
+> costs a page request, not a rail refresh per page. And a refresh now keeps the
+> order the file already has: a title on screen holds its place, the fresh
+> observation only updates its card, and what is new is appended. The sort chip
+> also starts saying what it does: the Watch grid's orders are **Popular** (the
+> order the feed sent), **A–Z**, **Newest** and **Last played** — it had lost
+> "Popular" and slid the other three labels by one.
+>
 > **Revision 2026-11-20 — a card says where a title comes from, and dims what
 > cannot be played.** A catalogue stamps every title it lists with the provider
 > that would resolve a stream (Stremio), so every film read "Stremio" — in the
@@ -757,22 +894,62 @@ Envelope, source `stremio-core`:
   of a page go out four at a time instead of twenty in a row; a title TMDB has no
   IMDb id for is remembered as such and never asked again.
 - The **discover fields** the panel offers are one choice each (◀ ▶ cycles,
-  "All" = unset): `genre` and `year` for both kinds, a **rating floor**
-  (`vote_average.gte` 9+/8+/7+/6+, always with `vote_count.gte=200` so one
-  ten-vote title cannot win), a **length** bucket (`with_runtime.lte=89`,
-  `gte/lte=90/120`, `gte=121` — a show's episode length, which is what TMDB
-  measures), an **original language** (`with_original_language`, offered in the
-  language's own words), **adult content** (`include_adult`, hide or show) and,
-  for series only, a **production status** (`with_status`: returning 0, ended 3,
-  canceled 4). Values are stable ids where the words are ours and TMDB's own
-  names otherwise; the panel localizes the labels and the length/adult/status
-  words (`console/watch_panel.rs`). Cinemeta can offer nothing more — the addon
+  "All" = unset, for the optional ones): `genre` and `year` for both kinds, a
+  **rating floor** (`vote_average.gte` 9+/8+/7+/6+, always with
+  `vote_count.gte=200` so one ten-vote title cannot win), a **length** bucket
+  (`with_runtime.lte=89`, `gte/lte=90/120`, `gte=121` — a show's episode length,
+  which is what TMDB measures), an **original language** (`with_original_language`,
+  offered in the language's own words), **adult content** and, for series only, a
+  **production status** (`with_status`: returning 0, ended 3, canceled 4). Values
+  are stable ids where the words are ours and TMDB's own names otherwise; the
+  panel localizes the labels and the length/adult/status words
+  (`console/watch_panel.rs`). Cinemeta can offer nothing more — the addon
   protocol's only extras are `genre`, `year`, `skip` and `search`.
+- **Adult content is a yes/no, and it is off.** `include_adult` takes true or
+  false, so the row offers exactly those two — **Hide** (first, and what a
+  missing choice means) and **Show** — and is declared **required**, which is what
+  keeps "All" out of it. A required filter has no empty step in the panel: it
+  shows one of its values and its arrows appear only when there is more than one
+  (`watch_catalog::filter_steps` / `filter_at`, used by both the row and the
+  cycling, and covered by a test). Measured against the live API with this app's
+  key, `include_adult=true` answers 15,211 films where `false` answers 15,202 —
+  nine more in fifteen thousand, and the same first page — because the flag only
+  admits titles TMDB itself marks `adult`. So the row is honest about what it
+  switches: it is for the people who ask for it, and it cannot reshape a page.
+  `/search` is asked without the flag (TMDB's default, adult left out), and a
+  search hides the row anyway.
 - **A search hides the browse controls.** TMDB's `/search` takes no discover
   filters (year and adult only), so the panel shows the search field alone while
   one is typed instead of controls that would not apply; clearing it brings the
   catalog, the order and the fields back. The list scrolls when a source declares
   more fields than the panel's height holds.
+- Simkl declares **one catalog**, `airing` (series): `data.simkl.in/calendar/v2/
+  tv.json`, the rolling ~33-day schedule, joined per show and ordered by when it
+  next airs. Filters `network` (the busiest 30 of 415), `country` (the busiest 30
+  of 60), `genre` (all, adult and gameplay genres left out) and `year` (premiere
+  years, newest first, 30); sorts Popular (the schedule's own order), Rating
+  (IMDb, else Simkl, with a 50-vote floor), Newest (premiere year, shown as
+  "Year") and Title. Search matches a show's name, network, country or genre —
+  how a network outside the busiest thirty is reached — and is one page, like
+  every search. It is the free route to the choices `simkl.com/tv/airing/`
+  offers: that page's endpoint needs the person's token under AUTH V2, is
+  uncached, and Simkl's own reference sends high-traffic clients to this file
+  instead. A show with no IMDb id is dropped (325 of 1,572 today), and the file
+  carries no overview. A page is a hundred shows, served from one ~2.5 MB
+  download kept in the source (which is why the catalog transport's ceiling is
+  8 MiB); `skip` walks the joined list and `consumed` counts the rows walked,
+  IMDb-less ones included. The catalog id is also the chip's label key: "Airing on
+  Simkl", the attribution Simkl's terms ask for, and the reason a chip already
+  naming its source does not get "Simkl · " in front when several sources are on.
+  A catalog id this build no longer has (an older settings file's `trending`) and
+  the Movies tab both answer an empty page rather than someone else's list.
+- **Simkl's images**: `poster` is composed as `posters/<path>_m.webp` (340 × *,
+  portrait) and `fanart` as `fanart/<path>_medium.webp` (1920 × 1080), through
+  `wsrv.nl` with the path percent-encoded into its `url` parameter. `_w` is the
+  600 × 338 **landscape** crop — for banners, not covers — and was what the
+  catalog and the metadata source shipped first; `_d.jpg` is fanart at original
+  size in JPG. Episode stills keep `_w` (600 × 338), which is the right frame for
+  a 16:9 still.
 - Probed with redirects followed — every catalog answers **307** to
   `cinemeta-catalogs.strem.io/<id>/catalog/…`, which the transport follows:
   `top` 50; `imdbRating` 49, then 50 at `skip=50`; `year/genre=1999` 50, and 50
@@ -798,9 +975,11 @@ Envelope, source `stremio-core`:
   from the page and turning a source off removes what it contributed from the
   first page *and* from the tabs.
 - The Movies and Series tabs list only their own feed's titles: before the first
-  page arrives they are empty, with a message that says why (asking the sources,
-  none turned on, or nothing found). They never show the library and replace it a
-  moment later.
+  page arrives they are empty, with a message that says why: asking the sources,
+  **none turned on** (the only case that points at Settings), nothing for this tab
+  from the sources that are on (Simkl lists series only, and a calendar that could
+  not be read costs its chip), or nothing found. They never show the library and
+  replace it a moment later.
 - The app asks for the next page when the grid's last visible row is within two
   rows of the end (the wheel and the pad both move that), shows "Loading more…"
   while a page is in flight, and retries a failed page only after 20 s — a fetch
@@ -891,6 +1070,22 @@ Envelope, source `stremio-core`:
   language. Its availability data ("on Netflix") is a fact when it lands, never a
   stream source. A source that needs a key reads its own entry through
   `MetaCtx`'s credentials; Cinemeta is given none.
+- A detail answer also carries two **rails**: `similar` (what a source calls
+  alike) and `recommended` (what people recommend alongside it), each a
+  `Vec<Related>` — the IMDb id, the kind, the name, the year, the poster and the
+  fanart, plus `users` on a community list. They merge one card per title in
+  source order (`merge_related`), and the film page draws them as the
+  **Community** and **Similar** cards (`console/watch_page.rs`). Simkl is the
+  source that fills them today, from `/movies/{id}` and `/tv/{id}`
+  (`users_count`, measured live, is 0 on every entry it sends, and nothing is
+  drawn from it); Cinemeta's addon protocol has no such lists and leaves them
+  empty. A page's rails are kept in the library the first time a rail is shown
+  (`catalog::keep_related`), because the cards are the console's own tiles and a
+  tile is drawn — and opened — by a library key. They carry the `simkl` /
+  `related:{imdb}` mark: the refresh keeps them for it, a catalogue replacement
+  leaves them for it, the card's origin reads Simkl because of it, and the next
+  page's keep replaces them for it (`collection::replace_scoped`, which keeps a
+  title another feed also names).
 - A 404 is "this source does not know the title" (`None`), not a fault: the next
   source is asked. A timeout, a 5xx or a body that is not JSON is an error; the
   registry keeps it aside, asks the next source, and when none answers the page

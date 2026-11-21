@@ -30,6 +30,7 @@ app
     │       └── heronite-watch-core
     ├── heronite-watch-catalogs what there is to browse: the sources, in order
     │   ├── heronite-watch-tmdb   TMDB discover
+    │   ├── heronite-watch-simkl  Simkl's free airing calendar
     │   └── heronite-watch-addon
     │       └── heronite-watch-core
     ├── heronite-watch-simkl    Simkl: the client id, the device/PIN flow and
@@ -50,10 +51,10 @@ app
 | `heronite-watch-state` | `store` (movies, per-provider credentials), `sessions` (`watch-sessions.json`, one record per playback), `tracking` (the tracker outbox) and `collection` (the Heroic-format projection) | `heronite-watch-core`, `heronite-data` | network, providers, GPUI |
 | `heronite-watch-metadata` | the metadata sources: `WatchMetadataSource`, the ordered registry, and TMDB + Cinemeta + Simkl | `heronite-watch-{core,addon,tmdb,simkl}` | media providers, accounts, playback, files, GPUI |
 | `heronite-watch-stremio` | endpoints, link code, `addonCollectionGet`, datastore and merge, streaming server, `impl WatchProvider` | `heronite-watch-{core,addon}` | files, processes, `heronite-data`, catalogs |
-| `heronite-watch-catalogs` | the catalog sources' registry (`sources`, `enabled`, `find`) and Cinemeta's catalogue | `heronite-watch-{core,addon,tmdb}` | media providers, accounts, playback, GPUI |
+| `heronite-watch-catalogs` | the catalog sources' registry (`sources`, `enabled`, `find`) and Cinemeta's catalogue | `heronite-watch-{core,addon,tmdb,simkl}` | media providers, accounts, playback, GPUI |
 | `heronite-watch-stats` | the recap's numbers: sessions in, days/titles/totals out, over a week, month, year or everything (pure, no files, no GPUI) | `heronite-watch-state` (the session record), chrono | the app's screens, network, providers |
 | `heronite-watch-tmdb` | TMDB discover, genres and external ids as a catalog source; the key from the credential store; the sign-in (request token → session, no password) | `heronite-watch-core` | accounts, playback, files, GPUI |
-| `heronite-watch-simkl` | the client id from the build or the credential store; the AUTH V2 device/PIN flow (device code → poll → tokens); the tokens' shape; the tracker (`/sync/history`, its removal, `/scrobble/stop`); the metadata source (search, movie/tv/anime records, episodes) | `heronite-watch-core` | titles, streams, catalogs, playback, GPUI |
+| `heronite-watch-simkl` | the client id from the build or the credential store; the AUTH V2 device/PIN flow (device code → poll → tokens); the tokens' shape; the tracker (`/sync/history`, its removal, `/scrobble/stop`); the metadata source (`/redirect`, movie/tv/anime records, episodes); the catalog source (the free `data.simkl.in` airing calendar — no token, no quota) | `heronite-watch-core` | media providers, accounts of its own, playback, files, GPUI |
 
 A provider crate takes everything it needs from `Ctx`; it never opens a file or
 spawns a process. That is what keeps a provider testable on fixtures alone.

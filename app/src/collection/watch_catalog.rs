@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::prelude::*;
 use heronite_i18n::tr;
-use heronite_watch::catalog::{CatalogDescriptor, CatalogRequest, CatalogSort};
+use heronite_watch::catalog::{CatalogDescriptor, CatalogFilter, CatalogRequest, CatalogSort};
 
 use super::CollectionView;
 
@@ -117,6 +117,9 @@ pub(super) struct WatchCatalog {
     /// The epoch `declared` was fetched in.
     declared_epoch: u64,
     loading_declared: bool,
+    /// Whether the settings name any catalog source at all: the difference
+    /// between "nothing is turned on" and "what is on has nothing for this tab".
+    sources_on: bool,
 }
 
 impl WatchCatalog {
@@ -131,6 +134,39 @@ impl WatchCatalog {
     pub(super) fn loading(&self, kind: &str) -> bool {
         self.feeds.get(kind).is_some_and(|feed| feed.loading)
     }
+}
+
+/// Where a filter's row stands, and how many steps it has: a **required** filter
+/// is one of its values and nothing else (its first value is where an unset feed
+/// already stands), an optional one has "All" before them.
+pub(crate) fn filter_steps(filter: &CatalogFilter, chosen: Option<&str>) -> (usize, usize) {
+    let position = chosen.and_then(|chosen| filter.values.iter().position(|value| value == chosen));
+    match (filter.required, position) {
+        (true, position) => (position.unwrap_or(0), filter.values.len().max(1)),
+        (false, position) => (position.map_or(0, |index| index + 1), filter.values.len() + 1),
+    }
+}
+
+/// The value a step of the row lands on: `None` is "no choice", which only an
+/// optional filter can be.
+pub(crate) fn filter_at(filter: &CatalogFilter, step: usize) -> Option<&str> {
+    let index = if filter.required { Some(step) } else { step.checked_sub(1) };
+    index.and_then(|index| filter.values.get(index)).map(String::as_str)
+}
+
+/// The filters a request carries: what the person chose, plus the first value of
+/// every required filter still missing. A catalog that cannot be asked without
+/// one (Cinemeta's `year`, TMDB's `adult`) is asked for its first, and the panel
+/// then shows the choice the request already makes instead of "All".
+fn with_required(descriptor: &CatalogDescriptor, mut filters: Vec<(String, String)>) -> Vec<(String, String)> {
+    for filter in &descriptor.filters {
+        if filter.required && !filters.iter().any(|(id, _)| *id == filter.id) {
+            if let Some(value) = filter.values.first() {
+                filters.push((filter.id.clone(), value.clone()));
+            }
+        }
+    }
+    filters
 }
 
 impl CollectionView {
@@ -227,7 +263,7 @@ impl CollectionView {
                             Err(error) => log::warn!("watch catalogs {id}: {error:#}"),
                         }
                     }
-                    declared
+                    (declared, settings.catalog_sources.is_empty())
                 })
                 .await;
             this.update(cx, |this, cx| {
@@ -238,8 +274,10 @@ impl CollectionView {
                     log::debug!("watch catalogs: a stale list was dropped");
                     return;
                 }
+                let (declared, sources_on) = declared;
                 log::info!("watch catalogs: {} declared", declared.len());
                 this.watch_catalog.declared = Some(declared);
+                this.watch_catalog.sources_on = sources_on;
                 cx.notify();
             })
             .ok();
@@ -345,8 +383,9 @@ impl CollectionView {
     }
 
     /// What a catalog tab says when it has nothing to show: the sources are
-    /// still being read, none is turned on, or the feed is empty — never the
-    /// rails' titles.
+    /// still being read, none is turned on, none of those on has a catalog for
+    /// this tab (Simkl lists series only), a source answered nothing, or the feed
+    /// is empty — never the rails' titles.
     pub(super) fn watch_catalog_empty(&self, kind: &str) -> gpui_kit::AnyElement {
         let icon = crate::icons::Icon::GridView;
         if self.watch_catalog.declared.is_none() {
@@ -354,10 +393,21 @@ impl CollectionView {
                 .into_any_element();
         }
         if self.watch_catalogs_of(kind).is_empty() {
+            // "Nothing is on" and "what is on has nothing here" are different
+            // answers, and only the first is a reason to open Settings. The flag
+            // comes with the declared list: a render must not read the file.
+            if !self.watch_catalog.sources_on {
+                return crate::console::kit::empty(
+                    icon,
+                    tr!("No catalog providers are on"),
+                    tr!("Turn one on in Settings → Watch → Sources (Catalogs)."),
+                )
+                .into_any_element();
+            }
             return crate::console::kit::empty(
                 icon,
-                tr!("No catalog providers are on"),
-                tr!("Turn one on in Settings → Watch → Sources (Catalogs)."),
+                tr!("Nothing to browse here"),
+                tr!("The catalog sources you turned on have nothing for this tab, or could not be read."),
             )
             .into_any_element();
         }
@@ -379,30 +429,28 @@ impl CollectionView {
         if self.watch_catalog.feeds.get(kind).is_some_and(|feed| feed.loading) {
             return;
         }
-        if self.watch_catalogs_of(kind).is_empty() {
-            return;
-        }
         // A feed asked for before the declared list arrived still knows whose it
-        // is: the first source, its first catalog.
-        let declared_first = self.watch_catalogs_of(kind).first().cloned();
+        // is: the first source, its first catalog. Nothing to browse by is no
+        // fetch at all — and never a latch left on.
+        let declared = self.watch_catalogs_of(kind);
+        let Some((first_source, first_catalog)) = declared.first() else {
+            return;
+        };
         let feed = self.watch_catalog.feeds.entry(kind).or_default();
         feed.requested = true;
         feed.loading = true;
         let generation = feed.generation;
         let first = feed.skip == 0;
-        let source = if feed.source.is_empty() {
-            let Some((source, _)) = declared_first.as_ref() else { return };
-            let source = source.clone();
-            feed.source.clone_from(&source);
+        if feed.source.is_empty() {
+            feed.source.clone_from(first_source);
             if feed.catalog.is_empty() {
-                if let Some((_, catalog)) = declared_first {
-                    feed.catalog = catalog.id;
-                }
+                feed.catalog.clone_from(&first_catalog.id);
             }
-            source
-        } else {
-            feed.source.clone()
-        };
+        }
+        let source = feed.source.clone();
+        if let Some((_, descriptor)) = declared.iter().find(|(id, catalog)| *id == feed.source && catalog.id == feed.catalog) {
+            feed.filters = with_required(descriptor, feed.filters.clone());
+        }
         let request = CatalogRequest {
             kind: kind.to_owned(),
             catalog: feed.catalog.clone(),
@@ -417,11 +465,12 @@ impl CollectionView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let http = heronite_watch::UreqTransport::new();
+                    // The facade builds the catalog's own transport: a page can be
+                    // a whole CDN file, and the app's default one would cut it.
                     if first {
-                        heronite_watch::catalog::replace_with(&http, &app, &source, &request)
+                        heronite_watch::catalog::replace(&app, &source, &request)
                     } else {
-                        heronite_watch::catalog::more_with(&http, &app, &source, &request)
+                        heronite_watch::catalog::more(&app, &source, &request)
                     }
                 })
                 .await;
@@ -479,6 +528,46 @@ impl CollectionView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_required_filter_has_no_empty_step() {
+        let required =
+            CatalogFilter { id: "adult".into(), label: "adult".into(), values: vec!["hide".into(), "show".into()], required: true };
+        assert_eq!(filter_steps(&required, None), (0, 2), "no `All`: the row starts on its first value");
+        assert_eq!(filter_steps(&required, Some("show")), (1, 2));
+        assert_eq!(filter_at(&required, 0).map(str::to_owned), Some("hide".to_owned()));
+        assert_eq!(filter_at(&required, 1).map(str::to_owned), Some("show".to_owned()));
+        assert_eq!(filter_at(&required, 2), None, "a required row never lands on no choice");
+
+        let optional = CatalogFilter { id: "genre".into(), label: "genre".into(), values: vec!["Action".into()], required: false };
+        assert_eq!(filter_steps(&optional, None), (0, 2), "All, then the value");
+        assert_eq!(filter_steps(&optional, Some("Action")), (1, 2));
+        assert_eq!(filter_at(&optional, 0), None, "an optional row's first step is All");
+        assert_eq!(filter_at(&optional, 1).map(str::to_owned), Some("Action".to_owned()));
+    }
+
+    #[test]
+    fn a_required_filter_is_filled_from_its_first_value() {
+        let descriptor = CatalogDescriptor {
+            id: "discover".into(),
+            name: "TMDB".into(),
+            kind: "movie".into(),
+            sorts: vec![CatalogSort::Popular],
+            filters: vec![
+                CatalogFilter { id: "adult".into(), label: "adult".into(), values: vec!["hide".into(), "show".into()], required: true },
+                CatalogFilter { id: "genre".into(), label: "genre".into(), values: vec!["Action".into()], required: false },
+            ],
+            search: true,
+            paging: true,
+        };
+        assert_eq!(
+            with_required(&descriptor, Vec::new()),
+            [("adult".to_owned(), "hide".to_owned())],
+            "a catalog that cannot be asked without a choice gets its first, and Hide is the safe one"
+        );
+        let chosen = vec![("adult".to_owned(), "show".to_owned())];
+        assert_eq!(with_required(&descriptor, chosen.clone()), chosen, "a choice is kept as it is");
+    }
 
     #[test]
     fn only_the_movies_and_series_tabs_are_catalogs() {

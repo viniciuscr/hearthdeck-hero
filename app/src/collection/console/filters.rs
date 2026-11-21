@@ -224,13 +224,14 @@ impl CollectionView {
                         }
                         Item::Filter(index) => {
                             if let Some(filter) = descriptor.as_ref().and_then(|(_, descriptor)| descriptor.filters.get(index)).cloned() {
-                                let chosen = filters.iter().find(|(id, _)| *id == filter.id).map(|(_, value)| value.clone());
-                                let at =
-                                    chosen.as_ref().and_then(|value| filter.values.iter().position(|v| v == value)).map_or(0, |i| i + 1);
-                                let next = step(at, filter.values.len() + 1);
+                                let chosen = filters.iter().find(|(id, _)| *id == filter.id).map(|(_, value)| value.as_str());
+                                // A required filter has no empty state; an optional
+                                // one has "All" before its values.
+                                let (at, total) = crate::collection::watch_catalog::filter_steps(&filter, chosen);
+                                let next = step(at, total);
                                 let mut kept: Vec<(String, String)> = filters.into_iter().filter(|(id, _)| *id != filter.id).collect();
-                                if let Some(value) = next.checked_sub(1).and_then(|i| filter.values.get(i)) {
-                                    kept.push((filter.id.clone(), value.clone()));
+                                if let Some(value) = crate::collection::watch_catalog::filter_at(&filter, next) {
+                                    kept.push((filter.id.clone(), value.to_owned()));
                                 }
                                 self.watch_feed_select(kind, source, current, sort, kept, cx);
                                 return true;

@@ -127,9 +127,12 @@ impl CollectionView {
             let names: Vec<SharedString> = catalogs
                 .iter()
                 .map(|(id, catalog)| {
-                    let name = catalog_name(&catalog.id, &catalog.name);
+                    let name = catalog_name(id, &catalog.id, &catalog.name);
                     let source = self.watch_source_name(id);
-                    let label = if several && source != name { format!("{source} · {name}") } else { name.to_string() };
+                    // A chip names its source only when more than one source is
+                    // on, and not when its catalog already says it ("Trending on
+                    // Simkl" needs no "Simkl ·" in front).
+                    let label = if several && !name.contains(source.as_str()) { format!("{source} · {name}") } else { name.to_string() };
                     SharedString::from(label)
                 })
                 .collect();
@@ -155,8 +158,14 @@ impl CollectionView {
                 }
                 for (index, filter) in descriptor.filters.iter().enumerate() {
                     let chosen_value = self.watch_feed_filters(kind).into_iter().find(|(id, _)| *id == filter.id).map(|(_, value)| value);
-                    let at = chosen_value.as_ref().and_then(|value| filter.values.iter().position(|v| v == value)).map_or(0, |i| i + 1);
-                    let text = chosen_value.map(|value| filter_value(&filter.id, &value)).unwrap_or_else(|| tr!("All").into());
+                    // A required filter has no empty state: it always shows one of
+                    // its values (the first, when nothing was chosen, which is what
+                    // the request sends), and its arrows appear only when there is
+                    // more than one to pick.
+                    let (at, total) = crate::collection::watch_catalog::filter_steps(filter, chosen_value.as_deref());
+                    let value = crate::collection::watch_catalog::filter_at(filter, at);
+                    let text: SharedString = value.map(|value| filter_value(&filter.id, value)).unwrap_or_else(|| tr!("All").into());
+                    let (can_left, can_right) = if filter.required { (total > 1, total > 1) } else { (at > 0, at < filter.values.len()) };
                     let on = focus == Item::Filter(index);
                     rows.push((
                         Some(Item::Filter(index)),
@@ -167,8 +176,8 @@ impl CollectionView {
                             kit::choice_clickable(
                                 text,
                                 on,
-                                at > 0,
-                                at < filter.values.len(),
+                                can_left,
+                                can_right,
                                 140.,
                                 to(Item::Filter(index), &[Pad::Left]),
                                 to(Item::Filter(index), &[Pad::Right]),
@@ -293,11 +302,14 @@ impl CollectionView {
 
 /// A catalog's chip: the ids we know read in the person's language, anything
 /// else as the provider named it.
-fn catalog_name(id: &str, name: &str) -> SharedString {
-    match id {
-        "top" => tr!("Popular").to_string().into(),
-        "imdbRating" => tr!("Top rated").to_string().into(),
-        "year" => tr!("Year").to_string().into(),
+fn catalog_name(source: &str, id: &str, name: &str) -> SharedString {
+    match (source, id) {
+        ("cinemeta", "top") => tr!("Popular").to_string().into(),
+        ("cinemeta", "imdbRating") => tr!("Top rated").to_string().into(),
+        ("cinemeta", "year") => tr!("Year").to_string().into(),
+        // Simkl's one catalog. Its label carries the source's name: the data is
+        // Simkl's and its terms ask for the attribution.
+        ("simkl", "airing") => tr!("Airing on Simkl").to_string().into(),
         _ => SharedString::from(name.to_owned()),
     }
 }
@@ -323,6 +335,8 @@ fn filter_label(id: &str, label: &str) -> SharedString {
         "language" => tr!("Original language").to_string().into(),
         "adult" => tr!("Adult content").to_string().into(),
         "status" => tr!("Status").to_string().into(),
+        "network" => tr!("Network").to_string().into(),
+        "country" => tr!("Country").to_string().into(),
         _ => SharedString::from(label.to_owned()),
     }
 }
@@ -342,13 +356,16 @@ fn filter_value(id: &str, value: &str) -> SharedString {
         // A show's status, not a download's: the plain word means "aborted"
         // elsewhere in the app.
         ("status", "canceled") => trc!("series", "Canceled").into(),
+        // The calendar names a country by its ISO code; a row reads better in
+        // capitals than in the file's lower case.
+        ("country", code) => SharedString::from(code.to_ascii_uppercase()),
         _ => SharedString::from(value.to_owned()),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{filter_label, filter_value};
+    use super::{catalog_name, filter_label, filter_value};
 
     use core::prelude::v1::test;
 
@@ -371,5 +388,17 @@ mod tests {
         assert_eq!(filter_value("status", "canceled").as_ref(), "Canceled");
         assert_eq!(filter_value("genre", "Science Fiction").as_ref(), "Science Fiction", "TMDB's own genre names");
         assert_eq!(filter_value("language", "日本語").as_ref(), "日本語", "a language reads in its own words");
+        assert_eq!(filter_value("country", "gb").as_ref(), "GB", "a country is written in capitals");
+    }
+
+    #[test]
+    fn a_simkl_chip_is_named_and_keeps_its_attribution() {
+        assert_eq!(catalog_name("simkl", "airing", "Simkl Airing").as_ref(), "Airing on Simkl");
+        assert_eq!(catalog_name("tmdb", "discover", "TMDB").as_ref(), "TMDB", "a source's own name is left alone");
+        assert_eq!(
+            catalog_name("other", "trending", "Trending").as_ref(),
+            "Trending",
+            "the labels are keyed by source too: another source's `trending` is its own word"
+        );
     }
 }

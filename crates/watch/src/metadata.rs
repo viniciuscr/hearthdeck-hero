@@ -14,7 +14,25 @@ use heronite_watch_core::http::{Transport, UreqTransport};
 use heronite_watch_core::metadata::MetaCtx;
 use heronite_watch_state::details as cache;
 
-pub use heronite_watch_core::metadata::{Episode, Fact, MetaDescriptor, TitleDetails, TitleRef, Trailer, WatchMetadataSource};
+pub use heronite_watch_core::metadata::{
+    Episode, Fact, MetaDescriptor, Rail, Related, TitleDetails, TitleRef, Trailer, WatchMetadataSource,
+};
+
+/// The library title a rail's card is, ready to be kept and opened.
+///
+/// The card already names the IMDb id, the kind, the year and the art, which is
+/// everything a title needs; the provider that plays it is the one a catalogue
+/// stamps on its titles (Stremio), because a rail is a list of things to open
+/// here and nothing else here can play them.
+pub fn related_title(related: &Related) -> heronite_watch_core::title::Title {
+    use heronite_watch_core::title::{Art, ProviderId, Title, TitleId, TitleKey, TitleKind};
+
+    let provider = ProviderId::declared("stremio");
+    let mut title = Title::new(TitleKey::new(TitleKind::of(&related.kind), TitleId::imdb(&related.id)), &related.name).plays(provider);
+    title.release = related.year.clone();
+    title.art = Art { poster: related.poster.clone(), background: related.background.clone(), logo: None };
+    title
+}
 
 /// The metadata sources Watch ships with, in registry order.
 pub fn sources() -> &'static [&'static dyn WatchMetadataSource] {

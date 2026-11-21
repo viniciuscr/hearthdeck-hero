@@ -17,6 +17,7 @@ use heronite_watch::types::StreamChoice;
 
 use super::CollectionView;
 use crate::console::list::{ListNav, Row};
+use crate::console::Pad;
 use crate::icons::Icon;
 use crate::theme;
 use crate::ui::icon;
@@ -54,6 +55,53 @@ pub(super) struct WatchPlayback {
     /// A trailer was asked for before the title's details arrived (from a
     /// cover, where nobody has opened the page yet): it plays with them.
     trailer_pending: Option<String>,
+    /// The card of the "Similar" / "Community" rail the pad is on.
+    rail: usize,
+    /// A title a rail's card opened, by IMDb id: the page turns to it once the
+    /// library holds it (the press adds it and reloads).
+    opening: Option<String>,
+    /// The page whose rail titles are being kept, and where that keep stands:
+    /// a rail asks once, not once per frame.
+    rails_page: Option<String>,
+    rails_loading: bool,
+    /// The keep was written and a reload is on its way: asking again until it
+    /// lands is what made the same set be kept twice.
+    rails_waiting_reload: bool,
+    /// The wait has been said once: a render that arrives while the load is in
+    /// flight must not repeat it per frame.
+    rails_spoke: bool,
+    rails_failed: bool,
+}
+
+impl WatchPlayback {
+    /// The card of the rail the pad is on (clamped to `len`).
+    fn rail_focus(&self, len: usize) -> usize {
+        self.rail.min(len.saturating_sub(1))
+    }
+}
+
+/// Where a press on a rail takes the focus, `None` when the press leaves the
+/// rail for the title's list: ◀ from the first card, ▲ from the top row (the
+/// grid's edges, as B does anywhere).
+///
+/// The grid is `len` cards laid out `columns` to a row — the page draws it that
+/// way, so the arithmetic lives here, where a test can walk it.
+pub(super) fn rail_step(focus: usize, columns: usize, len: usize, pad: Pad) -> Option<usize> {
+    if len == 0 || columns == 0 {
+        return None;
+    }
+    let last = len - 1;
+    let focus = focus.min(last);
+    match pad {
+        Pad::Left if focus == 0 => None,
+        Pad::Left => Some(focus - 1),
+        Pad::Right => Some((focus + 1).min(last)),
+        Pad::Up if focus < columns => None,
+        Pad::Up => Some(focus - columns),
+        // The last row is short: a step past it stays on the card it is on.
+        Pad::Down => Some((focus + columns).min(last)),
+        _ => None,
+    }
 }
 
 /// The series picker's state: which season and episode the page shows.
@@ -65,13 +113,37 @@ pub(super) struct Selection {
     pub episode: usize,
 }
 
-/// The two cards the film page shows beside the list.
+/// The cards the film page shows beside the list: what the title is, where it
+/// plays, what people recommend beside it and what Simkl calls alike.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum DetailTab {
     #[default]
     Details,
     Streams,
+    /// Titles people recommend alongside this one (Simkl's community list).
+    Community,
+    /// Titles the sources say are alike (Simkl's `similar`).
+    Similar,
 }
+
+impl DetailTab {
+    /// Whether the card is one of the two rails: the pad walks its cards with
+    /// ◀ ▶, and A opens the one it is on.
+    pub(super) fn is_rail(self) -> bool {
+        matches!(self, Self::Community | Self::Similar)
+    }
+
+    /// The card beside this one in the tab bar, wrapping at either end: RB walks
+    /// it forwards, LB back.
+    pub(super) fn next(self, forward: bool) -> Self {
+        let at = DETAIL_TABS.iter().position(|tab| *tab == self).unwrap_or(0);
+        let next = if forward { (at + 1) % DETAIL_TABS.len() } else { (at + DETAIL_TABS.len() - 1) % DETAIL_TABS.len() };
+        DETAIL_TABS[next]
+    }
+}
+
+/// The page's cards, in the order the tab bar draws them and LB / RB walk them.
+pub(super) const DETAIL_TABS: [DetailTab; 4] = [DetailTab::Details, DetailTab::Streams, DetailTab::Community, DetailTab::Similar];
 
 /// Which side of the film page the pad drives: the title's list (Play, season,
 /// episodes), its row of marks (watched, watch later, favourite) or the card
@@ -206,14 +278,23 @@ impl CollectionView {
                 }
                 this.watch.info.state = match result {
                     Ok((Some(details), resume)) => {
+                        log::info!(
+                            target: "heronite_app",
+                            "watch details: {key} answered — similar {}, recommended {}",
+                            details.similar.len(),
+                            details.recommended.len()
+                        );
                         this.watch.info.resume = resume;
                         // The new details decide which episode the picker opens on.
                         this.watch.pick = Pick::default();
                         TitleState::Ready(Arc::new(details))
                     }
-                    Ok((None, _)) => TitleState::Missing,
+                    Ok((None, _)) => {
+                        log::info!(target: "heronite_app", "watch details: the sources know nothing about {key}");
+                        TitleState::Missing
+                    }
                     Err(error) => {
-                        log::debug!("watch details: {error:#}");
+                        log::warn!(target: "heronite_app", "watch details: {key} could not be asked: {error:#}");
                         TitleState::Failed
                     }
                 };
@@ -233,6 +314,131 @@ impl CollectionView {
             .ok();
         })
         .detach();
+    }
+
+    /// The IMDb id of the title the page is open on: the page a keep belongs to,
+    /// and the only one whose rails the library keeps (`related:{imdb}`).
+    pub(super) fn watch_page_id(&self) -> Option<String> {
+        let key = SharedString::from(self.watch.info.item.clone()?);
+        let game = self.lib.as_ref()?.get(&key)?;
+        Some(crate::fork::watch::sources::id(game).to_owned())
+    }
+
+    /// A rail is on screen: its titles join the library, so its cards are the
+    /// app's own tiles (theme, focus, titles under them) and a press opens a
+    /// title that already exists.
+    ///
+    /// It runs when a rail is **shown**, not when the details land: a person who
+    /// never opens Community or Similar never pays for its titles, and pressing
+    /// the trailer on a cover adds nothing. The set is scoped to this page
+    /// (`related:{imdb}`), so the next page's rails take these away instead of
+    /// the library growing with every page ever looked at.
+    pub(super) fn watch_ensure_rails(&mut self, cx: &mut Context<Self>) {
+        let TitleState::Ready(details) = &self.watch.info.state else {
+            log::debug!(target: "heronite_app", "watch rails: the details are not in yet");
+            return;
+        };
+        let Some(page) = self.watch_page_id() else {
+            log::debug!(target: "heronite_app", "watch rails: no page id to keep titles for");
+            return;
+        };
+        if self.watch.rails_loading || self.watch.rails_waiting_reload {
+            if !self.watch.rails_spoke {
+                self.watch.rails_spoke = true;
+                log::debug!(target: "heronite_app", "watch rails: {page} is already being kept or reloading");
+            }
+            return;
+        }
+        let rails = details.similar.len() + details.recommended.len();
+        let known: std::collections::HashSet<String> =
+            self.lib.iter().flat_map(|lib| lib.games.iter()).map(|game| crate::fork::watch::sources::id(game).to_owned()).collect();
+        let missing: Vec<heronite_watch::types::Title> = details
+            .similar
+            .iter()
+            .chain(details.recommended.iter())
+            .filter(|related| !known.contains(related.id.as_str()))
+            .map(heronite_watch::metadata::related_title)
+            .collect();
+        if missing.is_empty() {
+            if self.watch.rails_page.as_deref() != Some(page.as_str()) {
+                log::info!(target: "heronite_app", "watch rails: {page} already has all {rails} titles in the library");
+                self.watch.rails_page = Some(page);
+                self.watch.rails_failed = false;
+            }
+            return;
+        }
+        log::info!(
+            target: "heronite_app",
+            "watch rails: keeping {} of {rails} for {page} (similar {}, recommended {})",
+            missing.len(),
+            details.similar.len(),
+            details.recommended.len()
+        );
+        self.watch.rails_loading = true;
+        self.watch.rails_failed = false;
+        self.watch.rails_spoke = false;
+        let app = self.app_paths.clone();
+        cx.spawn(async move |this, cx| {
+            let asking = page.clone();
+            let result = cx.background_spawn(async move { heronite_watch::catalog::keep_related(&app, &asking, missing) }).await;
+            this.update(cx, |this, cx| {
+                this.watch.rails_loading = false;
+                match result {
+                    Ok(added) => {
+                        log::info!(target: "heronite_app", "watch rails: kept {added} new title(s) for {page}, reloading");
+                        this.watch.rails_page = Some(page);
+                        this.watch.rails_waiting_reload = true;
+                        // The reload is what turns them into library titles: the
+                        // page's tiles take their art from its cover chains.
+                        this.reload(cx);
+                    }
+                    Err(error) => {
+                        log::warn!(target: "heronite_app", "watch rails: keeping {page}'s titles failed: {error:#}");
+                        this.watch.rails_failed = true;
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Whether that ask failed (the rail says so instead of waiting for ever).
+    pub(super) fn watch_rails_failed(&self) -> bool {
+        self.watch.rails_failed
+    }
+
+    /// Whether this wait has already been said (renders must not repeat it).
+    pub(super) fn watch_rails_spoke(&self) -> bool {
+        self.watch.rails_spoke
+    }
+
+    /// Says it: the next render of this wait is silent.
+    pub(super) fn watch_rails_say(&mut self) {
+        self.watch.rails_spoke = true;
+    }
+
+    /// A reload landed: say what the library holds of the page's rails, so the
+    /// next keep is asked for only when something is really missing.
+    pub(super) fn watch_rails_reloaded(&mut self) {
+        if !self.watch.rails_waiting_reload {
+            return;
+        }
+        self.watch.rails_waiting_reload = false;
+        // The next keep may say its wait again.
+        self.watch.rails_spoke = false;
+        let TitleState::Ready(details) = &self.watch.info.state else { return };
+        let known: std::collections::HashSet<String> =
+            self.lib.iter().flat_map(|lib| lib.games.iter()).map(|game| crate::fork::watch::sources::id(game).to_owned()).collect();
+        let total = details.similar.len() + details.recommended.len();
+        let found = details.similar.iter().chain(details.recommended.iter()).filter(|related| known.contains(related.id.as_str())).count();
+        let page = self.watch_page_id().unwrap_or_default();
+        if found == total {
+            log::info!(target: "heronite_app", "watch rails: reload landed — all {total} titles for {page} have a library key");
+        } else {
+            log::warn!(target: "heronite_app", "watch rails: reload landed — only {found} of {total} titles for {page} have a library key");
+        }
     }
 
     /// The details of `key`, when they arrived. The `Arc` keeps the page able to
@@ -438,14 +644,39 @@ impl CollectionView {
         self.watch.tab
     }
 
-    /// LB / RB: the other card, with the pad where that card expects it.
-    pub(super) fn watch_switch_tab(&mut self) -> DetailTab {
-        self.watch.tab = match self.watch.tab {
-            DetailTab::Details => DetailTab::Streams,
-            DetailTab::Streams => DetailTab::Details,
-        };
+    /// LB / RB: the card beside this one, with the pad where that card expects
+    /// it. RB walks the tab bar forwards, LB back, and either end wraps.
+    pub(super) fn watch_switch_tab(&mut self, forward: bool, cx: &mut Context<Self>) -> DetailTab {
+        self.watch.tab = self.watch.tab.next(forward);
         self.watch.pane = tab_pane(self.watch.tab);
+        // A rail opens on its first card, whichever card the page came from, and
+        // its titles join the library the first time it is shown.
+        self.watch.rail = 0;
+        if self.watch.tab.is_rail() {
+            self.watch_ensure_rails(cx);
+        }
         self.watch.tab
+    }
+
+    /// The card of the rail the pad is on (clamped to `len`).
+    pub(super) fn watch_rail_focus(&self, len: usize) -> usize {
+        self.watch.rail_focus(len)
+    }
+
+    /// The card of a rail's grid the pad is on.
+    pub(super) fn watch_set_rail(&mut self, index: usize) {
+        self.watch.rail = index;
+    }
+
+    /// A rail's card was pressed: the page turns to that title once the library
+    /// has it (`watch_take_opening`). The press adds it and reloads.
+    pub(super) fn watch_open_soon(&mut self, id: &str) {
+        self.watch.opening = Some(id.to_owned());
+    }
+
+    /// The title a rail's card opened, once: the page takes it and turns.
+    pub(super) fn watch_take_opening(&mut self) -> Option<String> {
+        self.watch.opening.take()
     }
 
     /// L3 (the click of the left stick), when the title has a trailer: it plays
@@ -547,6 +778,9 @@ impl CollectionView {
             return;
         }
         self.watch.page = Some(key.to_owned());
+        // Another title opens on the list's first row, at the first card of any
+        // rail, with the details card showing.
+        self.watch.rail = 0;
         self.watch.pane = Pane::List;
         self.watch.mark = 0;
     }
@@ -984,13 +1218,13 @@ fn default_selection(details: &TitleDetails, resume: Option<&str>) -> Selection 
     Selection { season, episode }
 }
 
-/// Where the pad goes when the card switches to `tab`: the stream list takes it
-/// for the streams, while the details open on the episode list (◀ ▶ reaches the
+/// Where the pad goes when the card switches to `tab`: the stream list and the
+/// two rails take it, while the details open on the episode list (◀ ▶ reaches the
 /// card to scroll it).
 fn tab_pane(tab: DetailTab) -> Pane {
     match tab {
         DetailTab::Details => Pane::List,
-        DetailTab::Streams => Pane::Card,
+        DetailTab::Streams | DetailTab::Community | DetailTab::Similar => Pane::Card,
     }
 }
 
@@ -1129,10 +1363,44 @@ mod tests {
     }
 
     #[test]
-    fn the_card_takes_the_pad_for_the_streams_and_the_list_for_the_details() {
+    fn the_card_takes_the_pad_for_the_streams_and_the_rails_and_the_list_for_the_details() {
         assert_eq!(tab_pane(DetailTab::Details), Pane::List);
         assert_eq!(tab_pane(DetailTab::Streams), Pane::Card);
+        assert_eq!(tab_pane(DetailTab::Community), Pane::Card);
+        assert_eq!(tab_pane(DetailTab::Similar), Pane::Card);
         assert_eq!(Pane::default(), Pane::List);
+        assert!(DetailTab::Community.is_rail() && DetailTab::Similar.is_rail());
+        assert!(!DetailTab::Details.is_rail() && !DetailTab::Streams.is_rail());
+    }
+
+    #[test]
+    fn the_tab_bar_walks_all_four_cards_and_wraps() {
+        let mut tab = DetailTab::Details;
+        let mut order = Vec::new();
+        for _ in 0..DETAIL_TABS.len() {
+            tab = tab.next(true);
+            order.push(tab);
+        }
+        assert_eq!(order, [DetailTab::Streams, DetailTab::Community, DetailTab::Similar, DetailTab::Details]);
+        assert_eq!(DetailTab::Details.next(false), DetailTab::Similar, "LB walks back from the first card");
+        assert_eq!(DETAIL_TABS, [DetailTab::Details, DetailTab::Streams, DetailTab::Community, DetailTab::Similar]);
+    }
+
+    #[test]
+    fn a_rail_is_a_grid_walked_by_the_pad() {
+        // Seven cards, three to a row: 0 1 2 / 3 4 5 / 6.
+        assert_eq!(rail_step(0, 3, 7, Pad::Right), Some(1));
+        assert_eq!(rail_step(2, 3, 7, Pad::Right), Some(3), "past the row's end is the next row");
+        assert_eq!(rail_step(6, 3, 7, Pad::Right), Some(6), "the last card is the end");
+        assert_eq!(rail_step(4, 3, 7, Pad::Left), Some(3));
+        assert_eq!(rail_step(0, 3, 7, Pad::Left), None, "the first card's ◀ leaves for the list");
+        assert_eq!(rail_step(4, 3, 7, Pad::Up), Some(1), "a row above");
+        assert_eq!(rail_step(1, 3, 7, Pad::Up), None, "the top row's ▲ leaves for the list");
+        assert_eq!(rail_step(1, 3, 7, Pad::Down), Some(4));
+        assert_eq!(rail_step(6, 3, 7, Pad::Down), Some(6), "the short last row stays put");
+        assert_eq!(rail_step(4, 3, 7, Pad::A), None, "A is the caller's: it opens the card");
+        assert_eq!(rail_step(0, 3, 0, Pad::Right), None, "an empty rail holds nothing");
+        assert_eq!(rail_step(9, 3, 7, Pad::Left), Some(5), "a stale focus is clamped to the list");
     }
 
     #[test]

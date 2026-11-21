@@ -139,3 +139,42 @@ fn a_source_of_its_own_is_all_the_screens_need() {
     let page = Stub.catalog(&ctx, &CatalogRequest::first("movie")).unwrap();
     assert!(page.items.is_empty() && !page.more, "a source that browses nothing answers an empty last page");
 }
+
+/// Answers Simkl's free CDN file: the airing calendar.
+struct SimklFake {
+    seen: Mutex<Vec<String>>,
+}
+
+impl Transport for SimklFake {
+    fn get(&self, url: &Url) -> Result<Vec<u8>> {
+        self.seen.lock().unwrap().push(url.as_str().to_owned());
+        let body: &[u8] = br#"{"calendar":[{"simkl_id":7,"date":"2026-11-21T05:00:00Z","episode":{"season":1,"episode":2}}],
+            "metadata":{"7":{"title":"MobLand","release_date":"2025-03-30T00:00:00Z","runtime":"45m",
+            "genres":["Crime"],"network":"Paramount+","country":"us","ids":{"imdb":"tt3231592"}}}}"#;
+        Ok(body.to_vec())
+    }
+    fn post_json(&self, _: &Url, _: &Value) -> Result<Vec<u8>> {
+        Ok(b"{}".to_vec())
+    }
+}
+
+#[test]
+fn simkl_browses_the_airing_calendar_and_spends_no_quota() {
+    let dir = tempfile::tempdir().unwrap();
+    let http = SimklFake { seen: Mutex::new(Vec::new()) };
+    let catalogs = heronite_watch::catalog::catalogs_with(&http, &app(dir.path()), "simkl").unwrap();
+    let declared: Vec<(&str, &str)> = catalogs.iter().map(|catalog| (catalog.kind.as_str(), catalog.id.as_str())).collect();
+    assert_eq!(declared, [("series", "airing")], "the airing calendar is Simkl's one catalog now");
+
+    let airing = CatalogRequest { catalog: "airing".into(), kind: "series".into(), ..CatalogRequest::first("series") };
+    let page = heronite_watch::catalog::page_with(&http, &app(dir.path()), "simkl", &airing).unwrap();
+    assert_eq!(page.items.len(), 1, "the calendar's one show");
+    assert_eq!(page.items[0].name, "MobLand");
+    assert_eq!(page.items[0].key.id.as_str(), "tt3231592", "keyed by the IMDb id the rest of Watch uses");
+
+    let seen = http.seen.lock().unwrap().clone();
+    assert!(
+        seen.iter().all(|url| url.starts_with("https://data.simkl.in/calendar/")),
+        "nothing asks api.simkl.com: the counted endpoints are never called from a catalogue ({seen:?})"
+    );
+}

@@ -207,6 +207,27 @@ impl CollectionView {
         // Sunshine's list follows the installed games (when that is on).
         crate::services::sunshine::library_loaded(&lib, cx);
         self.lib = Some(lib);
+        // A page's rails were kept and this is the load that brings them in.
+        self.watch_rails_reloaded();
+        // A rail's card asked for a title: the press added it and reloaded, and
+        // this is where the page turns to it, now that the library holds it.
+        if let Some(id) = self.watch_take_opening() {
+            let key = self
+                .lib
+                .as_ref()
+                .and_then(|lib| lib.games.iter().find(|game| crate::fork::watch::sources::id(game) == id))
+                .map(|game| game.key.clone());
+            match key {
+                Some(key) => {
+                    log::info!(target: "heronite_app", "watch rails: {id} reached the library; opening it");
+                    self.open_game_page(SharedString::from(key), cx)
+                }
+                None => {
+                    log::warn!("a rail's title did not reach the library: {id}");
+                    self.show_toast(tr!("That title did not reach the library."), true, cx);
+                }
+            }
+        }
         if first {
             if let Some((text, error)) = crate::services::upkeep::take_restore_notice() {
                 self.show_toast(text, error, cx);

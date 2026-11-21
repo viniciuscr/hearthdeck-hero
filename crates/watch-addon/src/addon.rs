@@ -225,10 +225,12 @@ impl MetaDetails {
             background: self.background,
             logo: self.logo,
             // The addon protocol's meta carries none of the open facts (a
-            // source's own tagline, budget, networks) and its `trailers` are not
-            // read here yet.
+            // source's own tagline, budget, networks), its `trailers` are not
+            // read here yet, and it knows no recommendations.
             trailers: Vec::new(),
             extras: Vec::new(),
+            similar: Vec::new(),
+            recommended: Vec::new(),
         })
     }
 }

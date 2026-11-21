@@ -105,13 +105,14 @@ app (bin heronite-rs) ── GPUI UI, desktop integration
  │                      (Cinemeta) and their ordered registry
  │                                              → watch-core, watch-addon
  ├─ heronite-watch-catalogs what there is to browse: the catalog sources
- │                      (Cinemeta, TMDB) and their registry
+ │                      (Cinemeta, TMDB, Simkl) and their registry
  │                                              → watch-core, watch-addon,
- │                                                watch-tmdb
+ │                                                watch-tmdb, watch-simkl
  ├─ heronite-watch-tmdb TMDB discover as a catalog source
  │                                                          → watch-core
- ├─ heronite-watch-simkl Simkl's account: the application's client id
- │                      and the AUTH V2 device/PIN sign-in  → watch-core
+ ├─ heronite-watch-simkl Simkl's account (client id, AUTH V2 device/PIN),
+ │                      metadata, tracker and its free catalog lists
+ │                                                          → watch-core
  ├─ heronite-watch-player mpv discovery, arguments, IPC supervision
  │                                                              → data
  ├─ heronite-watch-state local watch files and the Heroic-format

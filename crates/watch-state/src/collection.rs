@@ -122,12 +122,30 @@ pub fn append(root: &Path, titles: &[Title]) -> Result<usize> {
 /// leave an earlier feed's pages behind. The rails and the other kind stay
 /// untouched. Returns how many items were new.
 pub fn replace(root: &Path, kind: &str, titles: &[Title]) -> Result<usize> {
-    let prefix = format!("{kind}:");
+    replace_scoped(root, &format!("{kind}:"), None, titles)
+}
+
+/// [`replace`] for any feed the **first** mark names by `prefix`, whatever kind
+/// it belongs to: a film page's rails replace the previous page's set, so the
+/// library holds one page's recommendation at a time rather than every page ever
+/// looked at.
+///
+/// A title is only dropped when *this* feed is its only mark: a title a
+/// catalogue page also lists (it carries that page's mark too) is theirs, and a
+/// recommendation list must not take it away.
+pub fn replace_scoped(root: &Path, prefix: &str, keep: Option<&str>, titles: &[Title]) -> Result<usize> {
     let mut all: Vec<Title> = stored(root)
         .into_iter()
-        .filter(|title| match title.rails.first() {
-            Some(RailMark::Feed { catalog, .. }) => !catalog.starts_with(&prefix),
-            _ => true,
+        .filter(|title| {
+            // The title the person is looking at is never the feed's to take away:
+            // they opened it from the very list being replaced.
+            if keep.is_some_and(|id| title.key.id.as_str() == id) {
+                return true;
+            }
+            match title.rails.as_slice() {
+                [RailMark::Feed { catalog, .. }] => !catalog.starts_with(prefix),
+                _ => true,
+            }
         })
         .collect();
     let before = all.len();
@@ -150,6 +168,30 @@ fn merge(titles: &mut Vec<Title>, title: Title) {
         }
         None => titles.push(title),
     }
+}
+
+/// Gives one title a mark of its own, replacing whatever a scratch feed said
+/// about it: a title opened from a page's rails becomes a library title the
+/// person keeps — the next page's rails must not take it away, and its page must
+/// not disappear while it is open.
+///
+/// The title is added when the root has not got it yet (a press that beat the
+/// keep), so one call covers both. Returns whether anything changed.
+pub fn adopt(root: &Path, title: &Title, mark: RailMark) -> Result<bool> {
+    let mut all = stored(root);
+    match all.iter_mut().find(|held| held.key == title.key) {
+        Some(held) => {
+            if held.rails.as_slice() == std::slice::from_ref(&mark) {
+                return Ok(false);
+            }
+            held.rails = vec![mark];
+        }
+        None => {
+            all.push(title.clone().listed(mark));
+        }
+    }
+    write_root(root, &all)?;
+    Ok(true)
 }
 
 /// The titles a root holds now, read back from the layouts [`write_root`] wrote.
@@ -562,12 +604,118 @@ mod tests {
         let added = append(root, &[page, title("tt1", "A Film")]).unwrap();
         assert_eq!(added, 1, "a title already there is not added again");
 
-        // A rails refresh replaces the rails and keeps the page.
+        // A rails refresh replaces the rails and keeps the page, in its place.
         refresh(root, &[], || Ok(Fetched { titles: vec![title("tt3", "New Film")], answered: Vec::new() })).unwrap();
         let items = stored(root);
-        assert_eq!(ids(&items), ["tt3", "tt2"]);
+        assert_eq!(ids(&items), ["tt2", "tt3"], "the page keeps its place; the rails bring a new title after it");
         assert!(items.iter().any(|title| title.key.id.as_str() == "tt2" && !title.rails.is_empty()), "the page is still marked");
-        assert_eq!(items[1].release.as_deref(), Some("2026"), "the page keeps its metadata");
+        assert_eq!(items[0].release.as_deref(), Some("2026"), "the page keeps its metadata");
+    }
+
+    #[test]
+    fn a_scoped_replacement_takes_only_its_own_titles() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_root(root, &[]).unwrap();
+
+        // One title only the page's rails keep, one a catalogue page also lists.
+        let mut only_ours = title("tt1", "Only Ours");
+        only_ours.rails = vec![RailMark::feed("simkl", "related:tt9")];
+        let mut also_a_catalogue = title("tt2", "Also A Catalogue");
+        also_a_catalogue.rails = vec![RailMark::feed("cinemeta", "movie:cinemeta:top:Popular"), RailMark::feed("simkl", "related:tt9")];
+        append(root, &[only_ours, also_a_catalogue]).unwrap();
+
+        // The next page's keep replaces its own set — and only that.
+        let mut next = title("tt3", "Next Page");
+        next.rails = vec![RailMark::feed("simkl", "related:tt8")];
+        replace_scoped(root, "related:", None, &[next]).unwrap();
+
+        let ids: Vec<String> = stored(root).iter().map(|title| title.key.id.as_str().to_owned()).collect();
+        assert_eq!(ids, ["tt2", "tt3"], "ours goes, the catalogue's stays, the new page lands");
+    }
+
+    #[test]
+    fn a_scoped_replacement_never_takes_the_page_on_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_root(root, &[]).unwrap();
+
+        // The title on screen is one of the previous page's recommendations: the
+        // page's own keep runs with it protected, or the page would read "This
+        // title is gone".
+        let mut on_screen = title("tt9", "On Screen");
+        on_screen.rails = vec![RailMark::feed("simkl", "related:tt1")];
+        append(root, &[on_screen]).unwrap();
+
+        let mut next = title("tt3", "Next Page");
+        next.rails = vec![RailMark::feed("simkl", "related:tt9")];
+        replace_scoped(root, "related:", Some("tt9"), &[next]).unwrap();
+
+        let ids: Vec<String> = stored(root).iter().map(|title| title.key.id.as_str().to_owned()).collect();
+        assert_eq!(ids, ["tt9", "tt3"], "the page looked at stays; the rest of the old set goes");
+    }
+
+    #[test]
+    fn an_opened_title_is_marked_as_the_persons_and_survives_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_root(root, &[]).unwrap();
+
+        let mut scratch = title("tt9", "Opened");
+        scratch.rails = vec![RailMark::feed("simkl", "related:tt1")];
+        append(root, &[scratch]).unwrap();
+        assert!(adopt(root, &title("tt9", "Opened"), RailMark::feed("simkl", "opened")).unwrap());
+
+        let kept = stored(root);
+        assert_eq!(kept[0].rails.as_slice(), [RailMark::feed("simkl", "opened")], "one mark, the opened one");
+
+        // Neither the next page's rails nor a catalogue page take it away.
+        let mut next = title("tt3", "Next Page");
+        next.rails = vec![RailMark::feed("simkl", "related:tt9")];
+        replace_scoped(root, "related:", None, &[next]).unwrap();
+        replace(root, "movie", &[]).unwrap();
+        let ids: Vec<String> = stored(root).iter().map(|title| title.key.id.as_str().to_owned()).collect();
+        assert!(ids.contains(&"tt9".to_owned()), "a title the person opened is theirs: {ids:?}");
+        assert_eq!(stored(root)[0].rails.as_slice(), [RailMark::feed("simkl", "opened")], "and it keeps the mark that says so");
+
+        // A title the root has not got yet is added by the same call.
+        assert!(adopt(root, &title("tt8", "New"), RailMark::feed("simkl", "opened")).unwrap());
+        assert!(stored(root).iter().any(|title| title.key.id.as_str() == "tt8"), "a press that beat the keep still lands");
+        assert!(!adopt(root, &title("tt8", "New"), RailMark::feed("simkl", "opened")).unwrap(), "twice is a no-op");
+    }
+
+    #[test]
+    fn a_kept_rail_title_survives_a_refresh_and_a_catalogue_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_root(root, &[]).unwrap();
+
+        // What a film page's rail keeps: marked as Simkl's list, under a key no
+        // catalogue owns.
+        let mut kept = title("tt2", "Recommended");
+        kept.rails = vec![RailMark::feed("simkl", "related")];
+        append(root, &[kept]).unwrap();
+
+        // A rails refresh drops a title no mark names: this one is marked, so it
+        // stays (that is what keeps a page's tiles drawable).
+        refresh(root, &[], || Ok(Fetched { titles: Vec::new(), answered: Vec::new() })).unwrap();
+        assert!(stored(root).iter().any(|title| title.key.id.as_str() == "tt2"), "the kept title outlives a refresh");
+        assert_eq!(
+            stored(root)
+                .iter()
+                .find(|title| title.key.id.as_str() == "tt2")
+                .and_then(|title| title.rails.first())
+                .map(|mark| mark.as_wire()),
+            Some("related".to_owned()),
+            "and keeps the mark the card's origin comes from"
+        );
+
+        // A catalogue page of that kind replaces its own feed, not this one.
+        let mut page = title("tt3", "A Catalogue Film");
+        page.rails = vec![RailMark::feed("cinemeta", "movie:cinemeta:top:Popular")];
+        replace(root, "movie", &[page]).unwrap();
+        let kept_ids: Vec<String> = stored(root).iter().map(|title| title.key.id.as_str().to_owned()).collect();
+        assert_eq!(kept_ids, ["tt2", "tt3"], "the kept title is not a catalogue's to replace");
     }
 
     #[test]

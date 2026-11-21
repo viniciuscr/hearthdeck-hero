@@ -73,8 +73,12 @@ const LANGUAGES: [(&str, &str); 12] = [
     ("Русский", "ru"),
     ("Türkçe", "tr"),
 ];
-/// `include_adult`: unset is TMDB's own default (adult titles left out), and the
-/// row offers both answers so the choice is explicit.
+/// `include_adult` is a yes/no, so the row is too: **Hide** or **Show**, never an
+/// "All" that would be a second name for Hide. TMDB's own default is to leave
+/// adult titles out, and that is this source's default as well — the row opens on
+/// Hide and the request says so explicitly. The flag only admits the titles TMDB
+/// marks `adult` (its discover index counts them in the low thousands), so Show is
+/// for the people who ask for it, not a switch that changes a page's character.
 const ADULT: [&str; 2] = ["hide", "show"];
 /// A show's production status (`with_status`): the three a browsing person asks
 /// for. The rest (planned, in production, pilot) are TMDB's and not offered.
@@ -145,7 +149,9 @@ impl WatchCatalogSource for Tmdb {
                         id: "adult".into(),
                         label: "adult".into(),
                         values: ADULT.iter().map(|a| (*a).to_owned()).collect(),
-                        required: false,
+                        // Two answers, not three: a "no choice" would just be
+                        // Hide again, so the row is the choice.
+                        required: true,
                     },
                 ];
                 if *kind == "series" {
@@ -225,11 +231,10 @@ impl WatchCatalogSource for Tmdb {
             if let Some(code) = chosen(&request.filters, "language").and_then(language_code) {
                 query.push(("with_original_language".to_owned(), code.to_owned()));
             }
-            match chosen(&request.filters, "adult") {
-                Some("hide") => query.push(("include_adult".to_owned(), "false".to_owned())),
-                Some("show") => query.push(("include_adult".to_owned(), "true".to_owned())),
-                _ => {}
-            }
+            // Hide is TMDB's own default, and what this sends when the choice is
+            // missing (a settings file from before the row existed).
+            let adult = chosen(&request.filters, "adult").is_some_and(|adult| adult == "show");
+            query.push(("include_adult".to_owned(), adult.to_string()));
             if let Some(status) = chosen(&request.filters, "status").and_then(status_number) {
                 query.push(("with_status".to_owned(), status.to_string()));
             }
@@ -681,7 +686,9 @@ mod tests {
         assert_eq!(values("length"), LENGTHS);
         assert_eq!(values("language").len(), LANGUAGES.len());
         assert!(values("language").iter().any(|name| name == "日本語"), "a language reads in its own words");
-        assert_eq!(values("adult"), ADULT);
+        let adult = film.filters.iter().find(|filter| filter.id == "adult").expect("the adult row");
+        assert_eq!(adult.values, ADULT, "two answers only");
+        assert!(adult.required, "a yes/no has no `All`: the row is the choice, and it opens on Hide");
         assert_eq!(catalogs[1].kind, "series", "Watch's vocabulary, not TMDB's");
         let tv_genre = catalogs[1].filters.iter().find(|filter| filter.id == "genre").unwrap();
         assert_eq!(tv_genre.values, ["Drama"], "series have their own genre list");
@@ -775,6 +782,14 @@ mod tests {
         Tmdb::new().catalog(&ctx_with(&http, &credentials), &by_year).unwrap();
         let asked = http.seen.lock().unwrap().clone();
         assert!(asked.iter().any(|url| url.contains("discover/tv") && url.contains("first_air_date_year=2008")), "{asked:?}");
+        assert!(
+            asked.iter().filter(|url| url.contains("discover/tv")).all(|url| url.contains("include_adult=false")),
+            "no adult choice means Hide, and the discover request says so: {asked:?}"
+        );
+        assert!(
+            asked.iter().filter(|url| url.contains("/search/")).all(|url| !url.contains("include_adult")),
+            "a search keeps TMDB's default instead: it hides the browse controls it cannot honour"
+        );
     }
 
     /// A cache in memory, so a test can see what was asked and what was kept.

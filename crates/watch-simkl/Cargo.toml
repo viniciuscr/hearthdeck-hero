@@ -3,7 +3,7 @@ name = "heronite-watch-simkl"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Simkl as a Watch account: the application's client id and the device (PIN) sign-in"
+description = "Simkl for Watch: the client id and PIN sign-in, the tracker, the metadata source and the free airing calendar"
 
 [dependencies]
 log.workspace = true
