@@ -184,10 +184,15 @@ mod tests {
         let named = theme.tabs.iter().any(|tab| tab.name == "All games");
         assert!(named, "Cinema's home tab is the case this covers");
         let watch = validate(theme.clone(), Space::Watch);
-        assert_eq!(watch.tabs[0].name, "Watch");
-        // A name the person chose stays.
-        theme.tabs[0].name = "Films".into();
-        assert_eq!(validate(theme, Space::Watch).tabs[0].name, "Films");
+        let home = watch.tabs.iter().position(|tab| tab.source == "all").expect("the home tab");
+        assert_eq!(watch.tabs[home].name, "Watch");
+        // A name the person chose stays (the home tab is not always the first:
+        // a tab this space cannot show is dropped before it).
+        let at = theme.tabs.iter().position(|tab| tab.source == "all").expect("the preset's home tab");
+        theme.tabs[at].name = "Films".into();
+        let watched = validate(theme, Space::Watch);
+        let home = watched.tabs.iter().find(|tab| tab.source == "all").expect("the home tab");
+        assert_eq!(home.name, "Films");
     }
 
     #[test]

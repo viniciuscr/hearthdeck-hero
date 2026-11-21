@@ -59,11 +59,15 @@ mod tests {
     #[test]
     fn upstream_presets_are_still_part_of_the_theme_list() {
         let all = presets::all();
-        assert!(all.len() >= 7, "the built-in theme registry lost themes");
-        for id in ["minimal", "classic", "cinema", "pulse", "arcade", "hub", "living-room"] {
+        // Upstream offers six and keeps Classic as the base they start from, so
+        // it is not one of them (it is still reachable by id — `prefs::preset`).
+        assert!(all.len() >= 6, "the built-in theme registry lost themes");
+        for id in ["minimal", "cinema", "pulse", "arcade", "hub", "living-room"] {
             assert!(all.iter().any(|theme| theme.id == id), "{id} is missing from the presets");
         }
+        assert!(presets::by_id("classic").is_none(), "Classic is the base, not an offered theme");
+        assert!(crate::fork::watch::prefs::preset("classic").is_some(), "and Watch can still name it");
         let list = crate::console::theme_rows::theme_list(&[]);
-        assert!(list.len() >= 7, "the Theme picker lost the built-in themes");
+        assert!(list.len() >= 6, "the Theme picker lost the built-in themes");
     }
 }

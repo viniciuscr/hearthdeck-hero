@@ -48,7 +48,7 @@ impl Default for Nav {
 }
 
 /// What a Grid shows (its chips and the Filters panel edit it).
-#[derive(Clone, Default, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) struct Filters {
     /// Index in [`SHOW`].
     pub show: usize,
@@ -102,6 +102,24 @@ impl Filters {
     pub(crate) fn from_kept(k: KeptFilters) -> Self {
         let pick = |v: usize, n: usize| if v < n { v } else { 0 };
         Self { show: pick(k.show, SHOW.len()), sort: pick(k.sort, WATCH_SORT.len()), favourites: k.favourites, ..Self::default() }
+    }
+}
+
+impl Default for Filters {
+    /// Every game, the one played last first.
+    fn default() -> Self {
+        Self {
+            show: 0,
+            favourites: false,
+            sort: heronite_data::console_theme::SORT_LAST_PLAYED,
+            status: 0,
+            category: 0,
+            group: 0,
+            // Fork-Seam: F-008 — Watch's three filters, all "any" to start.
+            kind: 0,
+            genre: 0,
+            provider: 0,
+        }
     }
 }
 
@@ -378,7 +396,7 @@ impl CollectionView {
 
     fn grid_cols(&self, window: &Window, panel: bool, rail: bool) -> usize {
         let (tw, _) = self.console_tile_size();
-        let vw = f32::from(crate::ui::content_size(window).width) / kit::scale();
+        let vw = super::body_width(window);
         let taken = if panel { panel_width(vw) + SIDE } else { 0. } + if rail { RAIL } else { 0. };
         (((vw - 2. * SIDE - taken + GAP) / (tw + GAP)).floor() as usize).max(2)
     }
@@ -514,7 +532,7 @@ impl CollectionView {
         };
         let list = div().flex().flex_col().flex_1().min_w_0().child(div().flex_none().children(title_line)).child(body);
         let side = game.filter(|_| panel && !keys.is_empty()).map(|g| {
-            let w = panel_width(f32::from(crate::ui::content_size(window).width) / kit::scale());
+            let w = panel_width(super::body_width(window));
             self.grid_panel(&g, w, window)
         });
         div()

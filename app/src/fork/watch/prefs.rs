@@ -24,10 +24,17 @@ pub fn path(app: &AppPaths) -> PathBuf {
     app.config.join("console-watch.json")
 }
 
+/// The preset a Watch theme id names, including the base: upstream lists the
+/// themes it offers (`presets::all`), and Classic is the base they start from
+/// rather than one of them — so `presets::by_id("classic")` is `None` there.
+pub fn preset(id: &str) -> Option<ConsoleTheme> {
+    presets::by_id(id).or_else(|| (id == BASE).then(presets::classic))
+}
+
 /// The theme a fresh Watch starts from (and what "Reset Watch theme" goes
 /// back to).
 pub fn default_theme() -> ConsoleTheme {
-    present(presets::by_id(BASE).unwrap_or_else(presets::classic), Space::Watch)
+    present(preset(BASE).unwrap_or_else(presets::classic), Space::Watch)
 }
 
 /// The preset id the Watch theme is based on, so the Theme row names it (and
