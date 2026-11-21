@@ -5,4 +5,5 @@
 //! (`../mod.rs`) can compose them and the engine (`../engine.rs`) routes the pad
 //! over them without either knowing the other's internals.
 
+pub(super) mod details;
 pub(super) mod episode;
