@@ -33,6 +33,9 @@ use heronite_images::{ImageRef, Variant};
 use heronite_watch::metadata::{Episode, Fact, Rail, Related, TitleDetails};
 use heronite_watch::progress::WatchedState;
 
+mod engine;
+use engine::{focused_episode, mark_at, mark_route, marks_len, rail_route};
+
 use super::super::watch_personal::Flag;
 use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection, DETAIL_TABS};
 use super::super::CollectionView;
@@ -153,13 +156,6 @@ fn shows_watched(kind: &str, episodes_known: bool) -> bool {
     kind != "series" || episodes_known
 }
 
-/// How many marks the row draws, for a title that has any (the caller asks
-/// [`has_marks`] first): the watched one when the page draws it, then the two
-/// flags. Reads no record, so the pad can ask it on every press.
-fn marks_len(watched: bool) -> usize {
-    usize::from(watched) + Flag::ALL.len()
-}
-
 /// Where the watched mark stands: the film's own record, or the picked
 /// episode's. `None` when the page has nothing to mark at all (a series whose
 /// episodes it does not know). **No record is a mark that is off**, not a mark
@@ -172,13 +168,6 @@ fn watched_state(progress: Option<&heronite_watch::progress::MovieProgress>, pic
         None if kind != "series" => Some(progress.is_some_and(|progress| progress.finished)),
         None => None,
     }
-}
-
-/// The mark at `index` of the row, for a title whose watched mark is (or is not)
-/// drawn: read back from the same order `watch_marks` draws.
-fn mark_at(index: usize, watched: bool) -> Option<Mark> {
-    let row: &[Mark] = if watched { &[Mark::Watched, Mark::Watchlist, Mark::Favourite] } else { &[Mark::Watchlist, Mark::Favourite] };
-    row.get(index).copied()
 }
 
 /// Why a title has no mark: it is in no source's catalogue here, so the page has
@@ -367,12 +356,6 @@ fn episode_row(episode: &Episode, index: usize, state: WatchedState, resuming: b
     Row::action(SharedString::from(format!("episode:{index}")), episode_label(episode)).desc(parts.join(" \u{b7} ")).icon(icon)
 }
 
-/// The episode of the row the list is on, when that row is an episode: the
-/// card follows the focus.
-fn focused_episode(rows: &[Row], focus: usize) -> Option<usize> {
-    rows.get(focus)?.id.strip_prefix("episode:")?.parse().ok()
-}
-
 /// The picked episode above the title's own details: still, code, name, date,
 /// rating and what it is about.
 fn episode_card(episode: &Episode, still: Option<ImageSource>, locale: DateLocale) -> Div {
@@ -412,27 +395,6 @@ fn rail_of(tab: DetailTab) -> Rail {
         DetailTab::Community => Rail::Community,
         _ => Rail::Similar,
     }
-}
-
-/// The presses a click on a rail's card `to` makes: into the card from the list
-/// when it does not hold the pad, along the rail, then A — the same presses the
-/// pad would make, so a click and a press cannot disagree.
-fn rail_route(pane: Pane, focus: usize, to: usize, columns: usize) -> Vec<Pad> {
-    let columns = columns.max(1);
-    let mut pads = Vec::new();
-    if pane != Pane::Card {
-        pads.push(Pad::Left);
-    }
-    // Rows first, then across the row the card is on.
-    let (from_row, to_row) = (focus / columns, to / columns);
-    if to_row > from_row {
-        pads.extend(crate::console::pointer::repeat(Pad::Down, to_row - from_row));
-    } else {
-        pads.extend(crate::console::pointer::repeat(Pad::Up, from_row - to_row));
-    }
-    pads.extend(crate::console::pointer::along(focus % columns, to % columns, Pad::Left, Pad::Right));
-    pads.push(Pad::A);
-    pads
 }
 
 /// The room the details panel really has inside it, design px: the page's
@@ -1257,24 +1219,6 @@ fn watch_later_hint(on_the_shelf: bool) -> Option<Hint> {
 /// the left one (that is the trailer's).
 fn watch_later_press(pad: Pad) -> bool {
     pad == kit::btn_pad(WATCH_LATER_BTN)
-}
-
-/// The presses a click on mark `to` makes, from wherever the pad is: back to
-/// the list, up its rows to the first, then up into the marks row, across it and
-/// A — one route per state of the page, so a click and a press cannot disagree.
-fn mark_route(pane: Pane, list_focus: usize, mark_focus: usize, to: usize) -> Vec<Pad> {
-    let mut pads = Vec::new();
-    if pane != Pane::Marks {
-        // ◀ leaves the card for the list, at the row it was on.
-        if pane == Pane::Card {
-            pads.push(Pad::Left);
-        }
-        // Up the list to its first row, then up once more into the marks.
-        pads.extend(crate::console::pointer::repeat(Pad::Up, list_focus + 1));
-    }
-    pads.extend(crate::console::pointer::along(mark_focus, to, Pad::Left, Pad::Right));
-    pads.push(Pad::A);
-    pads
 }
 
 /// Whether the card has room for two columns of facts (design px, as the
