@@ -78,7 +78,7 @@ pub(in crate::collection::console::watch_page) fn watched_line(
 }
 
 /// The names as one line, `None` when the source listed none.
-pub(in crate::collection::console::watch_page) fn names(values: &[String]) -> Option<String> {
+fn names(values: &[String]) -> Option<String> {
     (!values.is_empty()).then(|| values.join(", "))
 }
 
@@ -134,7 +134,7 @@ pub(in crate::collection::console::watch_page) fn detail_lines(
 
 /// A fact's row name: the ids we know read in the person's language, anything
 /// else as the source wrote it.
-pub(in crate::collection::console::watch_page) fn fact_label(fact: &Fact) -> SharedString {
+fn fact_label(fact: &Fact) -> SharedString {
     match fact.id.as_str() {
         "tagline" => tr!("Tagline").into(),
         "budget" => tr!("Budget").into(),

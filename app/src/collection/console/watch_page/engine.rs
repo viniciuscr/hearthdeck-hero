@@ -17,6 +17,12 @@ use super::Mark;
 /// How many marks the row draws, for a title that has any (the caller asks
 /// `has_marks` first): the watched one when the page draws it, then the two
 /// flags. Reads no record, so the pad can ask it on every press.
+///
+/// The render and the pad must ask this with **one** predicate — today
+/// `shows_watched(kind, episodes_known)` on both sides. A series whose picked
+/// season is empty (so `picked_episode` is `None`) can still make the row draw
+/// the watched mark while the pad predicts two, which is why the count is not
+/// derived inside the render.
 pub(super) fn marks_len(watched: bool) -> usize {
     usize::from(watched) + Flag::ALL.len()
 }

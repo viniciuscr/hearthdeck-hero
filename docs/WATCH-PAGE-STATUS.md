@@ -22,10 +22,21 @@ cargo test -p heronite fork::watch::prefs  # 3 tests
 |---|---|---|
 | 0 — design record, register re-baseline, seam table | **done, reviewed** | `47733049` |
 | 1 — facts view model + film-shaped fixes | **done, reviewed** | `f998c79c`, `4a35719f`, `27437abf`, `a1901289` |
-| 2 — engine + sections | **in progress** | `8fa89b8d`, `b9406d5e`, `711d9c6c`, `97c93b76` |
+| 2 — engine + sections | **done, reviewed** | `8fa89b8d`, `b9406d5e`, `711d9c6c`, `97c93b76`, `5018e018`, `70894e35`, `9d1f5798` |
 | 3 — page styles (Film first) | not started | — |
 | 4 — page config in `console-watch.json` | not started | — |
 | 5 — retire the scaffolding; offer upstream an extension point | not started | — |
+
+Phase 2's six gates are all green and runnable:
+`cargo test -p heronite watch_page` (24), `fork::seams` (8),
+`fork::watch::prefs` (3), `cargo test -p heronite-i18n --test coverage` (2).
+
+One deliberate deviation to keep: `episode_name`/`episode_label`/`episode_desc`
+stay `pub(in …::watch_page)` because `mod.rs`'s test module still exercises them
+through the `series()` and `Selection` fixtures, which belong to the page, not to
+the section. Moving those tests would duplicate the fixture; the functions are
+private otherwise. The reviewer's other items (the `names`/`fact_label`
+visibility, the mark-count doc) are done.
 
 ### What Phase 0 landed
 
