@@ -22,6 +22,140 @@ use crate::icons::Icon;
 use crate::theme;
 use crate::ui::icon;
 
+/// How many times a page's set is written before the page gives up on it.
+const RAILS_TRIES: u8 = 3;
+
+/// What a page's rails should do next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RailStep {
+    /// A keep, or the load it asked for, is in flight.
+    Wait,
+    /// Every title the page has is in the library.
+    Done,
+    /// Keep the page's whole set.
+    Keep { missing: usize },
+    /// Written [`RAILS_TRIES`] times and the library still lacks titles.
+    Failed { missing: usize },
+}
+
+/// Where a page's rails stand: which page, the attempts so far, and the keep or
+/// load in flight.
+///
+/// Extracted from the view so it can be tested without a window: both dead ends
+/// an independent review found lived here — a failed keep that looked like a new
+/// page (so the count restarted on every render), and a failed load that left the
+/// "reload on its way" latch set for ever.
+#[derive(Default)]
+pub(super) struct Rails {
+    /// The page whose titles were asked for, recorded when the page is entered
+    /// and **whatever the outcome**: a failed ask is not a new page.
+    page: Option<String>,
+    tries: u8,
+    /// A keep is on its way out.
+    loading: bool,
+    /// The keep was written and the load it asked for is on its way.
+    waiting: bool,
+    /// The wait (or the failure) has been said once.
+    spoken: bool,
+    failed: bool,
+    /// The ids the projection held when the page was entered: a title the person
+    /// **hid** is still kept, so it must not read as missing for ever.
+    held: std::collections::HashSet<String>,
+}
+
+impl Rails {
+    /// The page in view; `true` when it is a new one (its attempts start over,
+    /// and `held` is read — once per page, never per frame).
+    fn enter(&mut self, page: &str, held: impl FnOnce() -> std::collections::HashSet<String>) -> bool {
+        if self.page.as_deref() == Some(page) {
+            return false;
+        }
+        self.page = Some(page.to_owned());
+        self.tries = 0;
+        self.loading = false;
+        self.waiting = false;
+        self.spoken = false;
+        self.failed = false;
+        self.held = held();
+        true
+    }
+
+    fn step(&self, missing: usize) -> RailStep {
+        if self.loading || self.waiting {
+            return RailStep::Wait;
+        }
+        if missing == 0 {
+            return RailStep::Done;
+        }
+        if self.tries >= RAILS_TRIES {
+            return RailStep::Failed { missing };
+        }
+        RailStep::Keep { missing }
+    }
+
+    /// Says the current wait or failure once: `true` the first time.
+    fn speak(&mut self) -> bool {
+        if self.spoken {
+            return false;
+        }
+        self.spoken = true;
+        true
+    }
+
+    fn spoke(&self) -> bool {
+        self.spoken
+    }
+
+    fn say(&mut self) {
+        self.spoken = true;
+    }
+
+    /// A keep is on its way out (one attempt counted).
+    fn began(&mut self) {
+        self.tries = self.tries.saturating_add(1);
+        self.loading = true;
+        self.failed = false;
+        self.spoken = false;
+    }
+
+    /// The keep was written; the load it asked for is on its way.
+    fn kept(&mut self) {
+        self.loading = false;
+        self.waiting = true;
+    }
+
+    fn keep_failed(&mut self) {
+        self.loading = false;
+        self.failed = true;
+    }
+
+    /// The load landed: a still-missing title may be asked for again.
+    fn reloaded(&mut self) {
+        self.waiting = false;
+        self.spoken = false;
+    }
+
+    /// The load the keep asked for failed: ask again on the next render instead
+    /// of waiting for a load that will never come.
+    fn reload_lost(&mut self) {
+        self.waiting = false;
+        self.spoken = false;
+    }
+
+    /// Whether this page is waiting for a load it asked for.
+    fn was_waiting(&self) -> bool {
+        self.waiting
+    }
+
+    fn failed(&self) -> bool {
+        self.failed
+    }
+
+    fn held(&self) -> &std::collections::HashSet<String> {
+        &self.held
+    }
+}
+
 /// What the detail page knows about the focused title's sources.
 #[derive(Default)]
 pub(super) struct WatchPlayback {
@@ -60,18 +194,8 @@ pub(super) struct WatchPlayback {
     /// A title a rail's card opened, by IMDb id: the page turns to it once the
     /// library holds it (the press adds it and reloads).
     opening: Option<String>,
-    /// The page whose rail titles are being kept, and where that keep stands:
-    /// a rail asks once, not once per frame (and gives up rather than looping).
-    rails_page: Option<String>,
-    rails_tries: u8,
-    rails_loading: bool,
-    /// The keep was written and a reload is on its way: asking again until it
-    /// lands is what made the same set be kept twice.
-    rails_waiting_reload: bool,
-    /// The wait has been said once: a render that arrives while the load is in
-    /// flight must not repeat it per frame.
-    rails_spoke: bool,
-    rails_failed: bool,
+    /// Where the page's rails stand (see [`Rails`]).
+    rails: Rails,
 }
 
 impl WatchPlayback {
@@ -346,131 +470,125 @@ impl CollectionView {
             log::debug!(target: "heronite_app", "watch rails: no page id to keep titles for");
             return;
         };
-        if self.watch.rails_loading || self.watch.rails_waiting_reload {
-            if !self.watch.rails_spoke {
-                self.watch.rails_spoke = true;
-                log::debug!(target: "heronite_app", "watch rails: {page} is already being kept or reloading");
-            }
-            return;
-        }
-        // A new page starts its own count: the retry bound is per page, not per
-        // run, or a page that could not be kept would never be tried again.
-        if self.watch.rails_page.as_deref() != Some(page.as_str()) {
-            self.watch.rails_tries = 0;
-            self.watch.rails_failed = false;
+        let app = self.app_paths.clone();
+        // The page is recorded **before** any ask, whatever the outcome: a keep
+        // that fails must not look like a new page on the next render, which is
+        // what reset the attempt count and hid the failure the card draws.
+        if self.watch.rails.enter(&page, || heronite_watch::catalog::kept_ids(&app)) {
+            log::info!(target: "heronite_app", "watch rails: {page} is in view");
         }
         let rails = details.similar.len() + details.recommended.len();
-        let known: std::collections::HashSet<String> =
-            self.lib.iter().flat_map(|lib| lib.games.iter()).map(|game| crate::fork::watch::sources::id(game).to_owned()).collect();
+        // What the library holds, hidden titles included: a title the person hid
+        // would otherwise read as missing for ever.
+        let known: std::collections::HashSet<String> = self
+            .lib
+            .iter()
+            .flat_map(|lib| lib.games.iter())
+            .map(|game| crate::fork::watch::sources::id(game).to_owned())
+            .chain(self.watch.rails.held().iter().cloned())
+            .collect();
         // The **whole** set, never only what looks missing: the keep replaces the
-        // page's scoped feed, so handing it a subset deletes the rest — which
-        // came back as "missing" on the next reload, and that is a loop.
+        // page's scoped feed, so handing it a subset deletes the rest — which came
+        // back as "missing" on the next reload, and that is a loop.
         let titles: Vec<heronite_watch::types::Title> =
             details.similar.iter().chain(details.recommended.iter()).map(heronite_watch::metadata::related_title).collect();
         let missing =
             details.similar.iter().chain(details.recommended.iter()).filter(|related| !known.contains(related.id.as_str())).count();
-        if missing == 0 {
-            if self.watch.rails_page.as_deref() != Some(page.as_str()) {
-                log::info!(target: "heronite_app", "watch rails: {page} already has all {rails} titles in the library");
-                self.watch.rails_page = Some(page);
-                self.watch.rails_failed = false;
-            }
-            return;
-        }
-        if self.watch.rails_tries >= 3 {
-            // The set was written and the load still does not hold it: say so
-            // instead of keeping it again and again.
-            if !self.watch.rails_failed {
-                log::warn!(
-                    target: "heronite_app",
-                    "watch rails: {page} still misses {missing} of {rails} titles after {} keeps; giving up",
-                    self.watch.rails_tries
-                );
-                self.watch.rails_failed = true;
-            }
-            return;
-        }
-        log::info!(
-            target: "heronite_app",
-            "watch rails: keeping {rails} titles for {page} ({missing} missing, similar {}, recommended {})",
-            details.similar.len(),
-            details.recommended.len()
-        );
-        self.watch.rails_tries = self.watch.rails_tries.saturating_add(1);
-        self.watch.rails_loading = true;
-        self.watch.rails_failed = false;
-        self.watch.rails_spoke = false;
-        let app = self.app_paths.clone();
-        cx.spawn(async move |this, cx| {
-            let asking = page.clone();
-            let result = cx.background_spawn(async move { heronite_watch::catalog::keep_related(&app, &asking, titles) }).await;
-            this.update(cx, |this, cx| {
-                this.watch.rails_loading = false;
-                match result {
-                    Ok(added) => {
-                        log::info!(target: "heronite_app", "watch rails: wrote {added} title(s) for {page}, reloading");
-                        this.watch.rails_page = Some(page);
-                        this.watch.rails_waiting_reload = true;
-                        // The reload is what turns them into library titles: the
-                        // page's tiles take their art from its cover chains.
-                        this.reload(cx);
-                    }
-                    Err(error) => {
-                        log::warn!(target: "heronite_app", "watch rails: keeping {page}'s titles failed: {error:#}");
-                        // The page is marked as asked-for even when the ask failed:
-                        // otherwise the per-page reset below runs on every render,
-                        // zeroing the retry count and clearing the failure the rail
-                        // draws — an endless retry with no way out.
-                        this.watch.rails_page = Some(page);
-                        this.watch.rails_failed = true;
-                    }
+        match self.watch.rails.step(missing) {
+            RailStep::Wait => {
+                if self.watch.rails.speak() {
+                    log::debug!(target: "heronite_app", "watch rails: {page} is being kept or reloading");
                 }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
+            }
+            RailStep::Done => {
+                if self.watch.rails.speak() {
+                    log::info!(target: "heronite_app", "watch rails: {page} has all {rails} titles in the library");
+                }
+            }
+            RailStep::Failed { missing } => {
+                if self.watch.rails.speak() {
+                    log::warn!(
+                        target: "heronite_app",
+                        "watch rails: {page} still misses {missing} of {rails} titles after {RAILS_TRIES} keeps; giving up"
+                    );
+                }
+            }
+            RailStep::Keep { missing } => {
+                log::info!(
+                    target: "heronite_app",
+                    "watch rails: keeping {rails} titles for {page} ({missing} missing, similar {}, recommended {})",
+                    details.similar.len(),
+                    details.recommended.len()
+                );
+                self.watch.rails.began();
+                let asking = page.clone();
+                cx.spawn(async move |this, cx| {
+                    let result = cx.background_spawn(async move { heronite_watch::catalog::keep_related(&app, &asking, titles) }).await;
+                    this.update(cx, |this, cx| {
+                        match result {
+                            Ok(added) => {
+                                log::info!(target: "heronite_app", "watch rails: wrote {added} title(s) for {page}, reloading");
+                                this.watch.rails.kept();
+                                // The reload is what turns them into library
+                                // titles: a tile takes its art from the library.
+                                this.reload(cx);
+                            }
+                            Err(error) => {
+                                log::warn!(target: "heronite_app", "watch rails: keeping {page}'s titles failed: {error:#}");
+                                this.watch.rails.keep_failed();
+                            }
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+        }
     }
 
     /// Whether that ask failed (the rail says so instead of waiting for ever).
     pub(super) fn watch_rails_failed(&self) -> bool {
-        self.watch.rails_failed
+        self.watch.rails.failed()
     }
 
     /// Whether this wait has already been said (renders must not repeat it).
     pub(super) fn watch_rails_spoke(&self) -> bool {
-        self.watch.rails_spoke
+        self.watch.rails.spoke()
     }
 
     /// Says it: the next render of this wait is silent.
     pub(super) fn watch_rails_say(&mut self) {
-        self.watch.rails_spoke = true;
+        self.watch.rails.say();
     }
 
-    /// The load the keep asked for failed: clear the latch so the next render may
-    /// ask again (the retry bound decides when to stop), instead of waiting for a
-    /// load that will never come.
+    /// The load the keep asked for failed: the next render may ask again (the
+    /// bound decides when to stop), instead of waiting for a load that will never
+    /// come.
     pub(super) fn watch_rails_reload_failed(&mut self) {
-        if !self.watch.rails_waiting_reload {
+        if !self.watch.rails.was_waiting() {
             return;
         }
-        self.watch.rails_waiting_reload = false;
-        self.watch.rails_spoke = false;
+        self.watch.rails.reload_lost();
         log::warn!(target: "heronite_app", "watch rails: the reload the keep asked for failed; the page asks again");
     }
 
     /// A reload landed: say what the library holds of the page's rails, so the
     /// next keep is asked for only when something is really missing.
     pub(super) fn watch_rails_reloaded(&mut self) {
-        if !self.watch.rails_waiting_reload {
+        if !self.watch.rails.was_waiting() {
             return;
         }
-        self.watch.rails_waiting_reload = false;
-        // The next keep may say its wait again.
-        self.watch.rails_spoke = false;
+        self.watch.rails.reloaded();
         let TitleState::Ready(details) = &self.watch.info.state else { return };
-        let known: std::collections::HashSet<String> =
-            self.lib.iter().flat_map(|lib| lib.games.iter()).map(|game| crate::fork::watch::sources::id(game).to_owned()).collect();
+        // The projection counts too: a hidden title is kept, not missing.
+        let known: std::collections::HashSet<String> = self
+            .lib
+            .iter()
+            .flat_map(|lib| lib.games.iter())
+            .map(|game| crate::fork::watch::sources::id(game).to_owned())
+            .chain(self.watch.rails.held().iter().cloned())
+            .collect();
         let total = details.similar.len() + details.recommended.len();
         let found = details.similar.iter().chain(details.recommended.iter()).filter(|related| known.contains(related.id.as_str())).count();
         let page = self.watch_page_id().unwrap_or_default();
@@ -1466,5 +1584,81 @@ mod tests {
         assert!(matches!(trailer_of(Some("a"), "a", &TitleState::Missing), Trailer::NotFound));
         assert!(matches!(trailer_of(Some("a"), "a", &TitleState::Failed), Trailer::Unavailable));
         assert!(matches!(trailer_of(Some("a"), "a", &TitleState::Loading), Trailer::Unasked));
+    }
+}
+
+/// The rails state machine, without a window: both dead ends an independent
+/// review found lived here, and neither was covered by a test.
+#[cfg(test)]
+mod rails_tests {
+    use super::*;
+    use core::prelude::v1::test;
+    use std::collections::HashSet;
+
+    #[test]
+    fn a_page_that_cannot_be_kept_gives_up_instead_of_retrying_for_ever() {
+        let mut rails = Rails::default();
+        assert!(rails.enter("tt1", HashSet::new));
+        for _ in 0..RAILS_TRIES {
+            assert_eq!(rails.step(2), RailStep::Keep { missing: 2 });
+            rails.began();
+            assert_eq!(rails.step(2), RailStep::Wait, "a keep in flight is not asked for again");
+            rails.kept();
+            assert_eq!(rails.step(2), RailStep::Wait, "the load it asked for is still on its way");
+            rails.reloaded();
+        }
+        assert_eq!(rails.step(2), RailStep::Failed { missing: 2 }, "the bound is reachable");
+        assert!(!rails.enter("tt1", HashSet::new), "the same page is not a new one");
+        assert_eq!(rails.step(2), RailStep::Failed { missing: 2 }, "and the failure stands");
+        assert!(rails.enter("tt2", HashSet::new), "another page starts its own count");
+        assert_eq!(rails.step(2), RailStep::Keep { missing: 2 });
+    }
+
+    #[test]
+    fn a_failed_keep_is_recorded_so_the_count_does_not_restart() {
+        // The blocker: a failed keep never recorded its page, so the next render
+        // looked like a new one and the attempt count went back to zero.
+        let mut rails = Rails::default();
+        rails.enter("tt1", HashSet::new);
+        rails.began();
+        rails.keep_failed();
+        assert!(rails.failed());
+        assert!(!rails.enter("tt1", HashSet::new), "the failure is not wiped by the next render");
+        assert!(rails.failed());
+        assert_eq!(rails.step(1), RailStep::Keep { missing: 1 }, "one more attempt is still allowed");
+    }
+
+    #[test]
+    fn a_lost_reload_lets_the_page_ask_again() {
+        // The other blocker: a failed load left the wait set for ever.
+        let mut rails = Rails::default();
+        rails.enter("tt1", HashSet::new);
+        rails.began();
+        rails.kept();
+        assert!(rails.was_waiting());
+        assert_eq!(rails.step(1), RailStep::Wait);
+        rails.reload_lost();
+        assert!(!rails.was_waiting(), "the page asks again instead of waiting for ever");
+        assert_eq!(rails.step(1), RailStep::Keep { missing: 1 });
+    }
+
+    #[test]
+    fn a_page_with_every_title_kept_is_done() {
+        let mut rails = Rails::default();
+        assert!(rails.enter("tt1", || ["tt2".to_owned()].into_iter().collect()));
+        assert!(rails.held().contains("tt2"), "the page reads what the projection held");
+        assert_eq!(rails.step(0), RailStep::Done);
+        assert!(!rails.enter("tt1", HashSet::new), "and asking again does not re-read it");
+    }
+
+    #[test]
+    fn a_wait_is_said_once() {
+        let mut rails = Rails::default();
+        rails.enter("tt1", HashSet::new);
+        rails.began();
+        assert!(rails.speak(), "the first render says it");
+        assert!(!rails.speak(), "the next one does not");
+        rails.say();
+        assert!(rails.spoke());
     }
 }

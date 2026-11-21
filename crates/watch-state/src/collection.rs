@@ -10,7 +10,8 @@
 //! here, beside the encode that has to match it.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context, Result};
 use chrono::SecondsFormat;
@@ -26,6 +27,9 @@ pub const ROOT: &str = "watch-library";
 
 /// The mark a catalog page leaves in its records, so a rails refresh keeps them.
 pub const CATALOG_KEY: &str = "watchCatalog";
+/// Every mark a title carries, in the order they were given (the first is also
+/// [`CATALOG_KEY`], for a reader that knows only the one).
+pub const CATALOGS_KEY: &str = "watchCatalogs";
 
 /// Where the provider left off, how long the title is and whether it is
 /// finished: the three fields `timeWatched` does not say (it stays 0 for a title
@@ -66,28 +70,32 @@ pub fn refresh<F>(root: &Path, rails: &[String], fetch: F) -> Result<()>
 where
     F: FnOnce() -> Result<Fetched>,
 {
+    // The fetch happens **outside** the lock: a rail is network work, and holding
+    // the root while it runs would hold every other writer for its duration.
     let Fetched { titles: mut fresh, answered } = fetch()?;
-    let kept: Vec<Title> = stored(root).into_iter().filter(|title| kept(title, rails, &answered)).collect();
-    // The order on screen is the file's, not the response's: a title the library
-    // already holds keeps its place and the fresh observation only updates it,
-    // and whatever is new is appended. A rail is a live feed — its order can
-    // change between two fetches — and re-sorting what the person is scrolling
-    // is exactly what a grid must never do.
-    let mut ordered = Vec::with_capacity(kept.len() + fresh.len());
-    for old in kept {
-        match fresh.iter().position(|title| title.key == old.key) {
-            Some(at) => {
-                let mut title = fresh.remove(at);
-                // The fresh card wins where it knows a field; the file says where
-                // it sits, and its rails and providers are kept.
-                let _ = title.merge(old);
-                ordered.push(title);
+    with_lock(root, || {
+        let kept: Vec<Title> = stored(root).into_iter().filter(|title| kept(title, rails, &answered)).collect();
+        // The order on screen is the file's, not the response's: a title the library
+        // already holds keeps its place and the fresh observation only updates it,
+        // and whatever is new is appended. A rail is a live feed — its order can
+        // change between two fetches — and re-sorting what the person is scrolling
+        // is exactly what a grid must never do.
+        let mut ordered = Vec::with_capacity(kept.len() + fresh.len());
+        for old in kept {
+            match fresh.iter().position(|title| title.key == old.key) {
+                Some(at) => {
+                    let mut title = fresh.remove(at);
+                    // The fresh card wins where it knows a field; the file says where
+                    // it sits, and its rails and providers are kept.
+                    let _ = title.merge(old);
+                    ordered.push(title);
+                }
+                None => ordered.push(old),
             }
-            None => ordered.push(old),
         }
-    }
-    ordered.append(&mut fresh);
-    write_root(root, &ordered)
+        ordered.append(&mut fresh);
+        write_root(root, &ordered)
+    })
 }
 
 /// Whether a stored title outlives the refresh that is writing now: a catalogue
@@ -102,19 +110,46 @@ fn kept(title: &Title, rails: &[String], answered: &[String]) -> bool {
     }
 }
 
+/// The lock of one projection root.
+///
+/// Every write here is a read-modify-write over one file, and `json_store::write`
+/// takes no lock of its own: a page's keep and a press's adoption running at once
+/// would each write a set that lacks the other's title, and one of the two would
+/// be lost. Per root, so two libraries never wait for each other.
+fn lock_for(root: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: Mutex<Vec<(PathBuf, Arc<Mutex<()>>)>> = Mutex::new(Vec::new());
+    let mut locks = LOCKS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((_, lock)) = locks.iter().find(|(path, _)| path == root) {
+        return Arc::clone(lock);
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.push((root.to_path_buf(), Arc::clone(&lock)));
+    lock
+}
+
+/// Runs `body` holding the root's lock: the read, the change and the write are one
+/// step for every other writer.
+fn with_lock<T>(root: &Path, body: impl FnOnce() -> Result<T>) -> Result<T> {
+    let lock = lock_for(root);
+    let _held = lock.lock().unwrap_or_else(PoisonError::into_inner);
+    body()
+}
+
 /// Merges a page of a catalog into the root's library, leaving the rails and
 /// the pages before it as they are. Returns how many items were new.
 pub fn append(root: &Path, titles: &[Title]) -> Result<usize> {
-    let mut all = stored(root);
-    let before = all.len();
-    for title in titles {
-        merge(&mut all, title.clone());
-    }
-    let added = all.len() - before;
-    if added > 0 {
-        write_root(root, &all)?;
-    }
-    Ok(added)
+    with_lock(root, || {
+        let mut all = stored(root);
+        let before = all.len();
+        for title in titles {
+            merge(&mut all, title.clone());
+        }
+        let added = all.len() - before;
+        if added > 0 {
+            write_root(root, &all)?;
+        }
+        Ok(added)
+    })
 }
 
 /// Replaces the catalog pages of one kind with `titles`, in a single write: a
@@ -134,6 +169,11 @@ pub fn replace(root: &Path, kind: &str, titles: &[Title]) -> Result<usize> {
 /// catalogue page also lists (it carries that page's mark too) is theirs, and a
 /// recommendation list must not take it away.
 pub fn replace_scoped(root: &Path, prefix: &str, keep: Option<&str>, titles: &[Title]) -> Result<usize> {
+    with_lock(root, || replace_scoped_locked(root, prefix, keep, titles))
+}
+
+/// [`replace_scoped`] under the root's lock already held.
+fn replace_scoped_locked(root: &Path, prefix: &str, keep: Option<&str>, titles: &[Title]) -> Result<usize> {
     let mut all: Vec<Title> = stored(root)
         .into_iter()
         .filter(|title| {
@@ -178,20 +218,22 @@ fn merge(titles: &mut Vec<Title>, title: Title) {
 /// The title is added when the root has not got it yet (a press that beat the
 /// keep), so one call covers both. Returns whether anything changed.
 pub fn adopt(root: &Path, title: &Title, mark: RailMark) -> Result<bool> {
-    let mut all = stored(root);
-    match all.iter_mut().find(|held| held.key == title.key) {
-        Some(held) => {
-            if held.rails.as_slice() == std::slice::from_ref(&mark) {
-                return Ok(false);
+    with_lock(root, || {
+        let mut all = stored(root);
+        match all.iter_mut().find(|held| held.key == title.key) {
+            Some(held) => {
+                if held.rails.as_slice() == std::slice::from_ref(&mark) {
+                    return Ok(false);
+                }
+                held.rails = vec![mark];
             }
-            held.rails = vec![mark];
+            None => {
+                all.push(title.clone().listed(mark));
+            }
         }
-        None => {
-            all.push(title.clone().listed(mark));
-        }
-    }
-    write_root(root, &all)?;
-    Ok(true)
+        write_root(root, &all)?;
+        Ok(true)
+    })
 }
 
 /// The titles a root holds now, read back from the layouts [`write_root`] wrote.
@@ -265,6 +307,21 @@ fn stored_item(game: &Value, metadata: &Value, timestamps: &Value) -> Option<Mov
             .unwrap_or_default(),
         top: extra.get("stremioTop").and_then(Value::as_bool).unwrap_or(false),
         catalog: text(extra.get(CATALOG_KEY)),
+        catalogs: extra
+            .get(CATALOGS_KEY)
+            .and_then(Value::as_array)
+            .map(|marks| {
+                marks
+                    .iter()
+                    .filter_map(|mark| {
+                        Some(heronite_watch_core::types::WireMark {
+                            source: mark.get("source").and_then(Value::as_str).unwrap_or_default().to_owned(),
+                            catalog: mark.get("catalog").and_then(Value::as_str)?.to_owned(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         runtime: text(extra.get(RUNTIME_KEY)),
         released: text(extra.get(RELEASED_KEY)),
         position_ms: extra.get(POSITION_KEY).and_then(Value::as_u64).unwrap_or(0),
@@ -306,6 +363,17 @@ fn record_of(title: &Title, provider: Option<&ProviderId>, with_watch: bool) -> 
         genres: title.genres.clone(),
         top: title.top,
         catalog: title.rails.first().map(RailMark::as_wire),
+        catalogs: title
+            .rails
+            .iter()
+            .map(|mark| heronite_watch_core::types::WireMark {
+                source: match mark {
+                    RailMark::Feed { source, .. } => source.clone(),
+                    RailMark::Collection(_) => String::new(),
+                },
+                catalog: mark.as_wire(),
+            })
+            .collect(),
         last_watched: watched.and_then(|seen| seen.at).map(stamp),
         minutes_played: watched.map_or(0.0, |seen| seen.minutes),
         position_ms: watched.map_or(0, |seen| seen.position_ms),
@@ -503,6 +571,7 @@ fn game_json(record: &MovieItem, probes: &std::collections::HashMap<String, crat
             "stremioType": kind,
             "stremioTop": record.top,
             CATALOG_KEY: &record.catalog,
+            CATALOGS_KEY: &record.catalogs,
             "provider": owner,
             "watchId": &record.id,
             "imported": imported,
@@ -610,6 +679,26 @@ mod tests {
         assert_eq!(ids(&items), ["tt2", "tt3"], "the page keeps its place; the rails bring a new title after it");
         assert!(items.iter().any(|title| title.key.id.as_str() == "tt2" && !title.rails.is_empty()), "the page is still marked");
         assert_eq!(items[0].release.as_deref(), Some("2026"), "the page keeps its metadata");
+    }
+
+    #[test]
+    fn the_projection_keeps_every_mark_a_title_carries() {
+        // A title a catalogue page lists **and** a film page's rails keep carries
+        // two marks. Writing only the first dropped the other, so a title the
+        // person was looking at lost its catalogue mark and the next keep deleted
+        // the catalogue's copy.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_root(root, &[]).unwrap();
+
+        let mut both = title("tt9", "Both");
+        both.rails = vec![RailMark::feed("cinemeta", "movie:top:Popular"), RailMark::feed("simkl", "related:tt1")];
+        append(root, &[both]).unwrap();
+
+        let held = stored(root);
+        assert_eq!(held[0].rails.len(), 2, "both marks come back: {:?}", held[0].rails);
+        assert_eq!(held[0].rails[0], RailMark::feed("cinemeta", "movie:top:Popular"));
+        assert_eq!(held[0].rails[1], RailMark::feed("simkl", "related:tt1"));
     }
 
     #[test]

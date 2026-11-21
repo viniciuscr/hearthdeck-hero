@@ -210,6 +210,20 @@ pub fn title_of_game(game: &CollectionGame) -> Title {
         genres: game.metadata.as_ref().map(|metadata| metadata.genres.clone()).unwrap_or_default(),
         top: field("stremioTop").and_then(serde_json::Value::as_bool).unwrap_or(false),
         catalog: field(collection::CATALOG_KEY).and_then(serde_json::Value::as_str).map(str::to_owned),
+        catalogs: field(collection::CATALOGS_KEY)
+            .and_then(serde_json::Value::as_array)
+            .map(|marks| {
+                marks
+                    .iter()
+                    .filter_map(|mark| {
+                        Some(heronite_watch_core::types::WireMark {
+                            source: mark.get("source").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned(),
+                            catalog: mark.get("catalog").and_then(serde_json::Value::as_str)?.to_owned(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         last_watched: game.last_played.clone(),
         minutes_played: game.playtime_minutes as f64,
         position_ms: field(collection::POSITION_KEY).and_then(serde_json::Value::as_u64).unwrap_or(0),
@@ -309,7 +323,24 @@ pub fn library(app: &AppPaths, include_hidden: bool) -> Result<Library> {
         let last = LAST_REFRESH.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         refresh_due(last.as_ref(), &ids, record)
     };
-    if due {
+    // One refresh at a time: a page landing, a mark and a rail's keep can each
+    // start a load, and each would otherwise fetch every rail again (Simkl's
+    // calendar is 2.5 MB). A load that finds a refresh running reads the file and
+    // lets the refresh it waited for stand.
+    static REFRESHING: Mutex<()> = Mutex::new(());
+    let running = if due {
+        match REFRESHING.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+    } else {
+        None
+    };
+    if due && running.is_none() {
+        log::debug!("movies provider: a refresh is already running; reading the file");
+    }
+    if let Some(_refreshing) = running {
         match collection::refresh(&root, &ids, || items(&http, app, &rails)) {
             Ok(()) => {
                 let mut last = LAST_REFRESH.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

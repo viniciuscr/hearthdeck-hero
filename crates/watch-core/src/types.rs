@@ -14,6 +14,16 @@ pub enum PosterShape {
     Square,
 }
 
+/// One mark of a record, as the projection writes it: the wire (`catalog`) and
+/// the source that listed the title (empty for a collection's mark, which names
+/// itself in the wire).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireMark {
+    #[serde(default)]
+    pub source: String,
+    pub catalog: String,
+}
+
 /// A catalog or meta item, normalized from Cinemeta or an installed addon.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct MovieItem {
@@ -46,6 +56,13 @@ pub struct MovieItem {
     /// rail: a rails refresh keeps these.
     #[serde(default)]
     pub catalog: Option<String>,
+    /// **Every** mark the title carried, each with the source that made it. A
+    /// title can be listed by a catalogue page and kept by a film page's rails;
+    /// a record with one mark lost the other, and the next keep deleted the
+    /// catalogue's copy. `catalog` stays as the first of these, for a reader that
+    /// knows only the one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub catalogs: Vec<WireMark>,
     /// Stremio's last watch, for the “Continue watching” rail.
     #[serde(default)]
     pub last_watched: Option<String>,

@@ -25,10 +25,13 @@ pub use heronite_watch_core::metadata::{
 /// stamps on its titles (Stremio), because a rail is a list of things to open
 /// here and nothing else here can play them.
 pub fn related_title(related: &Related) -> heronite_watch_core::title::Title {
-    use heronite_watch_core::title::{Art, ProviderId, Title, TitleId, TitleKey, TitleKind};
+    use heronite_watch_core::title::{Art, ProviderId, Title, TitleKey};
 
     let provider = ProviderId::declared("stremio");
-    let mut title = Title::new(TitleKey::new(TitleKind::of(&related.kind), TitleId::imdb(&related.id)), &related.name).plays(provider);
+    // The key the projection reads back (`TitleKey::of_item` → `of_parts`): an
+    // IMDb id stays an IMDb id, and anything else is that provider's own id — an
+    // `imdb` key built from a non-IMDb id could never be merged or adopted.
+    let mut title = Title::new(TitleKey::of_source(&related.kind, &related.id, &provider), &related.name).plays(provider);
     title.release = related.year.clone();
     title.art = Art { poster: related.poster.clone(), background: related.background.clone(), logo: None };
     title
@@ -93,5 +96,29 @@ pub fn details_with(http: &dyn Transport, app: &AppPaths, title: &TitleRef) -> R
             }
             None => Err(error),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use heronite_watch_core::metadata::Related;
+    use heronite_watch_core::title::{ProviderId, TitleKey};
+
+    /// The key a rail's card is built with must be the key the projection reads
+    /// back, or the title it keeps can never be found, merged or adopted.
+    #[test]
+    fn a_related_title_is_keyed_the_way_the_projection_reads_it_back() {
+        let related = |id: &str| Related { id: id.into(), kind: "series".into(), name: id.into(), ..Related::default() };
+        let stremio = ProviderId::declared("stremio");
+
+        assert_eq!(related_title(&related("tt1234567")).key, TitleKey::of_source("series", "tt1234567", &stremio));
+        let other = related_title(&related("kitsu:42"));
+        assert_eq!(other.key, TitleKey::of_source("series", "kitsu:42", &stremio));
+        assert_ne!(
+            other.key.id,
+            heronite_watch_core::title::TitleId::imdb("kitsu:42"),
+            "a non-IMDb id stays in its provider's space, which is the shape the projection reads back"
+        );
     }
 }

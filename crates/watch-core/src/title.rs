@@ -334,7 +334,14 @@ impl Title {
             art: Art { poster: item.poster.clone(), background: item.background.clone(), logo: item.logo.clone() },
             description: item.description.clone(),
             genres: item.genres.clone(),
-            rails: item.catalog.as_deref().map(|wire| RailMark::from_wire(wire, &item.addon)).into_iter().collect(),
+            // Every mark the record carries, each with the source that made it;
+            // a record written before the list existed has the one, and still
+            // reads (its single `addon` is that mark's source).
+            rails: if item.catalogs.is_empty() {
+                item.catalog.as_deref().map(|wire| RailMark::from_wire(wire, &item.addon)).into_iter().collect()
+            } else {
+                item.catalogs.iter().map(|mark| RailMark::from_wire(&mark.catalog, &mark.source)).collect()
+            },
             top: item.top,
             providers: ProviderId::new(&item.provider).into_iter().collect(),
             watched: watched_of(item),

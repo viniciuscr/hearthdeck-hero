@@ -136,6 +136,16 @@ pub fn keep_related(app: &AppPaths, page: &str, titles: Vec<heronite_watch_core:
     Ok(added)
 }
 
+/// The ids the projection holds, **whatever the screens show**: a title the person
+/// hid is still kept, so a page's rails must not count it as missing — they would
+/// ask for it again on every render and never be satisfied.
+pub fn kept_ids(app: &AppPaths) -> std::collections::HashSet<String> {
+    heronite_watch_state::collection::titles(&app.cache.join(heronite_watch_state::collection::ROOT))
+        .into_iter()
+        .map(|title| title.key.id.as_str().to_owned())
+        .collect()
+}
+
 /// A title the person opened from a page's rails: it stops being scratch. Its
 /// mark becomes `simkl/opened`, which no replacement owns — not the page's feed
 /// (the next page takes that away) and not a catalogue's (a tab's replacement
