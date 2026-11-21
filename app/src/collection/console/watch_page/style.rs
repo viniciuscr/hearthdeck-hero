@@ -21,10 +21,19 @@ pub(in crate::collection::console::watch_page) enum PageStyle {
 }
 
 impl PageStyle {
-    /// The arrangement drawn now. One place, so Phase 4 can read the space's
-    /// choice (`console-watch.json`) without the page asking twice.
-    pub(in crate::collection::console::watch_page) fn current() -> Self {
-        Self::Film
+    /// The arrangement drawn now: the space's stored choice (`console-watch.json`,
+    /// read from the Watch prefs whatever space is on screen), or Film when the
+    /// file says nothing this build knows.
+    pub(in crate::collection::console::watch_page) fn current(app: &heronite_data::paths::AppPaths) -> Self {
+        let prefs = crate::console::themes::prefs_for(app, crate::collection::Space::Watch);
+        Self::from_config(crate::fork::watch::page_config::read(&prefs).style)
+    }
+
+    /// The view's reading of the stored choice.
+    fn from_config(style: crate::fork::watch::page_config::PageStyle) -> Self {
+        match style {
+            crate::fork::watch::page_config::PageStyle::Film => PageStyle::Film,
+        }
     }
 }
 
@@ -33,8 +42,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn film_is_the_arrangement_the_page_draws() {
-        assert_eq!(PageStyle::current(), PageStyle::Film);
+    fn film_is_the_arrangement_every_stored_choice_reads_as() {
+        use crate::fork::watch::page_config::PageStyle as Stored;
+        for choice in Stored::ALL {
+            assert_eq!(PageStyle::from_config(*choice), PageStyle::Film, "{} does not draw Film", choice.as_str());
+        }
         assert_eq!(PageStyle::default(), PageStyle::Film, "a fresh page draws Film");
     }
 }

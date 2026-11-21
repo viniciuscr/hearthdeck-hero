@@ -7,7 +7,7 @@
 //! the Games file is never written from here.
 
 use heronite_data::console_theme::ConsolePrefs;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 /// The key this configuration lives under in `extra`.
 const KEY: &str = "watchPage";
@@ -23,8 +23,10 @@ pub enum PageStyle {
 }
 
 impl PageStyle {
+    #[cfg(test)]
     pub const ALL: &'static [PageStyle] = &[PageStyle::Film];
 
+    #[cfg(test)]
     pub fn as_str(self) -> &'static str {
         match self {
             PageStyle::Film => "film",
@@ -55,10 +57,11 @@ pub fn read(prefs: &ConsolePrefs) -> PageConfig {
 
 /// Writes the configuration into the prefs, keeping every other key `extra`
 /// carries (another build's settings survive a round trip).
+#[cfg(test)]
 pub fn write(prefs: &mut ConsolePrefs, config: PageConfig) {
     let mut entry = match prefs.extra.get(KEY) {
         Some(Value::Object(map)) => map.clone(),
-        _ => Map::new(),
+        _ => serde_json::Map::new(),
     };
     entry.insert("style".to_owned(), Value::String(config.style.as_str().to_owned()));
     prefs.extra.insert(KEY.to_owned(), Value::Object(entry));

@@ -1,7 +1,6 @@
 //! The Watch space: Stremio-backed films and series.
 
 pub mod filters;
-#[cfg(test)]
 pub mod page_config;
 pub mod prefs;
 pub mod rails;
