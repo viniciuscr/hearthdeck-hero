@@ -117,4 +117,18 @@ mod tests {
         assert!(prefs.theme.tabs.iter().any(|tab| tab.source == "shelf"));
         assert!(!crate::console::theme_rows::is_edited_for(Space::Watch, &prefs, &[]), "a fresh Watch is not Customised");
     }
+
+    /// The space's file and the Games file are separate: loading the Watch prefs
+    /// must never rewrite the other one (`docs/WATCH-PAGE.md` §2.4), which is
+    /// what keeps a Watch page setting from reaching Games.
+    #[test]
+    fn the_watch_prefs_never_rewrite_the_games_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app_paths(dir.path());
+        assert_ne!(path(&app), app.console_prefs(), "the two spaces keep different files");
+        let games_before = std::fs::read(app.console_prefs()).ok();
+        let prefs = load(&app);
+        assert!(prefs.theme.tabs.iter().any(|tab| tab.source == "type:movie"), "the space's own tabs are written");
+        assert_eq!(games_before, std::fs::read(app.console_prefs()).ok(), "writing console-watch.json touched console.json");
+    }
 }
