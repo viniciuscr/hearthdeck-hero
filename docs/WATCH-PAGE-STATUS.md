@@ -25,7 +25,7 @@ cargo test -p heronite fork::watch::prefs  # 3 tests
 | 2 — engine + sections | **done, reviewed** | `8fa89b8d`, `b9406d5e`, `711d9c6c`, `97c93b76`, `5018e018`, `70894e35`, `9d1f5798` |
 | 3 — page styles (Film first) | not started | — |
 | 4 — page config in `console-watch.json` | **partly** (config + isolation + the page reads it) | `8221227d`, `584e7de3` |
-| 5 — retire the scaffolding; offer upstream an extension point | not started | — |
+| 5 — retire the scaffolding; offer upstream an extension point | **partly** (proposal written; the rest is the section move + the maintainer's PR) | `docs/UPSTREAM-EXTENSION-POINT.md` |
 
 Phase 2's six gates are all green and runnable:
 `cargo test -p heronite watch_page` (24), `fork::seams` (8),
