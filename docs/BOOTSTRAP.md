@@ -59,6 +59,14 @@ names, comma separated (`--only app,retroarch`, `--skip audio,mounts`).
 
 A few deliberate choices:
 
+- **Root installs; the account owns its home.** `sudo` is used to install
+  packages and write under `/etc` — everything in the console account's home
+  (mpv, RetroArch, Ludusavi, the app's keys, the profile and the units) is
+  written **as that account**, and every folder in the path is created for it.
+  Nothing under `/home/<user>` is left owned by root, which is what an emulator
+  or a program trips on when it needs to create a settings folder there; the
+  summary ends by naming anything that is still root's, with the one `chown -R`
+  command that fixes it (mounts inside the home are left out).
 - **`seatd` is not installed.** `cage` uses `systemd-logind` on these systems;
   an old `seatd` that is enabled is turned off instead.
 - **Stremio needs no service of its own.** The app finds and starts the headless
@@ -290,6 +298,24 @@ belongs to mpv, which needs `input-gamepad=yes` and the `GAMEPAD_*` key names;
 both live in the `~/.config/mpv` block (`--only mpv` restores it). If the app's
 settings say the controller is unsupported, that mpv build has no SDL gamepad
 support (`mpv --input-gamepad=yes --version` fails): the config cannot add it.
+
+**A program cannot create a folder under the console account's `~/.config`.**
+An older bootstrap wrote into that home as root, and `install -d` creates a
+missing parent — `~/.config` itself — owned by root: what is already there keeps
+working, but the account can no longer create a *new* folder beside it, so the
+first emulator whose settings folder is missing fails while everything else
+looks fine (PCSX2's folder was the one that showed it). Today's script writes
+the home as the account and repairs this on every run; the summary names
+whatever root still owns there. Do the same by hand with:
+
+```
+sudo bash bootstrap.sh --only user
+sudo stat -c '%U:%G %a %n' /home/hearthdeck-hero/.config   # hearthdeck-hero:hearthdeck-hero
+```
+
+A folder outside `~/.config` that still belongs to root is listed too;
+`sudo chown -R hearthdeck-hero:hearthdeck-hero <path>` if a program complains
+about one of those. Restart the console afterwards.
 
 **An emulated game's saves do not show up.** The root must be the folder the
 manifest expects: RetroArch's config folder (the one with `saves/` and

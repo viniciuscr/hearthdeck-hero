@@ -10,6 +10,10 @@
 # disks, and makes tty1 boot straight into `cage` + `hearthdeck-hero --console`.
 # At the end it can take the admin rights away from the console account.
 #
+# Root installs packages and writes under /etc; everything in the console
+# account's home (its configs, keys and units) is written as that account, and
+# nothing there is left owned by root.
+#
 # Safe to run again: every step reads the current state first, only changes
 # what is missing or different, and backs up each file it edits as
 # <file>.bak.<timestamp>. `--dry-run` prints the whole plan and changes nothing.
@@ -235,6 +239,20 @@ run() {
   "$@"
 }
 
+# run_as USER CMD... — CMD as USER, with that account's HOME, and no log line:
+# for writes whose content must never reach the transcript (a key).
+run_as() {
+  local user="$1"; shift
+  local home
+  home=$(home_or_default "$user")
+  if [[ $EUID -ne 0 ]]; then
+    # Only the tests (HD_BOOTSTRAP_LIB) get here; preflight insists on root.
+    env HOME="$home" USER="$user" LOGNAME="$user" "$@"
+    return
+  fi
+  runuser -u "$user" -- env HOME="$home" USER="$user" LOGNAME="$user" "$@"
+}
+
 # Writes stdin to PATH when the content differs from what is on disk. Sets
 # HD_WROTE=1 when it wrote. BACKUP first, then owned and chmodded.
 write_if_changed() {
@@ -242,6 +260,39 @@ write_if_changed() {
   tmp="$WORK_DIR/new.$$.$RANDOM"
   cat >"$tmp"
   commit_file "$path" "$tmp" "$owner" "$mode"
+}
+
+# write_secret USER PATH — writes stdin to PATH (0600) as USER, atomically and
+# without a log line (the file is a key). The folder is the account's, and so
+# is the staging file: nothing root owns ever sits in that home.
+write_secret() {
+  local user="$1" path="$2" dir group tmp
+  dir=$(dirname -- "$path")
+  group=$(id -gn "$user")
+  ensure_user_dir "$user" "$dir" 0700
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "  ${C_DIM}[dry-run]${C_RESET} would write $path"
+    cat >/dev/null
+    return 0
+  fi
+  if [[ -e $path && $(stat -c %U "$path" 2>/dev/null || true) != "$user" ]]; then
+    warn "$path belongs to another account: giving it back to $user"
+    run chown "$user:$group" "$path"
+  fi
+  if ! tmp=$(run_as "$user" mktemp "$dir/.hearthdeck-bootstrap.XXXXXX" 2>/dev/null); then
+    warn "could not write beside $path as $user"
+    cat >/dev/null
+    return 1
+  fi
+  # The key travels on stdin: the account writes its own file, and the
+  # transcript never sees the value (`run_as` logs nothing).
+  if ! run_as "$user" sh -c 'umask 077; cat > "$1"' _ "$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  chmod 0600 -- "$tmp"
+  mv -f -- "$tmp" "$path"
+  return 0
 }
 
 backup_file() {
@@ -254,10 +305,12 @@ backup_file() {
 }
 
 # commit_file PATH TMP OWNER MODE — installs TMP at PATH when it differs.
-# Sets HD_WROTE=1 and creates PATH (with parents) when it does.
+# Sets HD_WROTE=1 and creates PATH (with parents) when it does. A file of an
+# account that is not root (the console account's settings) is written as that
+# account: root creates no folder and no content in its home.
 commit_file() {
   local path="$1" tmp="$2" owner="${3:-root:root}" mode="${4:-0644}"
-  local dir target
+  local dir target owner_user
   HD_WROTE=0
   if [[ -f $path ]] && cmp -s -- "$tmp" "$path"; then
     rm -f -- "$tmp"
@@ -274,6 +327,25 @@ commit_file() {
   fi
   backup_file "$path"
   dir=$(dirname -- "$path")
+  owner_user="${owner%%:*}"
+  if [[ $owner_user != root ]] && id "$owner_user" >/dev/null 2>&1; then
+    ensure_user_dir "$owner_user" "$dir"
+    # The staging file is the account's too, so root never owns anything in
+    # that folder, not even for an instant.
+    if target=$(run_as "$owner_user" mktemp "$dir/.hearthdeck-bootstrap.XXXXXX" 2>/dev/null); then
+      if ! run_as "$owner_user" sh -c 'cat > "$1"' _ "$target" <"$tmp"; then
+        rm -f -- "$target" "$tmp"
+        return 1
+      fi
+      rm -f -- "$tmp"
+      chmod -- "$mode" "$target"
+      chown -- "$owner" "$target" 2>/dev/null || true
+      mv -f -- "$target" "$path"
+      HD_WROTE=1
+      return 0
+    fi
+    warn "could not write beside $path as $owner_user; writing it as root and handing it back"
+  fi
   mkdir -p -- "$dir"
   # Write beside the target, then rename: /etc/fstab and pacman.conf are never
   # left half-written, even if the disk fills up.
@@ -394,6 +466,67 @@ user_in_group() {
 
 user_has_password() {
   [[ $(passwd -S "$1" 2>/dev/null | awk '{print $2}') == "P" ]]
+}
+
+# ensure_user_dir USER PATH [MODE] — the folder exists and belongs to USER.
+#
+# Root only installs packages: an account's home is written as that account.
+# `install -d` would create the parents of PATH with root's ownership (`-o` and
+# `-m` only touch the last component), so `~/.config` itself could end up
+# root's — and then the account cannot create a folder of its own there (an
+# emulator's settings, a program's config), while everything already inside
+# keeps working. Every missing component between the home and PATH is created
+# for USER, and one found in the wrong hands is handed back (folders only, so
+# what is inside keeps its owner; a symlink or a plain file is left alone).
+ensure_user_dir() {
+  local user="$1" path="$2" mode="${3:-0755}" group home p owner
+  group=$(id -gn "$user")
+  home=$(home_or_default "$user")
+  local -a chain=("$path")
+  if [[ $path == "$home"/* ]]; then
+    chain=()
+    p="$path"
+    while [[ $p == "$home"/* && $p != "$home" && $p != "/" ]]; do
+      chain=("$p" "${chain[@]}")
+      p=$(dirname -- "$p")
+    done
+  fi
+  for p in "${chain[@]}"; do
+    if [[ -L $p ]]; then
+      # A dotfiles manager's symlink: the account's, and not ours to rewrite.
+      [[ $p == "$path" ]] && info "$p is a symlink; left as it is"
+      continue
+    fi
+    if [[ -e $p && ! -d $p ]]; then
+      warn "$p is not a folder; left as it is"
+      return 1
+    fi
+    if [[ -d $p ]]; then
+      owner=$(stat -c %U "$p" 2>/dev/null || true)
+      [[ $owner == "$user" ]] && continue
+      warn "$p belongs to ${owner:-another user}, not $user: giving it back"
+      run chown "$user:$group" "$p"
+      note "gave $p back to $user"
+      continue
+    fi
+    run install -d -o "$user" -g "$group" -m "$mode" "$p"
+    note "created $p for $user"
+  done
+}
+
+# ensure_user_base_dirs USER — the account's XDG base folders (`~/.config`,
+# `~/.local{,/share,/state}`, `~/.cache`) exist and belong to it. Every step
+# that touches the home goes through this first (and it is what repairs a home
+# an older run left root-owned); the account not existing yet — the `user`
+# step's own first run — is not an error.
+ensure_user_base_dirs() {
+  local user="$1" home base
+  id "$user" >/dev/null 2>&1 || return 0
+  home=$(home_or_default "$user")
+  [[ -d $home ]] || return 0
+  for base in .config .local .local/share .local/state .cache; do
+    ensure_user_dir "$user" "$home/$base"
+  done
 }
 
 # as_user USER CMD... — runs a command as another account, with that account's
@@ -630,6 +763,25 @@ step_user() {
     run install -d -o "$user" -g "$user" -m 0755 "$home"
   fi
 
+  # The account's own base folders come before anything touches its home:
+  # `~/.config` (the app's settings, every emulator's), `~/.local/share` (the
+  # library, the saves) and `~/.local/state` (logs) must be the account's, or a
+  # program running as it cannot create anything new there — while files that
+  # already exist keep working, which is what makes the failure look random
+  # (see docs/BOOTSTRAP.md).
+  ensure_user_base_dirs "$user"
+  if [[ -d $home/.config ]]; then
+    ok "the account's folders (~/.config, ~/.local, ~/.cache) belong to $user"
+
+    # Leftovers of an earlier run (or of a program started with sudo) directly
+    # under ~/.config: say which, since one of them is what a program trips on.
+    local stray
+    while IFS= read -r stray; do
+      [[ -n $stray ]] || continue
+      warn "$stray belongs to $(stat -c %U:%G "$stray" 2>/dev/null || echo another); give it to $user if a program there cannot write"
+    done < <(find "$home/.config" -mindepth 1 -maxdepth 1 ! -user "$user" 2>/dev/null)
+  fi
+
   # No wheel here: the AUR step borrows sudo through a rule that is removed
   # when the bootstrap exits, so the account never needs permanent admin.
   for group in video audio input render; do
@@ -770,7 +922,7 @@ build_with_makepkg() {
   home=$(home_or_default "$user")
   cache="$home/.cache/hearthdeck-bootstrap/aur"
   AUR_CACHE="$cache"
-  run install -d -o "$user" -g "$user" -m 0755 "$cache"
+  ensure_user_dir "$user" "$cache"
 
   for pkg in "$@"; do
     dir="$cache/$pkg"
@@ -972,9 +1124,9 @@ ludusavi_setup() {
   [[ ${#names[@]} -gt 0 ]] || return 0
 
   for root in "${roots[@]}"; do
-    run install -d -o "$user" -g "$user" -m 0755 "$root"
+    ensure_user_dir "$user" "$root"
   done
-  run install -d -o "$user" -g "$user" -m 0755 "$mandir"
+  ensure_user_dir "$user" "$mandir"
 
   for i in "${!names[@]}"; do
     name="${names[i]}"
@@ -1088,7 +1240,7 @@ step_ludusavi() {
     say "  ${C_DIM}[dry-run]${C_RESET} would download the manifests into $mandir and add them to $cfgdir/config.yaml"
     return 0
   fi
-  run install -d -o "$user" -g "$user" -m 0755 "$cfgdir"
+  ensure_user_dir "$user" "$cfgdir"
   ludusavi_setup "$user" "$cfgdir" "$mandir" "$targets"
 }
 
@@ -1295,7 +1447,7 @@ step_mpv() {
 install_mpv_config() {
   local user="$1" dir="$2" owner="$1:$1" wrote=0
   info "gamepad bindings and player settings: $dir"
-  run install -d -o "$user" -g "$user" -m 0755 "$dir"
+  ensure_user_dir "$user" "$dir"
 
   write_mpv_block "$dir/input.conf" "$owner" <<'INPUT'
 # --- Face Buttons (A, B, X, Y) ---
@@ -1378,7 +1530,7 @@ step_retroarch() {
 
   info "controller profiles: $cfgdir/autoconfig/udev"
   info "settings: $cfg"
-  run install -d -o "$user" -g "$user" -m 0755 "$cfgdir"
+  ensure_user_dir "$user" "$cfgdir"
   install_autoconfig "$user" "$cfgdir" || true
 
   set_kv "$cfg" video_fullscreen '"true"' "$user:$user"
@@ -1449,14 +1601,16 @@ install_autoconfig() {
     warn "no $family controller profiles found in the archive"
     return 1
   fi
-  run install -d -o "$user" -g "$user" -m 0755 "$dest"
+  ensure_user_dir "$user" "$dest"
   local copied=0
   for file in "${wanted[@]}"; do
     base=$(basename -- "$file")
     if [[ -f $dest/$base ]] && cmp -s -- "$file" "$dest/$base"; then
       continue
     fi
-    install -m 0644 -o "$user" -g "$user" "$file" "$dest/$base"
+    # The profile is the account's file, so the account writes it (the content
+    # travels on stdin: the download stays in the bootstrap's own folder).
+    as_user "$user" sh -c 'cat > "$1" && chmod 0644 "$1"' _ "$dest/$base" <"$file"
     copied=$((copied + 1))
   done
   if [[ $copied -gt 0 ]]; then
@@ -1524,8 +1678,8 @@ WantedBy=default.target
 EOF
   [[ $HD_WROTE -eq 1 ]] && note "pinned the sound card profile $card -> $profile"
 
-  run install -d -o "$user" -g "$user" -m 0755 "$wants"
-  run ln -sfn ../hearthdeck-audio-profile.service "$wants/hearthdeck-audio-profile.service"
+  ensure_user_dir "$user" "$wants"
+  as_user "$user" ln -sfn ../hearthdeck-audio-profile.service "$wants/hearthdeck-audio-profile.service"
 
   if user_audio_session "$user"; then
     run pactl_as_user "$user" set-card-profile "$card" "$profile"
@@ -1823,7 +1977,7 @@ EOF
   fi
 
   if [[ ! -e $home/.hushlogin ]]; then
-    run install -o "$user" -g "$user" -m 0644 /dev/null "$home/.hushlogin"
+    as_user "$user" install -m 0644 -- /dev/null "$home/.hushlogin"
     note "quiet login (no motd) for $user"
   fi
 
@@ -1858,10 +2012,7 @@ step_tmdb() {
         if [[ ! $key =~ ^[0-9a-fA-F]{32}$ ]]; then
           warn "that is not 32 hexadecimal characters; saving it anyway"
         fi
-        # Written with printf, not `run`: the key must never reach the log.
-        install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$(dirname "$file")"
-        if printf '%s\n' "$key" >"$file"; then
-          chown "$user" "$file" && chmod 600 "$file"
+        if write_secret "$user" "$file" <<<"$key"; then
           info "the TMDB key is set for $user"
         else
           warn "could not write $file"
@@ -1892,8 +2043,7 @@ step_tmdb() {
     say "  [dry-run] would write $token_file"
     return 0
   fi
-  if printf '%s\n' "$token" >"$token_file"; then
-    chown "$user" "$token_file" && chmod 600 "$token_file"
+  if write_secret "$user" "$token_file" <<<"$token"; then
     info "the TMDB read token is set for $user"
   else
     warn "could not write $token_file"
@@ -1928,10 +2078,7 @@ step_simkl() {
     say "  [dry-run] would write $file"
     return 0
   fi
-  # Written with printf, not `run`: the client id must never reach the log.
-  install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$(dirname "$file")"
-  if printf '%s\n' "$client_id" >"$file"; then
-    chown "$user" "$file" && chmod 600 "$file"
+  if write_secret "$user" "$file" <<<"$client_id"; then
     info "the Simkl client id is set for $user"
   else
     warn "could not write $file"
@@ -2047,6 +2194,7 @@ plan() {
   say ""
   say "${C_BOLD}Plan${C_RESET}"
   say "  account     $HD_APP_USER (created if missing, added to video, audio, input, render)"
+  say "              its folders (~/.config, ~/.local, ~/.cache) are the account's, never root's"
   say "  packages    session, RetroArch, the libretro cores, mpv + yt-dlp, rclone, luakit, Dolphin"
   say "  AUR         ${HD_PKGS_AUR[*]}"
   say "  Ludusavi    per-game emulator saves for the emulators that are installed"
@@ -2074,6 +2222,29 @@ confirm_plan() {
   fi
   if ! confirm "Proceed?" y; then
     die "nothing was changed"
+  fi
+}
+
+# check_home_ownership — anything root still owns under the account's home is
+# what a program running as the account trips on next (PCSX2's settings folder
+# was the one that showed it): say it, with the one command that fixes it.
+# Mounted filesystems are left out (`-xdev`): an external disk's files are not
+# the bootstrap's to hand over.
+check_home_ownership() {
+  local user="$HD_APP_USER" home stray n=0 group
+  id "$user" >/dev/null 2>&1 || return 0
+  home=$(home_or_default "$user")
+  [[ -d $home ]] || return 0
+  group=$(id -gn "$user")
+  while IFS= read -r stray; do
+    [[ -n $stray ]] || continue
+    n=$((n + 1))
+    [[ $n -le 10 ]] && warn "$stray belongs to $(stat -c %U:%G "$stray" 2>/dev/null || echo another), not $user"
+  done < <(find "$home" -xdev ! -user "$user" 2>/dev/null)
+  if [[ $n -gt 0 ]]; then
+    [[ $n -gt 10 ]] && warn "…and $((n - 10)) more"
+    warn "$n path(s) under $home are not $user's; to hand them over:"
+    warn "  chown -R $user:$group $home"
   fi
 }
 
@@ -2118,6 +2289,7 @@ summary() {
       say "  ${C_YELLOW}!${C_RESET} $check is missing"
     fi
   done
+  check_home_ownership
   if [[ $LOGGING -eq 1 ]]; then
     say ""
     say "  log: $LOG_FILE"
@@ -2291,6 +2463,9 @@ run_step() {
   if ! declare -F "$function" >/dev/null 2>&1; then
     die "unknown step '$step'"
   fi
+  # A re-run of one step alone (`--only ludusavi`) writes into the home as
+  # root too: the account's base folders are handed back to it first.
+  ensure_user_base_dirs "$HD_APP_USER"
   "$function"
 }
 
