@@ -222,5 +222,9 @@
   "{shown} of {total} titles": "{shown} von {total} Titeln",
   "{time} watched": "{time} gesehen",
   "{watched} of 1 episode watched": "{watched} von 1 Folge gesehen",
-  "{watched} of {total} episodes watched": "{watched} von {total} Folgen gesehen"
+  "{watched} of {total} episodes watched": "{watched} von {total} Folgen gesehen",
+  "Film": "Film",
+  "Film page": "Filmseite",
+  "Reset the film page": "Filmseite zurücksetzen",
+  "The arrangement of a title's page. Its own setting: the Games page is untouched.": "Die Anordnung der Seite eines Titels. Eine eigene Einstellung: Die Spiele-Seite bleibt unberührt."
 }
