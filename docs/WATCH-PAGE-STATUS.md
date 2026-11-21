@@ -24,7 +24,7 @@ cargo test -p heronite fork::watch::prefs  # 3 tests
 | 1 — facts view model + film-shaped fixes | **done, reviewed** | `f998c79c`, `4a35719f`, `27437abf`, `a1901289` |
 | 2 — engine + sections | **done, reviewed** | `8fa89b8d`, `b9406d5e`, `711d9c6c`, `97c93b76`, `5018e018`, `70894e35`, `9d1f5798` |
 | 3 — page styles (Film first) | not started | — |
-| 4 — page config in `console-watch.json` | not started | — |
+| 4 — page config in `console-watch.json` | **partly** (config + isolation + the page reads it) | `8221227d`, `584e7de3` |
 | 5 — retire the scaffolding; offer upstream an extension point | not started | — |
 
 Phase 2's six gates are all green and runnable:
@@ -137,7 +137,40 @@ Rules while moving:
    into `engine.rs` as a pure function so it can be tested), dispatch (the seam
    guards), prefs isolation (done), i18n (`cargo test -p heronite-i18n`).
 
-## Phase 3, 4, 5 — what they mean in code
+## Phase 4 — what is left (start here)
+
+Landed: `app/src/fork/watch/page_config.rs` (the choice in `ConsolePrefs.extra`,
+read leniently, six tests including the Games-file isolation), and
+`watch_page/style.rs::PageStyle::current(&app_paths)` now reads it, so the page
+draws what the space chose (Film until something writes a choice).
+
+Left — the settings row, in **fork-owned files only**
+(`app/src/fork/watch/settings/mod.rs`), so no new seam is needed:
+
+1. `console_rows` (line ~1455) gains, between the theme row and the reset row:
+   `Row::choice("watch-page-style", tr!("Film page"), names, index)` where
+   `names` is `page_config::PageStyle::ALL` labelled and `index` comes from
+   `page_config::read(&themes::prefs_for(&d.ctx.app, Space::Watch))`.
+2. `console_apply` (line ~1670) gains two arms:
+   `Outcome::Changed(id, Value::Choice { index, .. })` for that row, and
+   `Outcome::Activate("watch-page-style-reset")`. Both write through
+   `crate::console::themes::update_for(&d.ctx.app, Space::Watch, |p| page_config::write(p, config))`
+   — never touching the Games prefs — and `cx.notify()`.
+3. A reset row (`Row::action("watch-page-style-reset", …)`) that writes the
+   default; that is the per-row "reset" the review asked for (with one style
+   today, a per-row *diff* has nothing to compare, so the reset is the honest
+   half of it).
+4. When the row lands, drop `#[cfg(test)]` from `page_config::{write, PageStyle::ALL, PageStyle::as_str}`
+   (they are gated only because nothing wrote the choice yet) and extend the
+   isolation test to assert the choice survives a save/load of the space's file.
+
+## Phase 5 — what it means
+
+Retire what the split left behind in `watch_page/mod.rs` (the render shell keeps
+only what a style needs), and open a branch off `upstream/main` offering the
+generic space/section **hook** (`§10`): an interface, not the fork's code. Never
+a dependency.
+
 
 - **Phase 3 (styles).** Add `PageStyle` in the page module (`Film` first, output
   identical to today). A fork style may carry an upstream style's name only if it
