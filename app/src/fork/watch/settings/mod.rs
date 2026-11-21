@@ -1452,11 +1452,27 @@ fn unlink(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
 }
 
 /// Console mode: the account, the code and the rails as rows.
-pub(crate) fn console_rows(_d: &SettingsPage) -> Vec<Row> {
+pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
+    let prefs = crate::console::themes::prefs_for(&d.ctx.app, Space::Watch);
+    let style = super::page_config::read(&prefs).style;
+    let names: Vec<SharedString> =
+        super::page_config::PageStyle::ALL.iter().map(|style| SharedString::from(page_style_label(*style))).collect();
+    let index = super::page_config::PageStyle::ALL.iter().position(|known| *known == style).unwrap_or(0);
     vec![
         Row::info("watch-theme", tr!("Watch theme"), tr!("Edited from ☰ → Customize.")),
+        Row::choice("watch-page-style", tr!("Film page"), names, index)
+            .desc(tr!("The arrangement of a title's page. Its own setting: the Games page is untouched.")),
+        Row::action("watch-page-style-reset", tr!("Reset the film page")),
         Row::action("watch-reset", tr!("Reset Watch theme")),
     ]
+}
+
+/// The name a stored page style shows under in Settings (`§10`: a style of its
+/// own keeps its own name).
+fn page_style_label(style: super::page_config::PageStyle) -> &'static str {
+    match style {
+        super::page_config::PageStyle::Film => tr!("Film"),
+    }
 }
 
 /// Settings → Watch → **Accounts**, as rows: a header per provider Watch is
@@ -1668,8 +1684,12 @@ pub(crate) fn source_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut
 
 /// The Watch page's own action.
 pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mut Window, cx: &mut Context<SettingsPage>) {
-    if let Outcome::Activate(id) = outcome {
-        if id.as_ref() == "watch-reset" {
+    let write = |d: &SettingsPage, config: super::page_config::PageConfig, cx: &mut Context<SettingsPage>| {
+        themes::update_for(&d.ctx.app, Space::Watch, |prefs| super::page_config::write(prefs, config));
+        cx.notify();
+    };
+    match outcome {
+        Outcome::Activate(id) if id.as_ref() == "watch-reset" => {
             themes::update_for(&d.ctx.app, Space::Watch, |prefs| {
                 prefs.theme = watch_default_theme();
                 prefs.based_on = crate::fork::watch::prefs::base_id().into();
@@ -1677,6 +1697,13 @@ pub(crate) fn console_apply(d: &mut SettingsPage, outcome: Outcome, _window: &mu
             });
             cx.notify();
         }
+        // The page's own choice: the space's file only, never the Games one.
+        Outcome::Activate(id) if id.as_ref() == "watch-page-style-reset" => write(d, super::page_config::PageConfig::default(), cx),
+        Outcome::Changed(id, crate::console::list::Value::Choice { index, .. }) if id.as_ref() == "watch-page-style" => {
+            let style = super::page_config::PageStyle::ALL.get(index).copied().unwrap_or_default();
+            write(d, super::page_config::PageConfig { style }, cx);
+        }
+        _ => {}
     }
 }
 
