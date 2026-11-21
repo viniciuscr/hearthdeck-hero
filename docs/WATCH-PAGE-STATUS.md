@@ -5,7 +5,7 @@ Working record for the Watch page refactor. `docs/WATCH-PAGE.md` is the decision
 continue it**. Read both before touching code.
 
 Branch: `feat/watch-page-adr` (cut from `fork/main`). Latest commit at the time
-of writing: `711d9c6c`. Working tree clean, gate green.
+of writing: `97c93b76`. Working tree clean, gate green.
 
 ```bash
 cargo fmt --all -- --check
@@ -22,7 +22,7 @@ cargo test -p heronite fork::watch::prefs  # 3 tests
 |---|---|---|
 | 0 — design record, register re-baseline, seam table | **done, reviewed** | `47733049` |
 | 1 — facts view model + film-shaped fixes | **done, reviewed** | `f998c79c`, `4a35719f`, `27437abf`, `a1901289` |
-| 2 — engine + sections | **in progress** | `8fa89b8d`, `b9406d5e`, `711d9c6c` |
+| 2 — engine + sections | **in progress** | `8fa89b8d`, `b9406d5e`, `711d9c6c`, `97c93b76` |
 | 3 — page styles (Film first) | not started | — |
 | 4 — page config in `console-watch.json` | not started | — |
 | 5 — retire the scaffolding; offer upstream an extension point | not started | — |
@@ -85,6 +85,11 @@ cargo test -p heronite fork::watch::prefs  # 3 tests
 - `fork/watch/prefs.rs`: the isolation test (`console-watch.json` never rewrites
   `console.json`).
 - `engine.rs`: the season-vs-episode test (a season row names no episode).
+- `sections/` exists: `sections/mod.rs` (the map) and `sections/episode.rs`
+  (`episode_name`, `episode_label`, `episode_desc`, `episode_row`,
+  `episode_card`, moved verbatim; visibility
+  `pub(in crate::collection::console::watch_page)` — `pub(super)` stops at
+  `sections`, which does not compile from `mod.rs`).
 
 ## Phase 2 — the remaining slice (start here)
 
@@ -94,10 +99,16 @@ split, one file per concern:
 
 | File | Moves |
 |---|---|
-| `sections/episode.rs` | `episode_name`, `episode_label`, `episode_desc`, `episode_row`, `episode_card` |
-| `sections/details.rs` | `facts_line`, `detail_lines`, `title_status`, `watched_line`, `fact_label`, `names`, `not_present`, `has_marks`, `shows_watched`, `watched_state`, `watched_mark_label`, `DetailLine` |
+| `sections/episode.rs` | **done** — `episode_name`, `episode_label`, `episode_desc`, `episode_row`, `episode_card` |
+| `sections/details.rs` | `DetailLine` (the struct itself, with its fields made visible to the page), `facts_line`, `title_status`, `watched_line`, `names`, `detail_lines`, `fact_label` |
 | `sections/rails.rs` | `watch_rail`, `rail_of`, `rail_columns`, `rail_line_width`, `columns_in`, `panel_room` |
-| `sections/marks.rs` | `watch_marks`, `mark_at` usage, the marks row builder |
+| `sections/marks.rs` | `watch_marks`, the marks row builder |
+
+Notes for the next file: after moving `DetailLine`, `mod.rs`'s render code reads
+its fields, and the tests that build or compare one need it in scope — add a
+test-only `use` if the compiler asks. `detail_lines` and `title_status` call
+`crate::fork::watch::sources::{runtime_minutes_of, binge_minutes}`, so
+`sections/details.rs` keeps that path.
 
 Rules while moving:
 
