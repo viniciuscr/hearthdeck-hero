@@ -63,11 +63,7 @@ const BOTTOM_PAD: f32 = 20.;
 const COLUMN_GAP: f32 = 40.;
 /// The column the title, its marks and its list take. The details panel takes
 /// the rest of the page, from its top edge to its bottom.
-const LEFT_W: f32 = 560.;
-/// The single panel's width in Compact, design px.
-const COMPACT_W: f32 = 520.;
-/// The list's height inside Compact's panel: the details keep the rest.
-const COMPACT_LIST_H: f32 = 240.;
+const LEFT_W: f32 = 420.;
 /// The list card's width in Cinema, design px.
 const CINEMA_LIST_W: f32 = 460.;
 /// The details panel's corners and its own padding, design px.
@@ -445,29 +441,6 @@ impl CollectionView {
                         .child(kit::tabs(&tabs, active))
                         .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
                 ),
-            // Compact: one panel on the right holding everything — the title, its
-            // marks, the list and the details under them — with the art alone on
-            // the left.
-            crate::fork::watch::page_config::PageStyle::Compact => {
-                div().relative().size_full().flex().justify_end().px(u(PAGE_PAD)).pb(u(BOTTOM_PAD)).child(
-                    card_surface()
-                        .w(u(COMPACT_W))
-                        .min_h_0()
-                        .p(u(PANEL_PAD))
-                        .rounded(u(PANEL_RADIUS))
-                        .shadow(kit::shadow(0.5, 12., 44.))
-                        .flex()
-                        .flex_col()
-                        .gap(u(16.))
-                        .when(pane == Pane::Card, |card| card.border_color(theme::console_focus()))
-                        .child(header)
-                        .child(marks_row)
-                        .child(div().flex_none().h(u(COMPACT_LIST_H)).flex().flex_col().child(list.flex_1().min_h_0()))
-                        .child(div().h(px(1.)).flex_none().bg(kit::ink(0.08)))
-                        .child(kit::tabs(&tabs, active))
-                        .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
-                )
-            }
             // Cinema: a title band across the top, then two full-width cards —
             // the details and the list side by side under it.
             crate::fork::watch::page_config::PageStyle::Cinema => div()
