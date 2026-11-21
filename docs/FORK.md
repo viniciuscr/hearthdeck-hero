@@ -213,6 +213,39 @@ date, upstream commit, files, and resolution.
     `crates/i18n/locales/{de,es,fr,pt-BR}/settings_pages.json` ("Pauses while a
     game runs or Hearthdeck Hero is in the background.").
 
+- **2026-11-21, upstream `72463208`** (the Playnite transfer and the console
+  overhaul). Sixteen paths conflicted where upstream's rewrites met the fork's
+  spaces and the F-005 rename:
+  - `app/src/pages/settings/console.rs` → upstream split it into
+    `console/{mod,find,sidebar}.rs`. The old file stays deleted and the fork's
+    Watch group moved into `console/mod.rs`: the group itself, the five rows and
+    the five apply arms.
+  - `app/src/collection/console/layouts/{cinema,carousel,spotlight/mod,spotlight/parts}.rs`:
+    upstream's versions taken, the fork's seams re-applied — the Watch wording
+    of a playtime (`watched_or_played`, and "Watched" as its label in the new
+    facts panels), the film page's own line and its L3 trailer hint, the Cards
+    zone, and no whole-block `motion::enter_from` (upstream replaced it with
+    per-part reveals).
+  - `app/src/collection/console/game/mod.rs`: upstream's visibility change, and
+    `game_page_scrolls_text` keeping the film page's always-scrolls branch.
+  - `app/src/console/kit.rs`: upstream's `draw` signature, with the fork's L3/R3
+    keys.
+  - `app/src/collection/store_media/mod.rs`: upstream's `media_wanted()`, with
+    the Watch guard beside it.
+  - `crates/data/src/console_theme/mod.rs` and
+    `crates/metadata/src/sources/builtin/mod.rs`: upstream's copy.
+  - `app/src/dialogs/settings_panel/console.rs`: upstream's `.under(...)` row,
+    with the fork's copy.
+  - `crates/i18n/locales/{de,es,fr,pt-BR}/{settings_pages,system}.json`: resolved
+    key by key — the fork's "Hearthdeck Hero" wording kept, upstream's new keys
+    added, the keys upstream retired dropped (the coverage test found them).
+  - Rebranded outside the conflicts: `console/activity.rs`,
+    `console/now_playing.rs`, `pages/settings/console/sidebar.rs` and their
+    locale keys (`console_activity.json`, `console_launch.json`).
+  - Also: upstream keeps **Classic** as the base rather than an offered preset,
+    so `presets::by_id("classic")` is `None`; Watch resolves its base through
+    `fork::watch::prefs::preset` and `theme_rows::base_theme` (F-008).
+
 ## Releases
 
 - Cut a release from `fork/main` with the **Fork Release** workflow

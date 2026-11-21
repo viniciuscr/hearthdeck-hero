@@ -324,7 +324,7 @@ impl CollectionView {
                 let u = update::get(cx)?;
                 match u.read(cx).phase() {
                     Phase::Ready => Some((Tone::Done, tr!("Update downloaded").into(), Some(tr!("Restart to update").into()))),
-                    Phase::InstallFailed(e) => Some((Tone::Failed, tr!("Could not update Heronite").into(), Some(e.clone()))),
+                    Phase::InstallFailed(e) => Some((Tone::Failed, tr!("Could not update Hearthdeck Hero").into(), Some(e.clone()))),
                     _ => None,
                 }
             }

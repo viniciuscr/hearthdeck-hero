@@ -65,7 +65,7 @@ fn header() -> Div {
                         .text_size(u(22.))
                         .line_height(u(26.))
                         .text_color(theme::text_primary())
-                        .child("Heronite"),
+                        .child("Hearthdeck Hero"),
                 )
                 .child(
                     div()

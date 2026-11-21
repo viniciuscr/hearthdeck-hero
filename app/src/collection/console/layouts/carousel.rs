@@ -398,12 +398,17 @@ impl CollectionView {
     /// each a small label over its value.
     fn carousel_facts(&self, g: &CollectionGame) -> Div {
         let dash = || "\u{2014}".to_string();
-        let played = played_time(g).unwrap_or_else(dash);
+        // Fork-Seam: F-008 — a film is watched, a game is played: the same words
+        // the hero line uses, so one title never reads two ways on one screen.
+        let (label, played) = match self.space {
+            crate::collection::Space::Watch => (tr!("Watched"), played_time(g).unwrap_or_else(dash)),
+            crate::collection::Space::Games => (tr!("Playtime"), played_time(g).unwrap_or_else(dash)),
+        };
         let last = g.last_played.as_deref().and_then(played_ago).unwrap_or_else(|| tr!("Never").to_string());
         let mut row = div()
             .flex()
             .items_center()
-            .child(fact(tr!("Playtime"), div().child(played)))
+            .child(fact(label, div().child(played)))
             .child(divider())
             .child(fact(tr!("Last played"), div().child(last)))
             .child(divider())
@@ -701,7 +706,10 @@ impl CollectionView {
                 0.,
                 PLACE_FROM,
             );
-            let block = div()
+            // Each part enters on its own (`motion::reveal` above): upstream took
+            // the whole block's entrance out, and adding it back animated the info
+            // twice.
+            div()
                 .relative()
                 .flex()
                 .flex_col()
@@ -709,10 +717,7 @@ impl CollectionView {
                 .gap(u(INFO_GAP))
                 .child(row(if logo { LOGO_H } else { NAME_H }).child(name))
                 .children(facts)
-                .child(row(PLACE_H).child(place));
-            // From the side the focus came from, never from blank (held
-            // directions keep it readable).
-            motion::enter_from(SharedString::from(format!("cr-info-{}", g.key)), block, 280, 18. * from, 0., 0.3)
+                .child(row(PLACE_H).child(place))
         });
         div()
             .flex()

@@ -198,7 +198,12 @@ impl CollectionView {
     /// the year it came out, each a small label over its value.
     pub(super) fn spotlight_facts(&self, g: &CollectionGame) -> Div {
         let dash = || "\u{2014}".to_string();
-        let played = played_time(g).unwrap_or_else(dash);
+        // Fork-Seam: F-008 — a film is watched, a game is played (see the
+        // hero line's words: one title must not read two ways on one screen).
+        let (label, played) = match self.space {
+            crate::collection::Space::Watch => (tr!("Watched"), played_time(g).unwrap_or_else(dash)),
+            crate::collection::Space::Games => (tr!("Playtime"), played_time(g).unwrap_or_else(dash)),
+        };
         let last = g.last_played.as_deref().and_then(played_ago).unwrap_or_else(|| tr!("Never").to_string());
         let icon = store_badges::game_icons(&self.with_copies(&g.key)).first().copied();
         let platform =
@@ -207,7 +212,7 @@ impl CollectionView {
             .flex()
             .items_center()
             .h(u(FACTS_H))
-            .child(fact(tr!("Playtime"), div().child(played)))
+            .child(fact(label, div().child(played)))
             .child(divider())
             .child(fact(tr!("Last played"), div().child(last)))
             .child(divider())

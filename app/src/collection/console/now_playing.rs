@@ -396,7 +396,7 @@ impl CollectionView {
             let rows = confirm_rows();
             let (_, _, np) = self.console.launch.playing_mut().expect("checked above");
             let nav = np.confirm.as_mut().expect("confirming");
-            let message = tr!("Progress the game has not saved is lost. Heronite saves the playtime so far.");
+            let message = tr!("Progress the game has not saved is lost. Hearthdeck Hero saves the playtime so far.");
             let dialog = simple_dialog(nav, "now-playing-stop", tr!("Stop {title}?", title = game.title), message, None, &rows);
             out.push(div().absolute().inset_0().child(dialog).into_any_element());
         }
