@@ -7,3 +7,4 @@
 
 pub(super) mod details;
 pub(super) mod episode;
+pub(super) mod marks;
