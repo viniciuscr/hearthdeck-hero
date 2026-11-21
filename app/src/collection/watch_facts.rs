@@ -1,0 +1,144 @@
+//! The Watch space's facts in one place: how a time is worded, the line under a
+//! title's name, and the labels its detail rows carry.
+//!
+//! Fork-owned, an addition rather than a deviation (`docs/FORK.md`). The console
+//! layouts and the desktop panel both print these strings, so a new upstream
+//! surface asks here instead of growing its own `match self.space`
+//! (`docs/WATCH-PAGE.md` §6, Phase 1). Games keep saying played and Playtime; a
+//! film or a series says watched and Watched.
+
+use heronite_data::organize::release_year;
+use heronite_data::CollectionGame;
+use heronite_i18n::tr;
+
+use super::data::played_ago;
+use super::vm::{DetailField, DetailRow};
+use super::Space;
+
+/// The time `g` was watched ("3h 54m"), `None` when it never was.
+pub(super) fn watched_time(g: &CollectionGame) -> Option<String> {
+    (g.playtime_minutes > 0).then(|| heronite_data::collection::format_playtime_minutes(g.playtime_minutes))
+}
+
+/// "{time} watched" in Watch, "{time} played" in Games.
+pub(super) fn time_label(space: Space, time: &str) -> String {
+    match space {
+        Space::Games => tr!("{time} played", time = time),
+        Space::Watch => tr!("{time} watched", time = time),
+    }
+}
+
+/// "3 days ago · 12h 40m"; `long` says "Last played 3 days ago · 12h 40m"
+/// ("Last watched" and "watched" in the Watch space). "Not played yet" (or
+/// "Not watched yet") for a title never started.
+pub(super) fn played_line(space: Space, g: &CollectionGame, long: bool) -> String {
+    let watch = space == Space::Watch;
+    let when = match g.last_played.as_deref().and_then(played_ago) {
+        Some(ago) if long && watch => tr!("Last watched {at}", at = ago.to_lowercase()),
+        Some(ago) if long => tr!("Last played {when}", when = ago.to_lowercase()),
+        Some(ago) => ago,
+        None if watch => tr!("Not watched yet").to_string(),
+        None => tr!("Not played yet").to_string(),
+    };
+    let time = watched_time(g).map(|time| time_label(space, &time));
+    let parts: Vec<String> = Some(when).into_iter().chain(time).collect();
+    parts.join(" \u{b7} ")
+}
+
+/// "Steam · Installed · 3h 54m played" for a game; "Cinemeta · 1999" (and
+/// "Stremio" once a stream is known) for a film or a series — where it was
+/// listed and what the source knows.
+pub(super) fn facts_line(space: Space, g: &CollectionGame) -> String {
+    let mut facts: Vec<String> = match space {
+        Space::Games => vec![g.source_label.to_string()],
+        // A catalogue stamps the provider that would resolve a stream, not one
+        // that has it: the origin names the catalogue, and the stream source
+        // joins it only when a probe found something.
+        Space::Watch => crate::fork::watch::sources::origins(g).into_iter().map(str::to_owned).collect(),
+    };
+    match space {
+        Space::Games => {
+            facts.push(if g.installed { tr!("Installed").into() } else { tr!("Not installed").into() });
+            facts.extend(watched_time(g).map(|time| time_label(Space::Games, &time)));
+        }
+        Space::Watch => {
+            // The year, or the range a series prints ("2011–2019").
+            let year = release_year(g)
+                .map(|year| year.to_string())
+                .or_else(|| g.details.release_date.as_deref().map(str::trim).filter(|date| !date.is_empty()).map(str::to_owned));
+            facts.extend(year);
+        }
+    }
+    facts.retain(|fact| !fact.trim().is_empty());
+    facts.join(" \u{b7} ")
+}
+
+/// The labels a space gives its detail rows: "Last Played" and "Playtime" for a
+/// game, "Last watched" and "Watched" for a film. A layout filters those rows by
+/// field, never by the translated label.
+pub(super) fn relabel(space: Space, rows: &mut [DetailRow]) {
+    if space != Space::Watch {
+        return;
+    }
+    for row in rows {
+        match row.field {
+            DetailField::LastPlayed => row.label = tr!("Last watched").into(),
+            DetailField::Playtime => row.label = tr!("Watched").into(),
+            _ => {}
+        }
+    }
+}
+
+/// "Cinemeta · Installed" for a game; the catalogue's name alone for a film. A
+/// catalogue lists a title, it does not install one, and a film has no folder to
+/// open.
+pub(super) fn library_line(space: Space, library: &str, installed: bool) -> String {
+    match space {
+        Space::Games => {
+            let place = if installed { tr!("Installed") } else { tr!("Not installed") };
+            format!("{library} \u{b7} {place}")
+        }
+        Space::Watch => library.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_film_says_watched_where_a_game_says_played() {
+        assert_eq!(time_label(Space::Watch, "2h 10m"), "2h 10m watched");
+        assert_eq!(time_label(Space::Games, "2h 10m"), "2h 10m played");
+    }
+
+    #[test]
+    fn the_detail_rows_are_renamed_only_for_a_film() {
+        let row = |field: DetailField, label: &str| DetailRow {
+            field,
+            label: label.into(),
+            value: super::super::vm::DetailValue::Text("".into()),
+            split: false,
+        };
+        let mut rows = vec![
+            row(DetailField::LastPlayed, "Last Played"),
+            row(DetailField::Playtime, "Playtime"),
+            row(DetailField::Developer, "Developer"),
+        ];
+        relabel(Space::Watch, &mut rows);
+        assert_eq!(rows[0].label.as_ref(), "Last watched");
+        assert_eq!(rows[1].label.as_ref(), "Watched");
+        assert_eq!(rows[2].label.as_ref(), "Developer", "a row that is not about time keeps its label");
+
+        let mut games = vec![row(DetailField::Playtime, "Playtime")];
+        relabel(Space::Games, &mut games);
+        assert_eq!(games[0].label.as_ref(), "Playtime");
+    }
+
+    #[test]
+    fn a_catalogue_lists_a_film_and_does_not_install_it() {
+        assert_eq!(library_line(Space::Watch, "Cinemeta", true), "Cinemeta");
+        assert_eq!(library_line(Space::Games, "Steam", true), "Steam \u{b7} Installed");
+        assert_eq!(library_line(Space::Games, "Steam", false), "Steam \u{b7} Not installed");
+    }
+}

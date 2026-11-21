@@ -127,32 +127,19 @@ pub(crate) fn shelf_heading(title: &str, count: Option<usize>, size: f32) -> Div
 
 /// The time `g` was played ("3h 54m"), `None` when it never was.
 pub(crate) fn played_time(g: &CollectionGame) -> Option<String> {
-    (g.playtime_minutes > 0).then(|| heronite_data::collection::format_playtime_minutes(g.playtime_minutes))
+    super::super::watch_facts::watched_time(g)
 }
 
 /// "3 days ago · 12h 40m"; `long` says "Last played 3 days ago · 12h 40m"
 /// ("Last watched" and "watched" in the Watch space). "Not played yet" (or
 /// "Not watched yet") for a title never started.
 pub(crate) fn played_line(space: crate::collection::Space, g: &CollectionGame, long: bool) -> String {
-    let watch = space == crate::collection::Space::Watch;
-    let when = match g.last_played.as_deref().and_then(played_ago) {
-        Some(ago) if long && watch => tr!("Last watched {at}", at = ago.to_lowercase()),
-        Some(ago) if long => tr!("Last played {when}", when = ago.to_lowercase()),
-        Some(ago) => ago,
-        None if watch => tr!("Not watched yet").to_string(),
-        None => tr!("Not played yet").to_string(),
-    };
-    let time = played_time(g).map(|time| watched_or_played(space, &time));
-    let parts: Vec<String> = Some(when).into_iter().chain(time).collect();
-    parts.join(" \u{b7} ")
+    super::super::watch_facts::played_line(space, g, long)
 }
 
 /// "{time} watched" in Watch, "{time} played" in Games.
 pub(crate) fn watched_or_played(space: crate::collection::Space, time: &str) -> String {
-    match space {
-        crate::collection::Space::Games => tr!("{time} played", time = time),
-        crate::collection::Space::Watch => tr!("{time} watched", time = time),
-    }
+    super::super::watch_facts::time_label(space, time)
 }
 
 /// A card's surface: a soft dark panel with a thin edge.
@@ -209,28 +196,7 @@ impl CollectionView {
     /// "Stremio" once a stream is known) for a film or a series — where it was
     /// listed and what the source knows.
     pub(super) fn console_facts(&self, g: &CollectionGame) -> String {
-        let mut facts: Vec<String> = match self.space {
-            crate::collection::Space::Games => vec![g.source_label.to_string()],
-            // A catalogue stamps the provider that would resolve a stream, not
-            // one that has it: the origin names the catalogue, and the stream
-            // source joins it only when a probe found something.
-            crate::collection::Space::Watch => crate::fork::watch::sources::origins(g).into_iter().map(str::to_owned).collect(),
-        };
-        match self.space {
-            crate::collection::Space::Games => {
-                facts.push(if g.installed { tr!("Installed").into() } else { tr!("Not installed").into() });
-                facts.extend(played_time(g).map(|time| watched_or_played(crate::collection::Space::Games, &time)));
-            }
-            crate::collection::Space::Watch => {
-                // The year, or the range a series prints ("2011–2019").
-                let year = release_year(g)
-                    .map(|year| year.to_string())
-                    .or_else(|| g.details.release_date.as_deref().map(str::trim).filter(|date| !date.is_empty()).map(str::to_owned));
-                facts.extend(year);
-            }
-        }
-        facts.retain(|fact| !fact.trim().is_empty());
-        facts.join(" \u{b7} ")
+        crate::collection::watch_facts::facts_line(self.space, g)
     }
 
     /// The game's status: its name and colour.

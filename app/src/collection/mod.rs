@@ -96,6 +96,7 @@ pub use screenshots::screenshots_global;
 pub mod stage;
 mod vm;
 pub(crate) mod watch_catalog;
+mod watch_facts;
 mod watch_personal;
 mod watch_playback;
 mod watch_service;

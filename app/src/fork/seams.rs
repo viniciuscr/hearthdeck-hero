@@ -46,6 +46,7 @@ const SEAMS: &[Seam] = &[
             "watch_console_rows",
             "self.space == super::super::Space::Watch",
             "pub(super) use hero::facts_table",
+            "fn classic_facts",
         ],
         why: "the detail page's dispatch: the seven questions the shell asks (the space branch answers them), and the facts table the page reuses",
     },
@@ -66,7 +67,7 @@ const SEAMS: &[Seam] = &[
     Seam {
         file: "app/src/collection/mod.rs",
         register: &["F-006", "F-008"],
-        sites: &["mod watch_catalog;", "mod watch_personal;", "mod watch_playback;", "mod watch_service;"],
+        sites: &["mod watch_catalog;", "mod watch_facts;", "mod watch_personal;", "mod watch_playback;", "mod watch_service;"],
         why: "the space itself: its modules and the view state the Collection keeps for it",
     },
     Seam {
@@ -74,6 +75,18 @@ const SEAMS: &[Seam] = &[
         register: &["F-016"],
         sites: &["if self.space.capabilities().manage {"],
         why: "the Manage tab, which a space without installs or settings does not show",
+    },
+    Seam {
+        file: "app/src/collection/data.rs",
+        register: &["F-021"],
+        sites: &["Fork-Seam: F-021", "watch_facts::relabel"],
+        why: "the focus view model's rows are worded by the space (Last watched, Watched)",
+    },
+    Seam {
+        file: "app/src/collection/actions.rs",
+        register: &["F-006"],
+        sites: &["Fork-Seam: F-006"],
+        why: "the focus is built for the space on screen, so a film's rows are its own",
     },
     Seam {
         file: "app/src/collection/console/game/hero.rs",
@@ -114,7 +127,7 @@ const SEAMS: &[Seam] = &[
     Seam {
         file: "app/src/collection/console/layouts/spotlight/mod.rs",
         register: &["F-012", "F-010"],
-        sites: &["Fork-Seam: F-012", "played_line(self.space, g, true)"],
+        sites: &["Fork-Seam: F-012", "played_line(self.space, g, true)", "watch_facts::library_line"],
         why: "the film page's own line and its trailer hint",
     },
     Seam {

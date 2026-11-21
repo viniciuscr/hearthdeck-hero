@@ -426,8 +426,9 @@ impl CollectionView {
         if let Some(size) = f.install_size.as_ref().filter(|s| f.installed && !s.is_empty() && s.as_ref() != "0") {
             rows.push((Icon::FaHardDrive, tr!("Size on disk").into(), size.to_string()));
         }
-        let place = if f.installed { tr!("Installed") } else { tr!("Not installed") };
-        rows.push((Icon::Folder, tr!("Store").into(), format!("{} \u{b7} {place}", f.library)));
+        // A catalogue lists a title; it does not install one (`watch_facts`).
+        let store = crate::collection::watch_facts::library_line(self.space, &f.library, f.installed);
+        rows.push((Icon::Folder, tr!("Store").into(), store));
         if let Some(score) = f.score.filter(|s| *s > 0.) {
             let from = f.score_source.as_ref().map_or(String::new(), |s| format!(" \u{b7} {s}"));
             rows.push((Icon::Star, tr!("Critic score").into(), format!("{score:.0}/100{from}")));

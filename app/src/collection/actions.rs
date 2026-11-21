@@ -117,7 +117,8 @@ impl CollectionView {
     /// (see [`copy_to_play`](Self::copy_to_play)).
     fn focus_vm_of(&self, lib: &heronite_data::Library, game: &heronite_data::collection::Game) -> super::vm::FocusVm {
         let target = self.copy_to_play(lib, &game.key).unwrap_or(game);
-        let mut vm = data::focus_vm(lib, &self.wiki, game, self.playing.contains_key(&target.app_name));
+        // Fork-Seam: F-006 — the focused title's rows are worded by the space.
+        let mut vm = data::focus_vm(lib, &self.wiki, game, self.playing.contains_key(&target.app_name), self.space);
         vm.installed = target.installed;
         vm
     }

@@ -717,13 +717,11 @@ impl CollectionView {
             for (in_row, related) in chunk.iter().enumerate() {
                 let index = row * columns + in_row;
                 let on = pane == Pane::Card && index == focus;
-                let key = self.rail_key(related);
-                let face = match &key {
-                    Some(key) => self.console_tile(key, tile_w, tile_h, on, true, window),
-                    // The library has it not yet (the reload is on its way): an
-                    // empty box of the right size, never a card of another shape.
-                    None => div().flex_none().w(u(tile_w)).h(u(tile_h)),
-                };
+                // A card with no library key is not drawn: an empty box would be
+                // a press that goes nowhere. The caller shows "loading" or
+                // "failed" instead while any are missing.
+                let Some(key) = self.rail_key(related) else { continue };
+                let face = self.console_tile(&key, tile_w, tile_h, on, true, window);
                 tiles.push(
                     div()
                         .id(SharedString::from(format!("watch-rail-{}", related.id)))

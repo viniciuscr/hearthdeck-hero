@@ -71,8 +71,14 @@ fn detail_text(v: &DetailValue) -> String {
 /// The facts of Classic's card, without what it shows above them: the
 /// status and the store are in the header, the times in the numbers.
 fn classic_facts(f: &super::super::vm::FocusVm) -> Vec<(SharedString, String)> {
-    let shown = [tr!("Last Played"), tr!("Playtime")];
-    f.details.iter().filter(|d| !shown.contains(&d.label.as_ref())).map(|d| (d.label.clone(), detail_text(&d.value))).collect()
+    use super::super::vm::DetailField;
+    // By field, not by label: the Watch space renames these two rows
+    // (`collection/watch_facts.rs`), and a translated label would stop matching.
+    f.details
+        .iter()
+        .filter(|d| !matches!(d.field, DetailField::LastPlayed | DetailField::Playtime))
+        .map(|d| (d.label.clone(), detail_text(&d.value)))
+        .collect()
 }
 
 impl CollectionView {

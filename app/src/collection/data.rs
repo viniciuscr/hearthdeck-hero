@@ -234,7 +234,7 @@ pub(super) fn year_in(date: &str) -> Option<i32> {
     })
 }
 
-pub(super) fn focus_vm(lib: &Library, wiki: &WikiCache, g: &CollectionGame, playing: bool) -> FocusVm {
+pub(super) fn focus_vm(lib: &Library, wiki: &WikiCache, g: &CollectionGame, playing: bool, space: super::Space) -> FocusVm {
     let fd = focus_data(lib, g, wiki);
     let d = &fd.details;
     let mut rows = Vec::new();
@@ -353,6 +353,9 @@ pub(super) fn focus_vm(lib: &Library, wiki: &WikiCache, g: &CollectionGame, play
 
     let overview = if !d.description.trim().is_empty() { Some(d.description.clone().into()) } else { None };
     let overview_html = d.description_html.as_deref().map(super::html::parse).filter(|b| !b.is_empty()).map(Arc::new);
+
+    // Fork-Seam: F-021 — a film's detail rows say watched, not played.
+    super::watch_facts::relabel(space, &mut rows);
 
     FocusVm {
         key: g.key.clone().into(),
