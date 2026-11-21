@@ -26,7 +26,10 @@ Watch's: **stream providers** and **movies/series**.
 
 The binding constraint is upstream. Every line we add in a shared file is a
 conflict to reconcile at every merge, so the plan keeps that surface to an
-explicit, registered budget (§2) and asks upstream for nothing.
+explicit, registered budget (§2), machine-checked in `app/src/fork/seams.rs`.
+One request is made upstream, deliberately: a generic extension point for the
+console's detail page, offered as a branch cut from `upstream/main` under the
+fork's upstream-first rule (`docs/WATCH-PAGE.md`). The fork never depends on it.
 
 ## 2. Ours and upstream's
 
@@ -34,7 +37,7 @@ explicit, registered budget (§2) and asks upstream for nothing.
 |---|---|
 | `crates/watch-core`, `crates/watch-state`, `crates/watch`, `crates/watch-*` | `app/src/collection/{vm,data,card,tile,carousel,list_row}.rs` |
 | `app/src/fork/watch/**` | `app/src/collection/console/{game,layouts}/**` (the renderer) |
-| `app/src/collection/console/watch_page.rs` (the film page) | `crates/data/**` (`CollectionGame`, `Library`, `copies`, `json_store`) |
+| `app/src/collection/console/watch_page/**` (the film page: host, engine, sections, styles) | `crates/data/**` (`CollectionGame`, `Library`, `copies`, `json_store`) |
 | `crates/watch-state/src/collection.rs` (the **watch library writer**) | the theme system, widgets, navigation, image loader |
 
 **The rule this document exists to fix:** *shared files never learn a Watch
@@ -43,11 +46,15 @@ already consumes.
 
 ### The upstream budget
 
-Every line this transition touches in upstream's files, and nothing else:
+Every seam this transition touches in upstream's files. The authoritative file
+list is the seam table in `app/src/fork/seams.rs`; the rows of `docs/FORK.md` say
+why each exists, and the footprint below is measured in seam sites, not in lines.
+The page's own seams (`F-012`) are listed in that table and in
+`docs/WATCH-PAGE.md`; the rows here are the projection's.
 
 | Seam | Files | Footprint | Why it cannot be ours |
 |---|---|---|---|
-| the placeholder flag (`F-019`) | `app/src/collection/{vm,data,card,list_row}.rs`, `console/tile.rs`, `console/layouts/carousel.rs`, `console/layouts/spotlight/row.rs` | one `CardVm` field (+4 lines with its test fixture), one assignment, **five** one-line grey conditions — seven files, +12/−6 lines | the card model and the grey rule are upstream's renderer; "a placeholder is always dimmed, whatever the theme says" has no other expression |
+| the placeholder flag (`F-019`) | `app/src/collection/{vm,data,card,list_row}.rs`, `console/tile.rs`, `console/layouts/carousel.rs`, `console/layouts/spotlight/row.rs` | one `CardVm` field (+4 lines with its test fixture), one assignment, **five** one-line grey conditions — seven files | the card model and the grey rule are upstream's renderer; "a placeholder is always dimmed, whatever the theme says" has no other expression |
 | a provider's display name (`F-007`) | `crates/data/src/library.rs` (`source_label`) | **one line per stream provider** ("Stremio" is there) — an English literal the i18n coverage gate cannot see | `source_label` is upstream's table; an unknown source falls back to "Local" |
 | "Play with \<provider\>" (`F-020`) | `app/src/collection/copies.rs` → `GameAction::PlayCopy` | one branch, when a second provider ships | `PlayCopy` ends in the store client's launch (`app/src/collection/game_actions.rs:424`), which cannot start a Watch stream |
 | the module rename (`F-006`, `F-008`) | `app/src/collection/{load,mod}.rs`, `console/sources.rs` | one line each for the rename, plus two lines in the watchlist rail (`game.runner == item.provider` dropped, so a shelf entry matches its title on any card) | the app dispatches through that module, and the rail is upstream's; both files are already registered seams |
@@ -57,9 +64,11 @@ now one line that calls `sources::imported` (+19/−6 became +12/−6). The seco
 cannot shrink below one line per provider. The third is deferred — confirmed
 necessary, because `PlayCopy` never reaches Watch today.
 
-No upstream change is requested for any of them: each is a fork-side patch with
-a `Fork-Seam` trailer and a `docs/FORK.md` row. Today's footprint is 7 files,
-+12/−6 lines: one field, one assignment and five conditions.
+Each is a fork-side patch with a `Fork-Seam` trailer and a `docs/FORK.md` row.
+`app/src/fork/seams.rs` lists those files and the lines the fork owns, and fails
+the build when the table, the tree and the register disagree. The budget is
+measured in **seam sites per file**, not in lines: lines drift with upstream's
+formatting, sites do not.
 
 ## 3. The model
 
@@ -422,7 +431,9 @@ shows, +12/−6. Committed at `fork/main` it is still +19/−6 until this lands.
 ## 7. What we deliberately do not do
 
 - **Rewrite the renderer.** `card`/`tile`/`carousel`/`spotlight` stay upstream's;
-  they keep eating `CollectionGame`-shaped data produced by our projection.
+  they keep eating `CollectionGame`-shaped data produced by our projection. The
+  console's detail page is the one exception, and it is fork-owned
+  (`docs/WATCH-PAGE.md`).
 - **Rename upstream's crates or types.** `CollectionGame` remains the *view*
   type; `heronite_data::Library` keeps its name — which is why our collection is
   `Titles` in `watch::library`, never a second `Library`. The module rename does
@@ -435,15 +446,20 @@ shows, +12/−6. Committed at `fork/main` it is still +19/−6 until this lands.
   a second identity.
 - **Change what `installed` means for games.** The repurpose is confined to the
   watch library writer.
-- **Move the film page onto upstream.** It is already ours and stays there.
-- **Send anything upstream.** No issue, no pull request: the seams of §2 are
-  fork-side patches we register and merge ourselves.
+- **Move the film page onto upstream.** It stays fork-owned, as one subsystem
+  (`docs/WATCH-PAGE.md`): hosting it inside upstream's five detail-page layouts
+  was measured larger and lands in the files upstream rewrites every sync.
+- **Send anything upstream.** No issue and no pull request for the fork's own
+  features: the seams of §2 are fork-side patches we register and merge
+  ourselves. The single exception is the generic console extension point
+  `docs/WATCH-PAGE.md` offers under the upstream-first rule, which the fork
+  never depends on.
 
 ## 8. Risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Shared-file edits accumulate | the budget in §2 (7 files, +12/−6); each registered; P5 shrank one |
+| Shared-file edits accumulate | the budget in §2, measured in seam sites per file and machine-checked in `app/src/fork/seams.rs`; each registered |
 | The projection's read-back path is forgotten | §5.1 names it; P2's acceptance tests the round trip |
 | A rail mark is lost through the single `watchCatalog` | §5.1; the persisted mark is the one `kept`/`replace` parse; P4 asserts it |
 | A film and a series share an id on the wire | §5: the keys carry no kind; P4 keeps an explicit first-wins rule and a test |

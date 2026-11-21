@@ -78,16 +78,48 @@ with a red gate.
 - A new capability lives in a new crate (`crates/<name>`, no GPUI) plus a thin
   adapter in `app/src`. Edit upstream code only at registered seams.
 - Fork-owned code is not registered: `crates/watch*`, `app/src/fork/**`,
-  `app/src/collection/watch_playback.rs` and `docs/WATCH*.md` are additions, not
-  deviations. The register lists only upstream files a fork commit edits.
+  `app/src/collection/watch_playback.rs`,
+  `app/src/collection/console/watch_page*` (the film page, once it becomes a
+  directory), `app/src/collection/console/watch_panel.rs` and `docs/WATCH*.md`
+  are additions, not deviations. The register lists only upstream files a fork
+  commit edits.
 - No repo-wide formatting, renames, moves, or refactors of upstream code.
 - Extend through fork-owned traits and adapters; do not edit upstream enums,
   structs, or service signatures when a wrapper can do the job.
 - Fork feature switches belong to a fork-owned crate, not to
   `heronite_platform::Feature`.
 - Commits that touch upstream files carry a `Fork-Seam: <id>` trailer.
+- The page's and the dispatch's seams are machine-checked: `app/src/fork/seams.rs`
+  lists the upstream files the Watch page and its dispatch touch, the fork's own
+  lines in them and the row that justifies each. The register above remains the
+  full list of deviations. `cargo test` fails when that table, the tree and this
+  register disagree, and it guards the rule that upstream's detail-page layouts
+  never *dispatch* the fork's page — they may still word things per space (F-016,
+  F-021). A new hook lands in the table in the same commit.
 - Keep the deviation surface small and stable: review
-  `git diff main...fork/main --name-only` at every reconciliation.
+  `git diff upstream/main...fork/main --name-only` at every reconciliation
+  (`main` is fast-forwarded by `scripts/fork/sync-upstream.sh`; when it lags,
+  the register is still measured against `upstream/main`).
+
+The machine-checked list of those seams is `app/src/fork/seams.rs`. For the
+Watch space its files are `app/src/collection/console/game/mod.rs`,
+`app/src/collection/console/mod.rs`, `app/src/collection/mod.rs`,
+`app/src/collection/console/game/tabs.rs`,
+`app/src/collection/console/game/hero.rs`,
+`app/src/collection/console/hero.rs`, `app/src/collection/console/tile.rs`,
+`app/src/collection/console/layouts/carousel.rs`,
+`app/src/collection/console/layouts/cinema.rs`,
+`app/src/collection/console/layouts/grid.rs`,
+`app/src/collection/console/layouts/spotlight/mod.rs`,
+`app/src/collection/console/layouts/spotlight/parts.rs`,
+`app/src/collection/hltb_ui.rs`, `app/src/console/theme_rows.rs`,
+`app/src/pages/settings/console/mod.rs`, `app/src/collection/focus_left.rs`,
+`app/src/collection/context_menu.rs`, `app/src/main.rs`,
+`app/src/console/mod.rs`, `app/src/console/input.rs`,
+`app/src/console/input/gilrs_pads.rs`, `app/src/console/input/sdl_pads.rs`,
+`app/src/console/kit.rs`, `app/src/console/sound.rs` and
+`crates/platform/src/controllers.rs`. The design that keeps the list short is
+`docs/WATCH-PAGE.md`.
 
 ## Branding identity
 
@@ -115,17 +147,19 @@ implementation rules live in `docs/WATCH.md`.
 | F-009 | `.github/workflows/{release,flatpak,windows-packages}.yml` | upstream release workflows guarded to the upstream repository | active |
 | F-010 | `app/src/collection/{actions,game_actions,render_focus,grid_drawer}.rs`, `app/src/collection/focus/mod.rs`, `app/src/collection/console/{mod.rs,game/mod.rs,layouts/spotlight/mod.rs}` | Native Watch playback: the stream list and Play action on both detail surfaces | active |
 | F-011 | `docs/ARCHITECTURE.md` | the watch crate map (the fork-owned watch crates are absent upstream) | active |
-| F-012 | `app/src/collection/console/{mod.rs,game/mod.rs,game/hero.rs,hero.rs}`, `app/src/collection/{hltb_ui,watch_personal,watch_playback}.rs`, `app/src/console/{mod,input,kit,sound}.rs`, `app/src/console/input/{gilrs_pads,sdl_pads}.rs`, `crates/platform/src/controllers.rs` | a fork-owned film page for Watch titles (`console/watch_page.rs`: the details panel from the page's top edge down, its marks as icons), no HowLongToBeat lookups for them, and the **R3** press (the right stick's click) that page's watch-later shortcut needs — the input stack carries it on every backend | active |
+| F-012 | `app/src/collection/console/mod.rs`, `app/src/collection/console/game/mod.rs`, `app/src/collection/console/layouts/spotlight/mod.rs`, `app/src/collection/hltb_ui.rs`, `app/src/console/mod.rs`, `app/src/console/input.rs`, `app/src/console/kit.rs`, `app/src/console/sound.rs`, `app/src/console/input/gilrs_pads.rs`, `app/src/console/input/sdl_pads.rs`, `crates/platform/src/controllers.rs` | a fork-owned film page for Watch titles — `console/watch_page` is an addition in the containment list, not a deviation — reached through one dispatch seam: the seven questions the shell asks, no HowLongToBeat lookups for a film, and the **L3 / R3** stick clicks its trailer and watch-later presses use, carried by every input backend. Upstream's detail-page layouts are never edited for the page: `docs/WATCH-PAGE.md` is the design and the tests in `app/src/fork/seams.rs` enforce it | active |
 | F-013 | `crates/launch/src/ffmpeg_install.rs` (one test) | `only_the_programs_asked_for_are_downloaded` accepts a host that already has ffmpeg on the `PATH` — the Linux case the module documents — instead of expecting the "not downloaded on" error there | active |
 | F-014 | `app/src/collection/store_media/mod.rs` (`sync_store_media`) | no store media and no Steam lookup by name for a Watch title: a film has no store page, and its name would otherwise be searched on Steam as a game title | active |
 | F-015 | `crates/data/src/console_theme/mod.rs` (`MAX_TABS`), `app/src/console/theme_rows/tests.rs` (the tab-limit test and the theme-take assertions) | at most **six** tabs (LB / RB) instead of four: the Watch space's home, movies, series and shelf fill four on their own and a theme brings its own, so four left no room to add one | active |
 | F-018 | `.github/workflows/fork-release.yml` (the build step's `env`) | the release build carries the fork's application credentials — TMDB's API key from the `TMDB_API_KEY` secret (`HEARTHDECK_TMDB_API_KEY`) and Simkl's client id from `SIMKL_CLIENT_ID` (`HEARTHDECK_SIMKL_CLIENT_ID`) — because neither provider has an anonymous login and both authenticate the *application* | active |
 | F-017 | `crates/backup/src/catalog.rs` (one rule in `classify_config`) | Watch's provider credentials (`<provider>-auth.json`) are `Part::Logins` instead of `Settings`: a backup may exclude them, and the cloud sync never uploads logins. Watch's history, shelves and settings stay `Settings`, so a restore keeps them | active |
-| F-016 | `app/src/console/theme_rows/{,commands,host}.rs`, `app/src/console/themes.rs`, `app/src/collection/console/{mod,sources}.rs`, `app/src/collection/console/layouts/{cinema,carousel,dashboard,grid,xbox,spotlight}`, `app/src/collection/console/{hero.rs,game/{mod,hero,sheet}.rs}`, `app/src/pages/settings/{console_mode/{editors.rs,preview/layouts.rs},controls/mod.rs}`, `crates/i18n/locales/*` | themes are **presented per space**: `space_theme::validate` runs on every load and change (removes only what a space cannot draw) and `present` runs when a theme is taken (adds the tabs and rails Watch needs, never renames). Watch edits its own tabs, shelves and hero — the sources, shelf kinds and hero lines are the space's — and the desktop editor only ever writes the Games prefs (`File: app/src/console/theme_rows/host.rs`, `ThemeState::new`) | active |
+| F-016 | `app/src/console/theme_rows/{,commands,host}.rs`, `app/src/console/themes.rs`, `app/src/collection/console/{mod,sources}.rs`, `app/src/collection/console/layouts/{cinema,carousel,dashboard,grid,xbox,spotlight}`, `app/src/collection/console/{hero.rs,game/{mod,hero,sheet,tabs}.rs}`, `app/src/pages/settings/{console_mode/{editors.rs,preview/layouts.rs},controls/mod.rs}`, `crates/i18n/locales/*` | themes are **presented per space**: `space_theme::validate` runs on every load and change (removes only what a space cannot draw) and `present` runs when a theme is taken (adds the tabs and rails Watch needs, never renames). Watch edits its own tabs, shelves and hero — the sources, shelf kinds and hero lines are the space's — and the desktop editor only ever writes the Games prefs (`File: app/src/console/theme_rows/host.rs`, `ThemeState::new`) | active |
 | F-019 | `app/src/collection/{vm,data,card,list_row}.rs`, `app/src/collection/console/{tile.rs,layouts/carousel.rs,layouts/spotlight/row.rs}` | a Watch title **no source here can play** is dimmed **whatever the theme's "grey uninstalled" says**: one `CardVm.imported` field (+4 lines with its test fixture), its assignment (one line in `data.rs`, calling `app/src/fork/watch/sources.rs::dimmed` — a placeholder, or a film whose stream probe came back empty — like every other read of the projection), and **five** one-line grey conditions (`card.rs`, `list_row.rs`, `console/tile.rs`, `console/layouts/carousel.rs`, `console/layouts/spotlight/row.rs`). Seven files, +12/−6 lines | active |
 | F-021 | `app/src/collection/{data,actions}.rs`, `app/src/collection/console/{mod.rs,tile.rs,layouts/{grid,spotlight/parts,dashboard,wheel}.rs}` | the cover's caption, the "New" badge and the console facts are the **space's**, not the games': Watch shows the watched time or its state instead of "Not Played" (`build_groups` takes the space; one line at the call site), a release from the last week instead of the added date (`tile_is_new`, one line where the badge was computed), and the length instead of How Long To Beat, which is not asked for a film — named for what the sources give (a film's **Runtime**, a show's **Episode runtime**) with **Time to binge** for a series, every episode it lists at that length. The focused title's merged metadata is asked once it rests (debounced with the background art in `console_focus_game`, the page's own week-long cache), so the cards print its genres and length when the answer arrives and the projection's values until then. The rules live in `app/src/fork/watch/sources.rs` and `watch_playback.rs`; the files are already registered (F-016, F-019), this row is the new behaviour | active |
+| F-022 | `app/src/main.rs` (`mod fork;`), `app/src/collection/focus_left.rs`, `app/src/collection/context_menu.rs` | the fork module root, and the two desktop surfaces that gate their game-only rows on `Space::capabilities()`: no install, settings or playtime row in the focus panel for a film, and no install or manage verbs in its context menu. Registered late — these lines had been edited since F-010 without a row | active |
 
-F-019 and F-021 are the Watch titles transition's registered deviations so far.
+F-019, F-021 and F-022 are the Watch titles transition's registered deviations so
+far, and F-012's file list is the seam table's.
 F-020 (one branch in `app/src/collection/copies.rs`, so "Play with
 \<provider\>" reaches the Watch picker for a copies group) is reserved by
 `docs/WATCH-TITLES.md` §2 and is registered when that phase lands, i.e. when a
