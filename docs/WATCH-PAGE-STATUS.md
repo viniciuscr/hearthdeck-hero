@@ -100,15 +100,15 @@ split, one file per concern:
 | File | Moves |
 |---|---|
 | `sections/episode.rs` | **done** — `episode_name`, `episode_label`, `episode_desc`, `episode_row`, `episode_card` |
-| `sections/details.rs` | `DetailLine` (the struct itself, with its fields made visible to the page), `facts_line`, `title_status`, `watched_line`, `names`, `detail_lines`, `fact_label` |
-| `sections/rails.rs` | `watch_rail`, `rail_of`, `rail_columns`, `rail_line_width`, `columns_in`, `panel_room` |
-| `sections/marks.rs` | `watch_marks`, the marks row builder |
+| `sections/details.rs` | **done** — `facts_line`, `title_status`, `watched_line`, `names`, `detail_lines`, `fact_label` (`DetailLine` stayed in `mod.rs`; the section reaches it through `super`, so its fields were not widened) |
+| `sections/rails.rs` | `rail_of`, `panel_room`, `columns_in`, `rail_columns`, `rail_line_width` (free functions — they take `PAGE_PAD`/`LEFT_W`/`COLUMN_GAP`/`PANEL_PAD`/`RAIL_GAP` from `mod.rs` and `super::layouts::body_width`, which becomes `super::super::super::layouts::body_width`) and then `watch_rail` itself, which needs an `impl CollectionView` block in the section (legal: it is a descendant of `collection`) |
+| `sections/marks.rs` | `watch_marks`, likewise an `impl CollectionView` block |
 
-Notes for the next file: after moving `DetailLine`, `mod.rs`'s render code reads
-its fields, and the tests that build or compare one need it in scope — add a
-test-only `use` if the compiler asks. `detail_lines` and `title_status` call
-`crate::fork::watch::sources::{runtime_minutes_of, binge_minutes}`, so
-`sections/details.rs` keeps that path.
+Learned while moving the first two: `pub(super)` stops at `sections/`, so a
+section's items need `pub(in crate::collection::console::watch_page)`; moving a
+function out of `mod.rs` turns any import only it used (`trn`, `Fact`, gpui's
+prelude) into an unused-import error under `-D warnings` — remove them in the
+same commit, and give the one test that still needs `trn` its own import.
 
 Rules while moving:
 
