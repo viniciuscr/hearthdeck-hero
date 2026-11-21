@@ -288,6 +288,27 @@ mod tests {
     }
 
     #[test]
+    fn keeping_a_pages_rails_again_leaves_the_same_titles() {
+        use heronite_watch_core::metadata::Related;
+
+        let related = |id: &str| Related { id: id.into(), kind: "movie".into(), name: id.into(), ..Related::default() };
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+        let titles = |app: &AppPaths| heronite_watch_state::collection::titles(&app.cache.join(collection::ROOT));
+        let rails = || vec![crate::metadata::related_title(&related("tt400")), crate::metadata::related_title(&related("tt401"))];
+
+        assert_eq!(keep_related(&app, "tt4", rails()).unwrap(), 2);
+        // The app keeps the **whole** set every time, because a keep replaces the
+        // page's scoped feed: handing it only the titles it thought missing deleted
+        // the rest, and the next reload asked for them again — a loop, not a
+        // refresh. This is that rule, held (the count is what was written, not
+        // what was missing: the feed is replaced, then written again).
+        keep_related(&app, "tt4", rails()).unwrap();
+        let ids: Vec<String> = titles(&app).iter().map(|title| title.key.id.as_str().to_owned()).collect();
+        assert_eq!(ids, ["tt400", "tt401"], "the page's rails survive being kept again");
+    }
+
+    #[test]
     fn a_pages_rails_are_kept_under_the_page_and_replace_the_last_pages() {
         use heronite_watch_core::metadata::Related;
 

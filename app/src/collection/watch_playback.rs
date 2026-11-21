@@ -61,8 +61,9 @@ pub(super) struct WatchPlayback {
     /// library holds it (the press adds it and reloads).
     opening: Option<String>,
     /// The page whose rail titles are being kept, and where that keep stands:
-    /// a rail asks once, not once per frame.
+    /// a rail asks once, not once per frame (and gives up rather than looping).
     rails_page: Option<String>,
+    rails_tries: u8,
     rails_loading: bool,
     /// The keep was written and a reload is on its way: asking again until it
     /// lands is what made the same set be kept twice.
@@ -352,17 +353,23 @@ impl CollectionView {
             }
             return;
         }
+        // A new page starts its own count: the retry bound is per page, not per
+        // run, or a page that could not be kept would never be tried again.
+        if self.watch.rails_page.as_deref() != Some(page.as_str()) {
+            self.watch.rails_tries = 0;
+            self.watch.rails_failed = false;
+        }
         let rails = details.similar.len() + details.recommended.len();
         let known: std::collections::HashSet<String> =
             self.lib.iter().flat_map(|lib| lib.games.iter()).map(|game| crate::fork::watch::sources::id(game).to_owned()).collect();
-        let missing: Vec<heronite_watch::types::Title> = details
-            .similar
-            .iter()
-            .chain(details.recommended.iter())
-            .filter(|related| !known.contains(related.id.as_str()))
-            .map(heronite_watch::metadata::related_title)
-            .collect();
-        if missing.is_empty() {
+        // The **whole** set, never only what looks missing: the keep replaces the
+        // page's scoped feed, so handing it a subset deletes the rest — which
+        // came back as "missing" on the next reload, and that is a loop.
+        let titles: Vec<heronite_watch::types::Title> =
+            details.similar.iter().chain(details.recommended.iter()).map(heronite_watch::metadata::related_title).collect();
+        let missing =
+            details.similar.iter().chain(details.recommended.iter()).filter(|related| !known.contains(related.id.as_str())).count();
+        if missing == 0 {
             if self.watch.rails_page.as_deref() != Some(page.as_str()) {
                 log::info!(target: "heronite_app", "watch rails: {page} already has all {rails} titles in the library");
                 self.watch.rails_page = Some(page);
@@ -370,25 +377,38 @@ impl CollectionView {
             }
             return;
         }
+        if self.watch.rails_tries >= 3 {
+            // The set was written and the load still does not hold it: say so
+            // instead of keeping it again and again.
+            if !self.watch.rails_failed {
+                log::warn!(
+                    target: "heronite_app",
+                    "watch rails: {page} still misses {missing} of {rails} titles after {} keeps; giving up",
+                    self.watch.rails_tries
+                );
+                self.watch.rails_failed = true;
+            }
+            return;
+        }
         log::info!(
             target: "heronite_app",
-            "watch rails: keeping {} of {rails} for {page} (similar {}, recommended {})",
-            missing.len(),
+            "watch rails: keeping {rails} titles for {page} ({missing} missing, similar {}, recommended {})",
             details.similar.len(),
             details.recommended.len()
         );
+        self.watch.rails_tries = self.watch.rails_tries.saturating_add(1);
         self.watch.rails_loading = true;
         self.watch.rails_failed = false;
         self.watch.rails_spoke = false;
         let app = self.app_paths.clone();
         cx.spawn(async move |this, cx| {
             let asking = page.clone();
-            let result = cx.background_spawn(async move { heronite_watch::catalog::keep_related(&app, &asking, missing) }).await;
+            let result = cx.background_spawn(async move { heronite_watch::catalog::keep_related(&app, &asking, titles) }).await;
             this.update(cx, |this, cx| {
                 this.watch.rails_loading = false;
                 match result {
                     Ok(added) => {
-                        log::info!(target: "heronite_app", "watch rails: kept {added} new title(s) for {page}, reloading");
+                        log::info!(target: "heronite_app", "watch rails: wrote {added} title(s) for {page}, reloading");
                         this.watch.rails_page = Some(page);
                         this.watch.rails_waiting_reload = true;
                         // The reload is what turns them into library titles: the
