@@ -47,7 +47,7 @@ names, comma separated (`--only app,retroarch`, `--skip audio,mounts`).
 | `packages` | Offers `pacman -Syu`, then installs the session, emulation, media and backup packages, plus `base-devel` and the GPU's Vulkan driver | pacman database |
 | `aur` | Installs `stremio-service-bin`, `pcsx2-latest-bin` and `ludusavi` with `shelly`, `paru` or `yay`, falling back to `makepkg` as the console account | AUR builds under `~/.cache/hearthdeck-bootstrap` |
 | `ludusavi` | Downloads the per-emulator manifests for the emulators that are installed and adds them, with each emulator's save folder, to Ludusavi's config | `~/.config/ludusavi/config.yaml`, `~/.config/ludusavi/manifests/` |
-| `app` | Adds the fork's `[hearthdeck]` repository when it answers, then installs `hearthdeck-hero`; otherwise installs the latest release `.pkg.tar.zst` | `/etc/pacman.conf`, `/usr/bin/hearthdeck-hero` |
+| `app` | Adds the fork's `[hearthdeck]` repository when it answers, then installs `hearthdeck-hero` — or updates it to the newest version the repository publishes; when the repository does not answer, it checks the release channel and installs a newer release `.pkg.tar.zst` | `/etc/pacman.conf`, `/usr/bin/hearthdeck-hero` |
 | `mpv` | Installs the gamepad bindings and player settings the player needs (A/B/X/Y, D-pad, sticks, bumpers, triggers) as a managed block | `~/.config/mpv/input.conf`, `~/.config/mpv/mpv.conf` |
 | `retroarch` | Downloads the libretro joypad profiles for Xbox and/or PlayStation pads into the account's config, and sets fullscreen in `retroarch.cfg` | `~/.config/retroarch/autoconfig/udev`, `~/.config/retroarch/retroarch.cfg` |
 | `audio` | Adds the account to `audio` and pins a sound card profile (asked once, or `--audio-card`/`--audio-profile`) so it is re-applied at every login | `~/.config/systemd/user/hearthdeck-audio-profile.service` |
@@ -125,9 +125,11 @@ Yes — it is meant to be run on a half-configured box, because every step looks
 at the machine first and the rest is a question. Three things are worth knowing:
 
 - **Nothing is reinstalled just because it is missing from the plan.** An
-  installed `hearthdeck-hero` is reported, not replaced (its own channel updates
-  it); packages already present are skipped; controller profiles already in the
-  account's config are left alone; a mount already in fstab is not added twice.
+  installed `hearthdeck-hero` is replaced only when the channel has a newer
+  version than the one installed, and the step says which (`up to date: …` is
+  the usual answer); packages already present are skipped; controller profiles
+  already in the account's config are left alone; a mount already in fstab is
+  not added twice.
 - **A full run also asks to upgrade the system** (`pacman -Syu`) and to disable
   enabled display managers. On a box that is working, answer no to either; the
   rest still runs. `--no-update` skips the upgrade without asking.
@@ -139,7 +141,10 @@ at the machine first and the rest is a question. Three things are worth knowing:
 If the app was installed by hand (a binary in `~/.local/bin` rather than a
 package), a run that includes the `app` step installs the system package into
 `/usr/bin` — the path the console session starts. `--skip app` leaves the
-existing install alone.
+existing install alone. A package installed by hand from a `.pkg.tar.zst` also
+gets no repository: the first `--only app` run that reaches the fork's
+repository adds `[hearthdeck]` to `pacman.conf`, and from then on updates come
+with `sudo pacman -Syu`.
 
 The smallest useful run on a partially configured machine is the missing piece,
 by name:
@@ -309,11 +314,16 @@ removed; the details are in the log). Install it by hand, then re-run with
 Because the entry has `nofail` and `x-systemd.automount`, an unplugged disk
 never blocks the boot; it mounts when it appears and the path is touched.
 
-**The fork repository is unreachable.** The bootstrap then installs the latest
-release package and does *not* add `[hearthdeck]` to `pacman.conf` (a dead
-server would make every `pacman -Syu` noisy). Re-run `--only app` once
+**The fork repository is unreachable.** The bootstrap then checks the release
+channel and installs a newer release package when there is one, and it still
+does *not* add `[hearthdeck]` to `pacman.conf` (a dead server would make every
+`pacman -Syu` noisy). A 404 at
 <https://viniciuscr.github.io/hearthdeck-hero/arch/x86_64/hearthdeck.db>
-answers. See [docs/RELEASING.md](RELEASING.md) for the one-time Pages setup.
+usually means GitHub Pages was never enabled — the `gh-pages` branch exists,
+but nothing serves it. Enable it once (Settings → Pages → **Deploy from a
+branch**, `gh-pages` / **/ (root)**, see [docs/RELEASING.md](RELEASING.md)),
+then run `--only app`: that run adds the repository, so from then on updates
+come with `sudo pacman -Syu`.
 
 **pacman says "failed to prepare transaction (could not satisfy
 dependencies)".** The package database is newer than the installed system (the

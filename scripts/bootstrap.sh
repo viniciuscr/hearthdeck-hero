@@ -1094,7 +1094,7 @@ step_ludusavi() {
 
 step_app() {
   section "Hearthdeck Hero"
-  local current=""
+  local current="" reachable=0
 
   if [[ -n $APP_PACKAGE ]]; then
     info "installing the package file $APP_PACKAGE"
@@ -1106,19 +1106,24 @@ step_app() {
     return 0
   fi
 
+  # Asked once: the answer decides both whether the repository can be added
+  # and where the update check looks for a newer version.
+  repo_reachable && reachable=1
+
   if pacman -Q "$HD_APP_NAME" >/dev/null 2>&1; then
     current=$(pacman -Q "$HD_APP_NAME" | awk '{print $2}')
     ok "$HD_APP_NAME $current is installed"
-    if repo_reachable; then
+    if [[ $reachable -eq 1 ]]; then
       add_package_repo
-      info "updates come with 'sudo pacman -Syu'"
+      update_from_repo "$current"
     else
-      info "the fork repository is not reachable; update by hand when it is back"
+      warn "the fork repository is not reachable at $REPO_URL"
+      update_from_release "$current"
     fi
     return 0
   fi
 
-  if repo_reachable; then
+  if [[ $reachable -eq 1 ]]; then
     add_package_repo
     info "installing from the fork's repository"
     if ! run pacman -S --needed --noconfirm "$HD_APP_NAME"; then
@@ -1136,6 +1141,82 @@ step_app() {
 
 repo_reachable() {
   curl -fsSL --max-time 15 -o /dev/null "$REPO_URL/$HD_REPO_NAME.db" 2>/dev/null
+}
+
+# dot_version TAG — a release tag's version as Arch spells it: pacman's pkgver
+# takes no hyphen, so `v1.7.0-hearthdeck.2.0.0` becomes `1.7.0.hearthdeck.2.0.0`.
+dot_version() {
+  local version="${1#v}"
+  printf '%s\n' "${version//-/.}"
+}
+
+# newer VERSION OTHER — true when pacman would consider VERSION the newer one.
+# It is pacman's own rule (vercmp ships with it), so `1.7.0.hearthdeck.2.0.0`
+# sorts after `1.7.0.hearthdeck.1.3.1` and `1.10.0` after `1.9.0`.
+newer() {
+  local order
+  order=$(vercmp "$1" "$2" 2>/dev/null) || return 1
+  [[ $order -gt 0 ]]
+}
+
+# release_latest_tag — the newest release's tag, from where /releases/latest
+# redirects. Fails (and prints nothing) when the release page does not answer.
+release_latest_tag() {
+  local tag
+  tag=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$HD_RELEASES/latest" 2>/dev/null) || return 1
+  tag="${tag##*/}"
+  [[ $tag == v* ]] || return 1
+  printf '%s\n' "$tag"
+}
+
+# update_from_repo CURRENT — refreshes the database and installs the package
+# the fork's repository publishes, when it is newer than CURRENT. Afterwards
+# the package manager owns the version, so updates come with `pacman -Syu`.
+update_from_repo() {
+  local current="$1" available=""
+  if [[ $DRY_RUN -eq 1 ]]; then
+    say "  ${C_DIM}[dry-run]${C_RESET} would refresh the repository and update $HD_APP_NAME if it publishes a newer version"
+    return 0
+  fi
+  if ! run pacman -Sy --noconfirm; then
+    warn "could not refresh the package database; skipping the update check"
+    return 0
+  fi
+  available=$(pacman -Si "$HD_APP_NAME" 2>/dev/null | awk -F': *' '/^Version[[:space:]]*:/{print $2; exit}' || true)
+  if [[ -z $available ]]; then
+    warn "the repository answers but does not list $HD_APP_NAME; the installed file stays"
+    return 0
+  fi
+  if ! newer "$available" "$current"; then
+    info "up to date: $current is the newest the repository has"
+    info "future updates come with 'sudo pacman -Syu'"
+    return 0
+  fi
+  info "updating $HD_APP_NAME $current -> $available"
+  if run pacman -S --noconfirm "$HD_APP_NAME"; then
+    note "updated $HD_APP_NAME to $available"
+    info "future updates come with 'sudo pacman -Syu'"
+  else
+    warn "the update failed; run 'sudo pacman -Syu' by hand"
+  fi
+}
+
+# update_from_release CURRENT — the same check against the release channel,
+# for when the repository does not answer. The package installed here comes
+# from a file, so the next release is installed the same way.
+update_from_release() {
+  local current="$1" tag pkgver
+  if ! tag=$(release_latest_tag); then
+    warn "$HD_RELEASES does not answer either; update by hand when it is back"
+    return 0
+  fi
+  pkgver=$(dot_version "$tag")
+  if ! newer "$pkgver" "${current%%-*}"; then
+    info "up to date: $tag is the newest release"
+    return 0
+  fi
+  info "a newer release is out: $tag (installed $current)"
+  install_release_package "$tag"
 }
 
 add_package_repo() {
@@ -1174,19 +1255,19 @@ add_package_repo() {
   run pacman -Sy --noconfirm
 }
 
+# install_release_package [TAG] — installs a release's package file over
+# whatever is installed: the newest release when no tag is named, and the tag
+# the caller already checked when there is one.
 install_release_package() {
-  local tag pkgver url file
+  local tag="${1:-}" pkgver url file
   if [[ $DRY_RUN -eq 1 ]]; then
-    say "  ${C_DIM}[dry-run]${C_RESET} would install the latest release package into /usr/bin"
+    say "  ${C_DIM}[dry-run]${C_RESET} would download the release package and install it over the current one"
     return 0
   fi
-  tag=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$HD_RELEASES/latest" 2>/dev/null) || tag=""
-  tag="${tag##*/}"
-  if [[ -z $tag || $tag != v* ]]; then
-    die "could not find the latest release at $HD_RELEASES/latest"
+  if [[ -z $tag ]]; then
+    tag=$(release_latest_tag) || die "could not find the latest release at $HD_RELEASES/latest"
   fi
-  pkgver="${tag#v}"
-  pkgver="${pkgver//-/.}"
+  pkgver=$(dot_version "$tag")
   url="$HD_RELEASES/download/$tag/hearthdeck-hero-$pkgver-1-x86_64.pkg.tar.zst"
   file="$WORK_DIR/$(basename -- "$url")"
   info "downloading $url"
@@ -1219,7 +1300,7 @@ install_mpv_config() {
   write_mpv_block "$dir/input.conf" "$owner" <<'INPUT'
 # --- Face Buttons (A, B, X, Y) ---
 GAMEPAD_ACTION_DOWN    cycle pause              # A: Play / Pause
-GAMEPAD_ACTION_RIGHT   cycle mute               # B: Mute / Unmute
+GAMEPAD_ACTION_RIGHT   quit-watch-later         # B: Close the video (saves the position)
 GAMEPAD_ACTION_LEFT    cycle sub                # X: Cycle Subtitles
 GAMEPAD_ACTION_UP      cycle fullscreen         # Y: Toggle Fullscreen
 
@@ -1245,7 +1326,7 @@ GAMEPAD_RIGHT_STICK       show-progress         # R3 (Click Right Stick): Show T
 
 # --- Menu & View Buttons ---
 GAMEPAD_BACK           cycle audio              # View (Back): Cycle Audio Tracks
-GAMEPAD_START          quit-watch-later         # Menu (Start): Save Position & Quit
+GAMEPAD_START          cycle mute               # Menu (Start): Mute / Unmute
 INPUT
   [[ $HD_WROTE -eq 1 ]] && wrote=1
 
