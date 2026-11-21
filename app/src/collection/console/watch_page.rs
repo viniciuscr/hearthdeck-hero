@@ -55,8 +55,9 @@ const COLUMN_GAP: f32 = 40.;
 /// The column the title, its marks and its list take. The details panel takes
 /// the rest of the page, from its top edge to its bottom.
 const LEFT_W: f32 = 560.;
-/// The details panel's corners, design px.
+/// The details panel's corners and its own padding, design px.
 const PANEL_RADIUS: f32 = 20.;
+const PANEL_PAD: f32 = 26.;
 /// The gaps between two of a rail's tiles, side by side and row under row. The
 /// tile itself is the theme's own (`console_tile_size`), never a size of this
 /// page's.
@@ -434,14 +435,36 @@ fn rail_route(pane: Pane, focus: usize, to: usize, columns: usize) -> Vec<Pad> {
     pads
 }
 
-/// How many of the theme's tiles a rail's row holds, by the page's own
-/// arithmetic (`card_is_wide` counts the same panel). The tile's width is the
-/// theme's (`console_tile_size`), so a square or wide tile makes fewer columns;
-/// at least two, and the grid scrolls when the list is long.
+/// The room the details panel really has inside it, design px: the page's
+/// width after its own margins, the title's column and the panel's padding.
+/// That width is the body's, never the window's: a theme whose menu is a Rail
+/// keeps it on screen and insets the page by it (`layouts::body_width`), so a
+/// panel measured from the window would claim room it does not have.
+fn panel_room(window: &Window) -> f32 {
+    super::layouts::body_width(window) - 2. * PAGE_PAD - LEFT_W - COLUMN_GAP - 2. * PANEL_PAD
+}
+
+/// How many of the theme's tiles fit a row of `room` design px: as many as
+/// the row of `tile_w`-wide tiles, `RAIL_GAP` apart, holds.
+fn columns_in(room: f32, tile_w: f32) -> usize {
+    let fit = ((room + RAIL_GAP) / (tile_w + RAIL_GAP)).floor();
+    (fit as usize).max(1)
+}
+
+/// How many of the theme's tiles a rail's row holds: as many as fit the
+/// panel's real room (`panel_room`). The tile's width is the theme's
+/// (`console_tile_size`), so a square or wide tile makes fewer columns. Never
+/// fewer than one and never so many that a row runs out of the panel — the
+/// grid scrolls down, not across.
 fn rail_columns(window: &Window, tile_w: f32) -> usize {
-    let viewport = f32::from(crate::ui::content_size(window).width) / kit::scale();
-    let panel = viewport - 2. * PAGE_PAD - LEFT_W - COLUMN_GAP - 2. * 26.;
-    ((panel / (tile_w + RAIL_GAP)).floor() as usize).max(2)
+    columns_in(panel_room(window), tile_w)
+}
+
+/// The width a rail's full row takes, design px: `columns` tiles with the gap
+/// between them. A shorter last row keeps it too, so its cards stay in their
+/// columns, and the whole block is centred in the panel.
+fn rail_line_width(columns: usize, tile_w: f32) -> f32 {
+    columns as f32 * tile_w + columns.saturating_sub(1) as f32 * RAIL_GAP
 }
 
 impl CollectionView {
@@ -622,7 +645,7 @@ impl CollectionView {
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
-                    .p(u(26.))
+                    .p(u(PANEL_PAD))
                     .rounded(u(PANEL_RADIUS))
                     .shadow(kit::shadow(0.5, 12., 44.))
                     .flex()
@@ -666,6 +689,7 @@ impl CollectionView {
         let room = super::tile::label_room();
         let focus = self.watch_rail_focus(items.len());
         let columns = rail_columns(window, tile_w);
+        let line_w = rail_line_width(columns, tile_w);
         let pane = self.watch_pane();
         // A browser page, not a shelf: the theme's tiles fill the panel row
         // under row, and the panel scrolls (the right stick, or the pad moving
@@ -676,10 +700,15 @@ impl CollectionView {
             Rail::Similar => "console-watch-similar",
             Rail::Community => "console-watch-community",
         };
+        // The rows are the width of a full one and centred in the panel (a
+        // shorter last row keeps its columns), so the covers sit in the middle
+        // with room on both sides for the focus's growth — a row wider than the
+        // panel would push the last column's card past its right edge.
         let mut grid = div()
             .id(SharedString::from(id))
             .flex()
             .flex_col()
+            .items_center()
             .gap(u(RAIL_ROW_GAP))
             .overflow_y_scroll()
             .track_scroll(self.console.game.about.handle());
@@ -706,7 +735,7 @@ impl CollectionView {
                         .into_any_element(),
                 );
             }
-            grid = grid.child(div().flex().gap(u(RAIL_GAP)).children(tiles));
+            grid = grid.child(div().flex_none().w(u(line_w)).flex().gap(u(RAIL_GAP)).children(tiles));
         }
         grid.flex_1().min_h_0().into_any_element()
     }
@@ -1547,5 +1576,24 @@ mod tests {
             assert!(!watch_later_press(pad), "{pad:?} keeps its own job");
         }
         assert!(!trailer_press(Pad::R3), "the two sticks' clicks do different things");
+    }
+
+    #[test]
+    fn a_rails_row_never_runs_out_of_the_panel() {
+        // Every theme's tile (portrait 120–215, square, wide up to 376) at the
+        // panels a window can give: the row is never wider than its room, so
+        // the last card cannot be pushed past the panel's right edge.
+        for room in [200., 316., 462., 604., 900., 1180.] {
+            for tile_w in [120., 150., 180., 215., 262.5, 315., 376.] {
+                let columns = columns_in(room, tile_w);
+                assert!(columns >= 1, "a rail always has a row");
+                if room >= tile_w {
+                    assert!(rail_line_width(columns, tile_w) <= room, "{columns} tiles of {tile_w} fit {room}");
+                    assert!(rail_line_width(columns + 1, tile_w) > room, "one more tile of {tile_w} would not fit {room}");
+                } else {
+                    assert_eq!(columns, 1, "a room narrower than a tile keeps the one column it can");
+                }
+            }
+        }
     }
 }

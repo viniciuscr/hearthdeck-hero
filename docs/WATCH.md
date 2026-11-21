@@ -4,6 +4,19 @@ Status: specification for Phases 0–5. `docs/FORK.md` owns the fork's
 change-control rules; this document owns the Watch feature's definitions and
 the rules that apply while building it.
 
+> **Revision 2026-11-21 — the rails' grid is measured from the panel, and
+> centred in it.**
+> A rail measured its columns from the window and then subtracted the page's
+> margins, so it never took off the space a theme's menu Rail keeps on screen
+> (`MenuStyle::Rail`, as Hub draws it): the panel was believed wider than it is
+> and the grid claimed a column the panel could not hold, so the last column ran
+> over its right edge and a focused card grew out of the panel with it. The room
+> now comes from `layouts::body_width` (the body's width, the Rail taken off),
+> the same measure every other layout uses; a row holds the tiles that fit it
+> and comes down to one rather than running over, and every row is the width of
+> a full one and centred — a short last row included — so the covers sit in the
+> middle with room on both sides for the focus's growth.
+>
 > **Revision 2026-11-20 — the film page gains Simkl's two lists: Community and
 > Similar.**
 > Simkl's detail record carries two lists the page had nowhere to put:
