@@ -195,6 +195,20 @@ Rules while moving:
 3. `app/src/fork/seams.rs`'s spotlight row cites F-012 and F-010 but its `why`
    does not mention F-021.
 
+## Sync log — the parity measurement
+
+`docs/WATCH-PAGE.md` §10 re-opens the "host Watch inside upstream's layouts"
+question when the detail-page files go two syncs without a change. Count them
+after each `scripts/fork/sync-upstream.sh` and record it here:
+
+| Date | Upstream | `console/game/*.rs` changed | `console/layouts/**` changed | Verdict |
+|---|---|---|---|---|
+| 2026-11-21 | `72463208` | 5 (hero, tabs, sheet, showcase, mod) | 9 | stay out |
+
+The count is `git diff <previous upstream>..<new upstream> --numstat -- <path>`.
+An unchanged sync is the only evidence that re-grafting would stop being a
+treadmill; the decision is not re-argued without two of them in a row.
+
 ## Open owner decisions
 
 - Which styles Watch ships besides **Film** (Phase 3), and the parity check's

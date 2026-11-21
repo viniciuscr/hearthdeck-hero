@@ -181,3 +181,56 @@ Found while reviewing the page and independent of the refactor:
 - whether the engine absorbs `watch_playback.rs`'s view state (Phase 2 measures
   the two owners and keeps data state where it is either way);
 - the parity check's form for styles (a screenshot gate is the candidate).
+
+## 10. The upstream parity policy
+
+Upstream's page is code, not a template: its five styles are hand-written
+drawing routines with closed geometry (`Shape`/`Zone`/`Geo`) and a private facts
+model. Hosting Watch inside them was measured at 11 → ≥14 upstream files, with
+the fork's lines landing in the bodies upstream rewrites most often, and it would
+have hit real defects on day one (four styles treat a season change as
+"activate", the Sheet's six-id allow-list drops every film row, Hero has no list,
+and `Row` cannot carry a still). So Watch draws its own arrangement and reuses
+upstream's **components** — the list, the tiles, the theme tokens, the focus and
+scroll helpers — which is where most of upstream's polish lands.
+
+That trade is only sound if it is re-measured, not believed. This section is the
+rule for doing that.
+
+**Naming.** A fork style may carry one of upstream's detail-page names (Hero,
+Tabs, Sheet, Showcase) **only** when a side-by-side shows the same arrangement:
+the same blocks in the same places, the same focus order. Otherwise the style
+gets its own name. A person is never promised a thing the page does not do, and
+`style.rs` says the same in code.
+
+**The parity check.** Every style after Film ships with a committed reference
+screenshot, taken on a known window size with the Film theme, and the style is
+compared to it by hand on each release — not by a unit test, because the thing
+being checked is a picture. A style whose picture changes without a matching
+intent in the commit is a regression, exactly like a failing test.
+
+**The revisit rule (the numbers, not the feeling).** After every upstream sync,
+count how many of `app/src/collection/console/game/*.rs` and
+`app/src/collection/console/layouts/**` changed, and write the count into the
+sync log in `docs/WATCH-PAGE-STATUS.md`. The decision to host Watch inside
+upstream's layouts is re-opened when the detail-page files go **two consecutive
+syncs without a change** — at that point re-grafting film logic into them stops
+being a treadmill and the trade flips. Until then, staying out is cheaper, and
+the log is the evidence either way.
+
+**The degradation contract.** If the fork ever offers "an upstream style for
+Watch" as an option, it is labelled as such and it degrades safely: no episodes,
+no streams, no rails; a season press may never launch anything; the row filter may
+never empty the page. Those three are the defects found in review, and each gets
+a test before the option ships.
+
+**Who owns what.** Film is the fork's and is always available. Upstream's styles
+serve games only unless the person explicitly opts into the contract above. The
+fork never edits upstream's detail-page layouts for Watch — `app/src/fork/seams.rs`
+fails the build if anyone tries.
+
+**Offering upstream an extension point.** Phase 5 offers upstream a generic
+space/section hook for this screen, under the fork's upstream-first rule. If it
+is accepted, the seven dispatch answers collapse and the fork's page plugs in as
+a section set; this section is then superseded by upstream's own contract. If it
+is declined, nothing was blocked — the fork already ships the page.
