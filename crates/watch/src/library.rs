@@ -269,10 +269,28 @@ fn placeholder_item(placeholder: &Placeholder) -> MovieItem {
 /// reload only re-reads the file; a rail turned on or off refreshes at once.
 const REFRESH_AFTER: Duration = Duration::from_secs(120);
 
+/// What the last refresh saw: when it ran, the rails it asked for, and the
+/// person's own record at that moment (`movies.json`'s modified time).
+struct Refreshed {
+    at: Instant,
+    rails: Vec<String>,
+    record: Option<std::time::SystemTime>,
+}
+
+/// The modified time of the person's record, which is what the fold into the
+/// projection reads. `None` when the file is missing or its time cannot be read:
+/// that is not "unchanged", so the first read after it lands refreshes.
+fn record_stamp(app: &AppPaths) -> Option<std::time::SystemTime> {
+    std::fs::metadata(heronite_watch_state::store::movies_path(app)).and_then(|meta| meta.modified()).ok()
+}
+
 /// Whether the rails are due a refresh: never fetched, fetched long enough ago,
-/// or the set the person turned on changed.
-fn refresh_due(last: Option<&(Instant, Vec<String>)>, rails: &[String]) -> bool {
-    last.is_none_or(|(at, seen)| at.elapsed() >= REFRESH_AFTER || seen.as_slice() != rails)
+/// the set the person turned on changed, or **their own record changed** (a mark
+/// or a finished session folds into the projection, and waiting the whole window
+/// for it would show a stale mark on the grid).
+fn refresh_due(last: Option<&Refreshed>, rails: &[String], record: Option<std::time::SystemTime>) -> bool {
+    let Some(last) = last else { return true };
+    last.at.elapsed() >= REFRESH_AFTER || last.rails.as_slice() != rails || last.record != record
 }
 
 /// The movies Collection, refreshed from the providers when possible. A
@@ -285,16 +303,19 @@ pub fn library(app: &AppPaths, include_hidden: bool) -> Result<Library> {
     // rail no longer holds — or a rail that is now off — with the rail.
     let rails = crate::collections::enabled(app);
     let ids: Vec<String> = rails.iter().map(|(_, rail)| rail.id.clone()).collect();
-    static LAST_REFRESH: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
+    static LAST_REFRESH: Mutex<Option<Refreshed>> = Mutex::new(None);
+    let record = record_stamp(app);
     let due = {
         let last = LAST_REFRESH.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        refresh_due(last.as_ref(), &ids)
+        refresh_due(last.as_ref(), &ids, record)
     };
     if due {
         match collection::refresh(&root, &ids, || items(&http, app, &rails)) {
             Ok(()) => {
                 let mut last = LAST_REFRESH.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                *last = Some((Instant::now(), ids));
+                // The stamp is read **before** the fold: a write that lands while
+                // it runs is one the next load must see.
+                *last = Some(Refreshed { at: Instant::now(), rails: ids, record });
             }
             Err(error) => log::warn!("movies provider: {error:#}; keeping the last library"),
         }
@@ -713,12 +734,13 @@ mod tests {
     #[test]
     fn a_page_reload_does_not_refetch_the_rails_but_a_new_rail_does() {
         let rails = vec!["tmdb:top-rated:movie".to_owned()];
-        assert!(refresh_due(None, &rails), "the first load fetches");
-        let just_now = (Instant::now(), rails.clone());
-        assert!(!refresh_due(Some(&just_now), &rails), "a page landing reloads the file, not the rails");
-        let stale = (Instant::now() - REFRESH_AFTER - Duration::from_secs(1), rails.clone());
-        assert!(refresh_due(Some(&stale), &rails), "the window passes");
-        assert!(refresh_due(Some(&just_now), &["other:rail".to_owned()]), "turning a rail on refreshes at once");
+        let record = None;
+        assert!(refresh_due(None, &rails, record), "the first load fetches");
+        let just_now = Refreshed { at: Instant::now(), rails: rails.clone(), record };
+        assert!(!refresh_due(Some(&just_now), &rails, record), "a page landing reloads the file, not the rails");
+        let stale = Refreshed { at: Instant::now() - REFRESH_AFTER - Duration::from_secs(1), rails: rails.clone(), record };
+        assert!(refresh_due(Some(&stale), &rails, record), "the window passes");
+        assert!(refresh_due(Some(&just_now), &["other:rail".to_owned()], record), "turning a rail on refreshes at once");
     }
 
     #[test]
@@ -866,5 +888,24 @@ mod tests {
         };
         assert_eq!(view(&raw), view(loaded.titles()), "the raw decode and the loaded-library decode must agree");
         assert!(!raw[1].available(), "and the placeholder is one, whichever reader");
+    }
+
+    #[test]
+    fn the_rails_refresh_when_the_persons_record_moved_inside_the_window() {
+        use std::time::SystemTime;
+
+        let rails = vec!["cinemeta".to_owned()];
+        let seen = SystemTime::UNIX_EPOCH;
+        let now = || Refreshed { at: Instant::now(), rails: rails.clone(), record: Some(seen) };
+
+        assert!(refresh_due(None, &rails, Some(seen)), "never fetched is due");
+        assert!(!refresh_due(Some(&now()), &rails, Some(seen)), "same rails, same record, inside the window: not due");
+        assert!(refresh_due(Some(&now()), &rails, Some(seen + std::time::Duration::from_secs(1))), "a mark landed: due now");
+        assert!(refresh_due(Some(&now()), &rails, None), "the record went away: due");
+        assert!(!refresh_due(Some(&now()), &rails, Some(seen)), "and a record that did not move is not");
+        assert!(refresh_due(Some(&now()), &["tmdb".to_owned()], Some(seen)), "another set of rails is due");
+
+        let old = Refreshed { at: Instant::now() - REFRESH_AFTER - std::time::Duration::from_secs(1), ..now() };
+        assert!(refresh_due(Some(&old), &rails, Some(seen)), "long enough ago is due");
     }
 }
