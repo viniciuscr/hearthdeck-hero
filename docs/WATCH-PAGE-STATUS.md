@@ -201,11 +201,12 @@ Rules while moving:
 question when the detail-page files go two syncs without a change. Count them
 after each `scripts/fork/sync-upstream.sh` and record it here:
 
-| Date | Upstream | `console/game/*.rs` changed | `console/layouts/**` changed | Verdict |
-|---|---|---|---|---|
-| 2026-11-21 | `72463208` | 5 (hero, tabs, sheet, showcase, mod) | 9 | stay out |
+| Date | Previous upstream | Upstream | `console/game/*.rs` changed | `console/layouts/**` changed | Verdict |
+|---|---|---|---|---|---|
+| 2026-11-21 | `14562ee6` | `72463208` | 4 (hero, mod, sheet, showcase; `tabs.rs` untouched) | 13 | stay out |
 
-The count is `git diff <previous upstream>..<new upstream> --numstat -- <path>`.
+The count is `git diff <previous upstream> <new upstream> --numstat -- <path>`,
+counted by file; record both commits so the numbers can be reproduced.
 An unchanged sync is the only evidence that re-grafting would stop being a
 treadmill; the decision is not re-argued without two of them in a row.
 

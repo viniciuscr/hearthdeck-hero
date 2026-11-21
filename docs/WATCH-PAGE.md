@@ -180,19 +180,23 @@ Found while reviewing the page and independent of the refactor:
   check);
 - whether the engine absorbs `watch_playback.rs`'s view state (Phase 2 measures
   the two owners and keeps data state where it is either way);
-- the parity check's form for styles (a screenshot gate is the candidate).
+- the parity check's form for styles (decided: a committed screenshot compared by
+  hand, §10).
 
 ## 10. The upstream parity policy
 
 Upstream's page is code, not a template: its five styles are hand-written
-drawing routines with closed geometry (`Shape`/`Zone`/`Geo`) and a private facts
-model. Hosting Watch inside them was measured at 11 → ≥14 upstream files, with
-the fork's lines landing in the bodies upstream rewrites most often, and it would
-have hit real defects on day one (four styles treat a season change as
-"activate", the Sheet's six-id allow-list drops every film row, Hero has no list,
-and `Row` cannot carry a still). So Watch draws its own arrangement and reuses
-upstream's **components** — the list, the tiles, the theme tokens, the focus and
-scroll helpers — which is where most of upstream's polish lands.
+drawing routines whose geometry (`Shape`/`Zone`/`Geo`, computed in `layouts/`) is
+closed and whose facts model is private. Hosting Watch inside them was measured at
+11 → ≥14 upstream files, with the fork's lines landing in the bodies upstream
+rewrites most often, and it would have hit real defects on day one: four styles
+re-dispatch a changed value through the games' press handler, where a season id
+matches no row and is dropped silently (a season picker would simply do nothing),
+the Sheet's six-id allow-list drops every film row, Hero has no list at all, and a
+`Row` can carry a still only as a path on disk — not the URL a catalogue hands
+out. So Watch draws its own arrangement and reuses upstream's **components** — the
+list, the tiles, the theme tokens, the focus and scroll helpers — which is where
+most of upstream's polish lands.
 
 That trade is only sound if it is re-measured, not believed. This section is the
 rule for doing that.
@@ -226,11 +230,14 @@ a test before the option ships.
 
 **Who owns what.** Film is the fork's and is always available. Upstream's styles
 serve games only unless the person explicitly opts into the contract above. The
-fork never edits upstream's detail-page layouts for Watch — `app/src/fork/seams.rs`
-fails the build if anyone tries.
+fork never *dispatches* its page from upstream's detail-page layouts —
+`app/src/fork/seams.rs` fails the build if one tries. (The layouts may still word
+things per space under F-016/F-021; that is not a dispatch.)
 
 **Offering upstream an extension point.** Phase 5 offers upstream a generic
-space/section hook for this screen, under the fork's upstream-first rule. If it
-is accepted, the seven dispatch answers collapse and the fork's page plugs in as
-a section set; this section is then superseded by upstream's own contract. If it
-is declined, nothing was blocked — the fork already ships the page.
+space/section **hook** for this screen — an interface, not the fork's drawing
+code (`§7`: the two share no code by design) — under the fork's upstream-first
+rule. If it is accepted, the seven dispatch answers collapse and the fork's page
+plugs in as a section set; this section is then superseded by upstream's own
+contract. If it is declined, nothing was blocked — the fork already ships the
+page.
