@@ -242,8 +242,8 @@ impl CollectionView {
     /// style adds an arm here, and the engine and the sections do not change
     /// (`style.rs`, `docs/WATCH-PAGE.md` §6).
     pub(super) fn render_watch_game_page(&mut self, key: &SharedString, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        match style::PageStyle::current(&self.app_paths) {
-            style::PageStyle::Film => self.render_film_page(key, window, cx),
+        match style::current(&self.app_paths) {
+            crate::fork::watch::page_config::PageStyle::Film => self.render_film_page(key, window, cx),
         }
     }
 
