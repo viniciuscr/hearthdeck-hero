@@ -4,6 +4,8 @@ Status: decided; Phase 0 landed, Phases 1–5 follow.
 Owner: the fork. Register rows: `F-012`, `F-022`. Seam table:
 `app/src/fork/seams.rs` (machine-checked).
 
+Where the work stands, and how to continue it: `docs/WATCH-PAGE-STATUS.md`.
+
 This is the design record for the console screen a person opens when they press
 A on a film or a series. It replaces the earlier note that the film page "is
 already ours and stays where it is" with a shape that survives upstream
