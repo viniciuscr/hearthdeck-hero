@@ -40,6 +40,8 @@ mod sections;
 use sections::details::{detail_lines, facts_line, title_status, watched_line};
 use sections::episode::{episode_card, episode_row};
 
+mod style;
+
 use super::super::watch_personal::Flag;
 use super::super::watch_playback::{picked_episode, DetailTab, Pane, Selection, DETAIL_TABS};
 use super::super::CollectionView;
@@ -236,7 +238,16 @@ impl CollectionView {
     /// The console page of a film or a series. The title, its marks and its list
     /// keep the left column; the details panel beside them runs from the page's
     /// top edge to its bottom — the room the header band used to sit in.
+    /// The page in the space's arrangement. Film is the only one today; a new
+    /// style adds an arm here, and the engine and the sections do not change
+    /// (`style.rs`, `docs/WATCH-PAGE.md` §6).
     pub(super) fn render_watch_game_page(&mut self, key: &SharedString, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        match style::PageStyle::current() {
+            style::PageStyle::Film => self.render_film_page(key, window, cx),
+        }
+    }
+
+    fn render_film_page(&mut self, key: &SharedString, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(g) = self.lib.as_ref().and_then(|lib| lib.get(key)).cloned() else {
             return kit::empty(Icon::Warning, tr!("This title is gone"), tr!("Press B to go back.")).into_any_element();
         };
