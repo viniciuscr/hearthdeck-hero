@@ -7,11 +7,15 @@ description = "Watch's player: mpv discovery, arguments and IPC supervision"
 
 [dependencies]
 heronite-watch-core = { path = "../watch-core" }
-heronite-data = { path = "../data" }
 tempfile = "3"
 anyhow.workspace = true
 serde_json.workspace = true
 url = { version = "2", features = ["serde"] }
+
+# Starting mpv (`player::unix`) guards the helper through `heronite-data`; the
+# types this crate also exposes compile everywhere.
+[target.'cfg(unix)'.dependencies]
+heronite-data = { path = "../data" }
 
 [lints]
 workspace = true

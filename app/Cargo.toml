@@ -47,7 +47,6 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 smallvec = "1"
 indexmap = "2"
 libc = "0.2"
-signal-hook = "0.3"
 futures = "0.3"
 trash = "5"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
@@ -66,6 +65,11 @@ fast_qr = "0.14.0"
 # (heronite-platform's `controllers`).
 [target.'cfg(not(windows))'.dependencies]
 gilrs = "0.11"
+
+# SIGINT, SIGTERM and SIGHUP as a graceful quit (`system::signals`); Windows
+# gets the session's end through the window instead.
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Hiding and showing the cursor (console mode) and handing a window an

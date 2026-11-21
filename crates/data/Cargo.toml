@@ -13,7 +13,6 @@ dirs = "6"
 heronite-i18n = { path = "../i18n" }
 heronite-platform = { path = "../platform" }
 fork-brand = { path = "../fork-brand" }
-libc = "0.2"
 parking_lot = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 indexmap = { version = "2", features = ["serde"] }
@@ -22,6 +21,11 @@ tempfile = "3"
 icu_collator = "2"
 unicode-normalization = "0.1"
 base64 = "0.22"
+
+# The Unix-only parts of `proc` (PDEATHSIG, idle scheduling and I/O class) and
+# of `temps` (`kill(pid, 0)`); Windows goes through `heronite_platform`.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [features]
 # Helpers for other crates' tests (`testing`): their `[dev-dependencies]` turn it on.
