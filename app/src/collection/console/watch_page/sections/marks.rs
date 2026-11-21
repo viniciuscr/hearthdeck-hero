@@ -2,8 +2,10 @@
 //! person's two shelf flags, built from the local records.
 //!
 //! Fork-owned (`docs/WATCH-PAGE.md`, Phase 5). Moved out of the page unchanged:
-//! the render and the pad handler still call `CollectionView::watch_marks`, which
-//! now lives here.
+//! the render still calls `CollectionView::watch_marks`, which now lives here.
+//! The page's own types and the record readers stay in `../mod.rs`, because the
+//! engine and the pad handler use them too — this file holds the section, not a
+//! second owner of them.
 
 use heronite_data::CollectionGame;
 use heronite_watch::metadata::Episode;

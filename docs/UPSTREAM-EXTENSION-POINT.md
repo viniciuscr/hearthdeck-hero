@@ -78,10 +78,12 @@ registry — empty by default, so upstream ships unchanged and pays nothing.
 
 ## What the fork would do if this lands
 
-Delete its seven branches in favour of one implementation of the trait, keeping
-`app/src/fork/seams.rs`'s debt list shrinking to the input-stack hooks. The
-fork's page becomes a `DetailPage`, and `docs/WATCH-PAGE.md` §10 is superseded by
-upstream's contract rather than the fork's.
+Delete its seven branches in favour of one implementation of the trait: the
+dispatch debt shrinks by those seven branches, while the per-space *wording*
+seams (the tile, carousel, grid, cinema and spotlight bodies that say "watched"
+or grey a film out) stay as they are — a page hook does not touch those. The
+fork's `app/src/fork/seams.rs` list records both kinds, and `docs/WATCH-PAGE.md`
+§10 is superseded by upstream's contract rather than the fork's.
 
 ## How to send it
 
