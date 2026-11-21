@@ -25,8 +25,10 @@ impl PageStyle {
     /// read from the Watch prefs whatever space is on screen), or Film when the
     /// file says nothing this build knows.
     pub(in crate::collection::console::watch_page) fn current(app: &heronite_data::paths::AppPaths) -> Self {
-        let prefs = crate::console::themes::prefs_for(app, crate::collection::Space::Watch);
-        Self::from_config(crate::fork::watch::page_config::read(&prefs).style)
+        let style = crate::console::themes::read_for(app, crate::collection::Space::Watch, |prefs| {
+            crate::fork::watch::page_config::read(prefs).style
+        });
+        Self::from_config(style)
     }
 
     /// The view's reading of the stored choice.

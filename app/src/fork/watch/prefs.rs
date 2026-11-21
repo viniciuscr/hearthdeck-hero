@@ -66,6 +66,9 @@ pub fn load(app: &AppPaths) -> ConsolePrefs {
 /// options but with its own theme and rails.
 pub fn defaults(app: &AppPaths) -> ConsolePrefs {
     let mut prefs = ConsolePrefs::load(app);
+    // The Games prefs are copied for their global options, not their `extra`:
+    // a fresh Watch file must not inherit a page choice it never made.
+    super::page_config::clear(&mut prefs);
     prefs.theme = default_theme();
     prefs.based_on = base_id().into();
     prefs.last_tab = 0;

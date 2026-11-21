@@ -1453,8 +1453,7 @@ fn unlink(d: &mut SettingsPage, cx: &mut Context<SettingsPage>) {
 
 /// Console mode: the account, the code and the rails as rows.
 pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
-    let prefs = crate::console::themes::prefs_for(&d.ctx.app, Space::Watch);
-    let style = super::page_config::read(&prefs).style;
+    let style = crate::console::themes::read_for(&d.ctx.app, Space::Watch, |prefs| super::page_config::read(prefs).style);
     let names: Vec<SharedString> =
         super::page_config::PageStyle::ALL.iter().map(|style| SharedString::from(page_style_label(*style))).collect();
     let index = super::page_config::PageStyle::ALL.iter().position(|known| *known == style).unwrap_or(0);

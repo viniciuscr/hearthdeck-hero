@@ -64,6 +64,12 @@ pub fn write(prefs: &mut ConsolePrefs, config: PageConfig) {
     prefs.extra.insert(KEY.to_owned(), Value::Object(entry));
 }
 
+/// Removes the choice, for a file built fresh from another space's prefs: the
+/// Games prefs carry no page choice, and a new Watch file must not inherit one.
+pub fn clear(prefs: &mut ConsolePrefs) {
+    prefs.extra.remove(KEY);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,14 +122,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = heronite_data::paths::AppPaths::for_data(&DataPaths::at(dir.path().to_path_buf()));
 
+        // The Games file as it stands, byte for byte, before anything of ours.
+        let games_path = app.console_prefs();
+        let games_before = std::fs::read(&games_path).ok();
+
         let mut prefs = super::super::prefs::load(&app);
         write(&mut prefs, PageConfig { style: PageStyle::Film });
         super::super::prefs::save(&app, &prefs).unwrap();
 
         let again = super::super::prefs::load(&app);
         assert!(again.extra.contains_key(KEY), "the space's own file keeps the choice");
-
-        let games = ConsolePrefs::load(&app);
-        assert!(!games.extra.contains_key(KEY), "the Games file gained the Watch page's choice");
+        assert_eq!(games_before, std::fs::read(&games_path).ok(), "saving the Watch choice rewrote the Games file");
     }
 }

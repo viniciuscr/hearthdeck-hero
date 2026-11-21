@@ -101,6 +101,12 @@ const SEAMS: &[Seam] = &[
         why: "the hero's lines say watched or played, name the time the space keeps, and carry its facts",
     },
     Seam {
+        file: "app/src/collection/render_focus.rs",
+        register: &["F-021", "F-010"],
+        sites: &["Fork-Seam: F-021"],
+        why: "the desktop panel puts its folder rows after the time row by DetailField, which the space renames",
+    },
+    Seam {
         file: "app/src/collection/console/tile.rs",
         register: &["F-019", "F-021"],
         sites: &["crate::fork::watch::sources::dimmed", "crate::collection::Space::Watch"],
