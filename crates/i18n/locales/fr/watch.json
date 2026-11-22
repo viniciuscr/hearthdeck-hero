@@ -219,7 +219,7 @@
   "{time} watched": "{time} vus",
   "{watched} of 1 episode watched": "{watched} sur 1 épisode regardé",
   "{watched} of {total} episodes watched": "{watched} sur {total} épisodes regardés",
-  "Film": "Film",
+  "Stage": "Scène",
   "Film page": "Page du film",
   "Reset the film page": "Réinitialiser la page du film",
   "The arrangement of a title's page. Its own setting: the Games page is untouched.": "La disposition de la page d'un titre. Un réglage à part : la page des jeux n'est pas modifiée.",

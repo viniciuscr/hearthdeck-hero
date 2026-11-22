@@ -404,7 +404,7 @@ impl CollectionView {
         let page = match layout {
             // Film: the title, its marks and its list lead; the details read
             // beside them.
-            crate::fork::watch::page_config::PageStyle::Film => div()
+            crate::fork::watch::page_config::PageStyle::Stage => div()
                 .relative()
                 .size_full()
                 .flex()

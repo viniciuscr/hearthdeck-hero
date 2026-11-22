@@ -19,25 +19,26 @@ pub enum PageStyle {
     /// The page as built in Phases 1–3: one column of title / marks / list, one
     /// panel of sections.
     #[default]
-    Film,
+    Stage,
     /// A title band across the top, then full-width cards for the details and the
     /// list, the way a cinema screen reads.
     Cinema,
 }
 
 impl PageStyle {
-    pub const ALL: &'static [PageStyle] = &[PageStyle::Film, PageStyle::Cinema];
+    pub const ALL: &'static [PageStyle] = &[PageStyle::Stage, PageStyle::Cinema];
 
     pub fn as_str(self) -> &'static str {
         match self {
-            PageStyle::Film => "film",
+            PageStyle::Stage => "stage",
             PageStyle::Cinema => "cinema",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "film" => Some(PageStyle::Film),
+            "stage" => Some(PageStyle::Stage),
+            "film" => Some(PageStyle::Stage),
             "cinema" => Some(PageStyle::Cinema),
             _ => None,
         }
@@ -84,15 +85,15 @@ mod tests {
     }
 
     #[test]
-    fn a_space_without_a_choice_draws_film() {
-        assert_eq!(read(&prefs()).style, PageStyle::Film, "no key means the page as it is");
+    fn a_space_without_a_choice_draws_stage() {
+        assert_eq!(read(&prefs()).style, PageStyle::Stage, "no key means the page as it is");
     }
 
     #[test]
     fn a_choice_survives_the_round_trip() {
         let mut p = prefs();
-        write(&mut p, PageConfig { style: PageStyle::Film });
-        assert_eq!(read(&p).style, PageStyle::Film);
+        write(&mut p, PageConfig { style: PageStyle::Stage });
+        assert_eq!(read(&p).style, PageStyle::Stage);
         assert!(p.extra.contains_key(KEY), "the choice is written where the next read finds it");
     }
 
@@ -100,14 +101,14 @@ mod tests {
     fn an_unknown_style_reads_as_film_and_keeps_the_file_loadable() {
         let mut p = prefs();
         p.extra.insert(KEY.to_owned(), serde_json::json!({ "style": "something-newer" }));
-        assert_eq!(read(&p).style, PageStyle::Film, "a newer build's style must not break this one");
+        assert_eq!(read(&p).style, PageStyle::Stage, "a newer build's style must not break this one");
     }
 
     #[test]
     fn writing_keeps_the_other_settings_extra_carries() {
         let mut p = prefs();
         p.extra.insert("fromANewerBuild".to_owned(), serde_json::json!({ "a": 1 }));
-        write(&mut p, PageConfig { style: PageStyle::Film });
+        write(&mut p, PageConfig { style: PageStyle::Stage });
         assert_eq!(p.extra["fromANewerBuild"]["a"], 1, "another build's settings survive a round trip");
     }
 
@@ -132,7 +133,7 @@ mod tests {
         let games_before = std::fs::read(&games_path).ok();
 
         let mut prefs = super::super::prefs::load(&app);
-        write(&mut prefs, PageConfig { style: PageStyle::Film });
+        write(&mut prefs, PageConfig { style: PageStyle::Stage });
         super::super::prefs::save(&app, &prefs).unwrap();
 
         let again = super::super::prefs::load(&app);
