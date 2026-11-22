@@ -14,6 +14,7 @@ mod context_menu;
 mod copies;
 mod data;
 mod debug;
+mod desktop_pad;
 mod dock;
 mod downloads_pill;
 mod emulation;
@@ -220,6 +221,11 @@ pub struct CollectionView {
     game_extras: Arc<heronite_data::organize::GameExtras>,
     /// The actions users added to their games, by game key, loaded with the library.
     user_actions: std::collections::HashMap<String, Vec<heronite_data::game_actions::Action>>,
+    /// Games whose Play asks how to play (`game_actions::load_ask_on_play`).
+    ask_on_play: std::collections::HashSet<String>,
+    /// The way to play picked last in "Choose how to start the game", by game
+    /// key (`None`: Play itself); focused first the next time.
+    last_play_choice: HashMap<String, Option<String>>,
     /// Games with an update waiting (app names), for "Only with updates".
     update_apps: std::collections::HashSet<String>,
     search: String,
@@ -350,6 +356,8 @@ pub struct CollectionView {
     /// with the library (`load.rs`), because declaring one builds a transport and
     /// the Shelf tab's rails are drawn on a render path.
     watch_collections: Vec<(String, heronite_watch::collections::CollectionDescriptor)>,
+    /// The controller outside console mode (`desktop_pad.rs`).
+    desktop_pad: desktop_pad::DesktopPad,
     /// Language the precomputed view models and the search placeholder were
     /// built in.
     lang: heronite_i18n::Lang,
@@ -443,7 +451,15 @@ impl CollectionView {
         });
         let data_paths = DataPaths::detect();
         let app_paths = AppPaths::for_data(&data_paths);
-        let ui = UiState::load(&app_paths);
+        let mut ui = UiState::load(&app_paths);
+        // A switch left on stays off until the PIN is typed, in the file too
+        // (Settings and the quick launcher read it).
+        if ui.show_hidden && !crate::services::hidden_lock::open(&app_paths) {
+            ui.show_hidden = false;
+            if let Err(err) = ui.save(&app_paths) {
+                log::warn!("saving ui state: {err:#}");
+            }
+        }
         let drawer_closed = !ui.grid_open_on_select;
         // Interface / Collection-art appearance (this app's own file, tiny).
         crate::theme::set_appearance(heronite_data::appearance::Appearance::load(&app_paths));
@@ -545,6 +561,8 @@ impl CollectionView {
             group_members: Default::default(),
             game_extras: Default::default(),
             user_actions: Default::default(),
+            last_play_choice: HashMap::new(),
+            ask_on_play: Default::default(),
             update_apps: Default::default(),
             search: String::new(),
             search_input,
@@ -624,6 +642,7 @@ impl CollectionView {
             watch_personal_ready: false,
             watch_catalog: Default::default(),
             watch_collections: Vec::new(),
+            desktop_pad: Default::default(),
             lang: heronite_i18n::current(),
         };
         this.apply_start_view();
@@ -855,6 +874,7 @@ impl CollectionView {
         self.drive_palette(window, cx);
         crate::ui::glass::set_backdrop(self.glass_image(window));
         self.sync_nav_meta(cx);
+        self.sync_desktop_pad(window, cx);
         if crate::console::active() {
             return self.render_console(window, cx);
         }
@@ -946,6 +966,7 @@ impl CollectionView {
             .children(self.render_gallery(window, cx))
             .children(self.render_viewer(window, cx))
             .children(self.render_palette())
+            .children(self.render_desktop_pointer())
             .into_any_element()
     }
 }

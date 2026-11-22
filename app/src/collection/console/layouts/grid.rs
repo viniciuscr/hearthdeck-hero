@@ -215,9 +215,10 @@ impl Nav {
             crate::fork::watch::filters::retain_and_sort(all_games, &mut games, f.kind, f.genre, f.provider, f.sort, fixed_kind);
         } else {
             match f.sort {
-                1 => games.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.title_lower.cmp(&b.title_lower))),
-                2 => games.sort_by(|a, b| b.playtime_minutes.cmp(&a.playtime_minutes).then_with(|| a.title_lower.cmp(&b.title_lower))),
-                _ => games.sort_by(|a, b| a.title_lower.cmp(&b.title_lower)),
+                1 => games.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| heronite_data::organize::title_order(a, b))),
+                2 => games
+                    .sort_by(|a, b| b.playtime_minutes.cmp(&a.playtime_minutes).then_with(|| heronite_data::organize::title_order(a, b))),
+                _ => games.sort_by(|a, b| heronite_data::organize::title_order(a, b)),
             }
         }
         if !tokens.is_empty() {
@@ -300,10 +301,11 @@ fn rail_letters() -> impl Iterator<Item = char> {
     std::iter::once('#').chain('A'..='Z')
 }
 
-/// The rail letter of a title: its first letter without accents, `#` for
-/// digits and symbols (they sort before A).
-pub(super) fn letter_of(title: &str) -> char {
-    let first = title.trim_start().chars().next().unwrap_or('#');
+/// The rail letter of a game's [`sort_key`](CollectionGame::sort_key): its
+/// first letter without accents, `#` for digits and symbols (they sort
+/// before A).
+pub(super) fn letter_of(key: &str) -> char {
+    let first = key.trim_start().chars().next().unwrap_or('#');
     heronite_data::fuzzy::fold(first.encode_utf8(&mut [0; 4]))
         .chars()
         .next()
@@ -520,7 +522,7 @@ impl CollectionView {
         } else {
             let loading = crate::collection::watch_catalog::feed_kind(&spec.source).is_some_and(|kind| self.watch_feed_loading(kind));
             let scroller = self.grid_scroller(tab, &keys, cols, grid_focus, window);
-            let current = game.as_ref().map_or('#', |g| letter_of(&g.title));
+            let current = game.as_ref().map_or('#', |g| letter_of(&g.sort_key));
             div()
                 .flex()
                 .flex_col()
@@ -737,7 +739,7 @@ impl CollectionView {
             Pad::Up => nav.index = i - cols,
             Pad::Down => nav.index = (i + cols).min(n.saturating_sub(1)),
             Pad::RT | Pad::LT if by_letter => {
-                let letters: Vec<char> = keys.iter().map(|k| lib.get(k).map_or('#', |g| letter_of(&g.title))).collect();
+                let letters: Vec<char> = keys.iter().map(|k| lib.get(k).map_or('#', |g| letter_of(&g.sort_key))).collect();
                 nav.index = jump_letter(&letters, i, pad == Pad::RT);
             }
             Pad::ScrollDown | Pad::RT => nav.index = (i + cols * 3).min(n.saturating_sub(1)),

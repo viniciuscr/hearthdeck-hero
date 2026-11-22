@@ -282,6 +282,49 @@ date, upstream commit, files, and resolution.
     so `presets::by_id("classic")` is `None`; Watch resolves its base through
     `fork::watch::prefs::preset` and `theme_rows::base_theme` (F-008).
 
+- **2026-11-22, upstream `477a8d18`** (v1.8.0, 58 commits: the "how do you want to play"
+  ask, the hidden games' PIN, one AntiMicroX profile per player, the EA account, Xenia and
+  the Xbox 360 ROM folders, the sorting name, the desktop controller, quick launch's Enter
+  and the Hero overview's cover). Sixteen paths conflicted, each one the F-005 rename or a
+  fork seam meeting upstream's rewrite:
+  - `app/src/collection/load.rs`: upstream's `ask_on_play`, and `hidden_lock::shown`, inside
+    the fork's `Space` dispatch — `heronite_watch::library::library` for Watch, upstream's
+    `Library::load_with` for Games. Everything else upstream reads through `data_paths` is
+    read through `lib.paths`, as the Watch space needs (F-006).
+  - `app/src/collection/mod.rs`: upstream's `desktop_pad` field and its initializer, beside
+    the seven Watch fields and the five Watch modules the space keeps (F-006, F-008).
+  - `app/src/collection/console/game/hero.rs`: upstream's facts line without the status
+    pill, calling the fork's `&self` `console_facts`; `facts_table` stays `pub(crate)` for
+    the film page (F-012).
+  - `app/src/collection/console/layouts/mod.rs`: upstream's spelling of the same reach —
+    `pub(in crate::collection::console)` where the fork wrote `pub(super)` — taken, so the
+    film page still reaches it. No fork hook lives in this file.
+  - `app/src/collection/console/layouts/grid.rs`: the fork's Watch `retain_and_sort` branch
+    kept, with upstream's `heronite_data::organize::title_order` taken in the games branch
+    (F-008, F-021).
+  - `app/src/dialogs/settings_panel/advanced.rs`: upstream's AntiMicroX section, with the
+    fork's help line rebranded.
+  - `app/src/pages/clients/{console,render}.rs`: upstream's disabled-while-busy "forget"
+    row, with "Remove from Hearthdeck Hero" in the copy.
+  - `app/src/pages/settings/quick_launch.rs`: upstream's two Enter lines (focused or not),
+    with the space's "Hearthdeck Hero" in the second.
+  - `crates/i18n/locales/{de,es,fr,pt-BR}/quick_launch.json` and
+    `crates/i18n/locales/fr/settings_panel.json`: upstream's file taken whole and the
+    rebranding re-applied — 24, 24, 24, 24 and 28 strings.
+  - `Cargo.lock`: `fork-brand` and upstream's `getrandom 0.3.4` together.
+  - `docs/ARCHITECTURE.md`: the watch crate map kept, with upstream's Xbox and EA logins in
+    the `epic-login` line.
+  - Rebranded outside the conflicts (F-005), in Rust strings and locales together (the
+    coverage test matches them): the eleven keys upstream added — the quick launcher's
+    Ctrl K clash (`quick_launch.json`), the hidden games' PIN (three in
+    `hidden_games.json`), the interface's graphics card (four in `settings_pages.json`),
+    the desktop controller's row (`settings_controller.json`) and the EA account (two in
+    `ea_account.json`) — plus the quick-launch test expectations in
+    `app/src/collection/palette/launcher.rs`, whose titles the app already drew rebranded.
+    `"Heronite Player"` in `services/clients/ea_account.rs` stays: it is the name
+    `HERONITE_DEBUG_EA_ACCOUNT` shows, not shipped copy.
+  - No new seam: `app/src/fork/seams.rs` is unchanged, and its eight guards pass.
+
 ## Releases
 
 - Cut a release from `fork/main` with the **Fork Release** workflow

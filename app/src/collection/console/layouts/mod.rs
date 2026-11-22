@@ -222,12 +222,14 @@ impl CollectionView {
     }
 
     /// Whether the wheel moves along a row of covers (Carousel, and
-    /// Spotlight's row while it has the focus) rather than up and down.
+    /// Spotlight's and Cinema's row while it has the focus) rather than up
+    /// and down.
     pub(super) fn layout_wheel_row(&self) -> bool {
         let (tab, spec) = self.console_shown_tab();
         match spec.layout {
             Layout::Carousel => true,
             Layout::Spotlight => self.console.tab_navs.get(tab).is_none_or(|n| n.spotlight.on_row()),
+            Layout::Cinema => self.console.tab_navs.get(tab).is_none_or(|n| n.cinema.on_row()),
             _ => false,
         }
     }
@@ -295,7 +297,7 @@ fn cinema_tab_window(names: &[SharedString], active: usize, vw: f32) -> (usize, 
 
 /// Width of the body, design px: the window's, less the menu's rail when the
 /// theme keeps one on screen (it insets the content).
-pub(super) fn body_width(window: &Window) -> f32 {
+pub(in crate::collection::console) fn body_width(window: &Window) -> f32 {
     let rail = super::sidebar::rail_inset().map_or(0., |(_, w)| f32::from(w));
     (f32::from(crate::ui::content_size(window).width) - rail) / kit::scale()
 }
@@ -312,7 +314,7 @@ fn body_height(window: &Window, hints: bool) -> f32 {
 /// follow, by title).
 fn top_recent(games: &[Arc<CollectionGame>], k: usize) -> Vec<Arc<CollectionGame>> {
     let order = |a: &&Arc<CollectionGame>, b: &&Arc<CollectionGame>| {
-        b.last_played.cmp(&a.last_played).then_with(|| a.title_lower.cmp(&b.title_lower))
+        b.last_played.cmp(&a.last_played).then_with(|| heronite_data::organize::title_order(a, b))
     };
     let mut v: Vec<&Arc<CollectionGame>> = games.iter().collect();
     if v.len() > k {
