@@ -1254,6 +1254,11 @@ impl CollectionView {
         }
     }
 
+    /// The rows the console page adds under Play for a film: one per stream.
+    pub(super) fn watch_console_rows(&self, game: &CollectionGame) -> Vec<Row> {
+        self.watch_stream_rows(game, None)
+    }
+
     /// The rows of one episode's streams (`None`: the title's own, for a film).
     pub(super) fn watch_stream_rows(&self, game: &CollectionGame, video: Option<&str>) -> Vec<Row> {
         if self.watch.item.as_deref() != Some(game.key.as_str()) || self.watch.video.as_deref() != video {

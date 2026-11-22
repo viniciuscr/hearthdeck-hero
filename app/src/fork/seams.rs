@@ -43,7 +43,7 @@ const SEAMS: &[Seam] = &[
         register: &["F-012", "F-010"],
         sites: &[
             "Fork-Seam: F-012",
-            "watch_rows",
+            "watch_console_rows",
             "self.space == super::super::Space::Watch",
             "pub(super) use hero::facts_table",
             "DetailField::LastPlayed | DetailField::Playtime",
