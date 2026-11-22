@@ -249,12 +249,47 @@ treadmill; the decision is not re-argued without two of them in a row.
 - Whether the engine absorbs `watch_playback.rs`'s view state (it keeps data
   state either way).
 
-## Restart checklist for a new window
+## Hold — 2026-11-22, waiting on upstream #277
 
-1. `git switch feat/watch-page-adr && git log --oneline -6` — expect `711d9c6c`
-   at the top.
-2. Read `docs/WATCH-PAGE.md` (decision) and this file (state).
-3. Run the five gate commands at the top; all must pass before changes.
-4. Start Phase 2's remaining slice from the table above, one `sections/` file at
-   a time, committing after each with the gate green.
-5. Review with the rust-skills reviewer, then `complete_step` for `phase2`.
+Upstream is reworking how pages are templated (`RafaelGoulartB/Heronite#277`).
+Until that lands the fork adds no page features: wiring their Classic/Tabs/Sheet/
+Showcase as Watch options would be built on the composition model that issue is
+replacing. Nothing is half-built — the last code commit is `5ff3161b`.
+
+Shipped and settled:
+
+- **Stage** (title, marks and list on the left, details panel beside them) and
+  **Stage Wide** (title band across the top, two full-width cards), chosen per
+  space in Settings → Watch and stored in `console-watch.json`; `film`/`cinema`
+  still parse, so an older file keeps its choice.
+- The film page is fork-owned (`app/src/collection/console/watch_page/`); the
+  upstream edits are the registered seam set in `app/src/fork/seams.rs`, with
+  guards that fail by name when a token moves.
+
+Open, to be re-decided against #277 rather than built now:
+
+1. **Upstream layouts as Watch options.** Needs the five shell answers in
+   `console/game/mod.rs` to branch on the *layout* rather than the space (7
+   sites), `episode:`/`season` presses in `game_pad_classic` (only `stream:` is
+   handled), and one `details_card` helper — it is duplicated in the two Stage
+   arms, so a change today has to be made twice.
+2. **`game_rows`'s Watch branch is unreachable** until (1): every layout returns
+   early for Watch. `ab8c72ea` claimed it worked and was reverted for it; feed it
+   with (1), not before.
+3. **Hero has no list at all** — excluded from Watch until someone gives it one.
+4. **Rails draw 2 cards per row**: `columns_in` rounds down and throws away the
+   panel's third. Rounding up is a two-line change, but it invalidates
+   `a_rails_row_never_runs_out_of_the_panel`, which asserts the tiles never
+   shrink — rewrite that test with the change, not after.
+5. The setting row still reads "Film page".
+
+## Restart checklist
+
+1. `git log --oneline -6` — expect `5ff3161b` on top of a revert. That revert is
+   deliberate; do not re-apply `ab8c72ea`.
+2. Read `docs/WATCH-PAGE.md` (the decision), this file (the state), `docs/FORK.md`
+   (the seams and the rules).
+3. `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings
+   && cargo test --workspace && cargo test -p heronite-i18n --test coverage`.
+4. Look at upstream first: if #277 has landed, read how pages compose now before
+   touching 1–5 above. If it has not, the only safe work here is (4) and (5).
