@@ -22,16 +22,16 @@ pub enum PageStyle {
     Stage,
     /// A title band across the top, then full-width cards for the details and the
     /// list, the way a cinema screen reads.
-    Cinema,
+    StageWide,
 }
 
 impl PageStyle {
-    pub const ALL: &'static [PageStyle] = &[PageStyle::Stage, PageStyle::Cinema];
+    pub const ALL: &'static [PageStyle] = &[PageStyle::Stage, PageStyle::StageWide];
 
     pub fn as_str(self) -> &'static str {
         match self {
             PageStyle::Stage => "stage",
-            PageStyle::Cinema => "cinema",
+            PageStyle::StageWide => "stage-wide",
         }
     }
 
@@ -39,7 +39,8 @@ impl PageStyle {
         match value {
             "stage" => Some(PageStyle::Stage),
             "film" => Some(PageStyle::Stage),
-            "cinema" => Some(PageStyle::Cinema),
+            "stage-wide" => Some(PageStyle::StageWide),
+            "cinema" => Some(PageStyle::StageWide),
             _ => None,
         }
     }

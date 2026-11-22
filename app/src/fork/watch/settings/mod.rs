@@ -1471,7 +1471,7 @@ pub(crate) fn console_rows(d: &SettingsPage) -> Vec<Row> {
 fn page_style_label(style: super::page_config::PageStyle) -> &'static str {
     match style {
         super::page_config::PageStyle::Stage => tr!("Stage"),
-        super::page_config::PageStyle::Cinema => tr!("Cinema"),
+        super::page_config::PageStyle::StageWide => tr!("Stage Wide"),
     }
 }
 

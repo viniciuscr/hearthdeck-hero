@@ -443,7 +443,7 @@ impl CollectionView {
                 ),
             // Cinema: a title band across the top, then two full-width cards —
             // the details and the list side by side under it.
-            crate::fork::watch::page_config::PageStyle::Cinema => div()
+            crate::fork::watch::page_config::PageStyle::StageWide => div()
                 .relative()
                 .size_full()
                 .flex()
@@ -460,6 +460,17 @@ impl CollectionView {
                         .gap(u(COLUMN_GAP))
                         .child(
                             card_surface()
+                                .w(u(CINEMA_LIST_W))
+                                .min_h_0()
+                                .p(u(18.))
+                                .rounded(u(PANEL_RADIUS))
+                                .shadow(kit::shadow(0.5, 12., 44.))
+                                .flex()
+                                .flex_col()
+                                .child(list.flex_1().min_h_0()),
+                        )
+                        .child(
+                            card_surface()
                                 .flex_1()
                                 .min_w_0()
                                 .min_h_0()
@@ -472,17 +483,6 @@ impl CollectionView {
                                 .when(pane == Pane::Card, |card| card.border_color(theme::console_focus()))
                                 .child(kit::tabs(&tabs, active))
                                 .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
-                        )
-                        .child(
-                            card_surface()
-                                .w(u(CINEMA_LIST_W))
-                                .min_h_0()
-                                .p(u(18.))
-                                .rounded(u(PANEL_RADIUS))
-                                .shadow(kit::shadow(0.5, 12., 44.))
-                                .flex()
-                                .flex_col()
-                                .child(list.flex_1().min_h_0()),
                         ),
                 ),
         };
