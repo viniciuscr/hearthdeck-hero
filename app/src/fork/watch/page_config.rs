@@ -86,6 +86,12 @@ mod tests {
     }
 
     #[test]
+    fn the_names_a_build_shed_still_read_as_their_successor() {
+        assert_eq!(PageStyle::parse("film"), Some(PageStyle::Stage), "the page was called Film before Stage");
+        assert_eq!(PageStyle::parse("cinema"), Some(PageStyle::StageWide), "the wide stage was called Cinema");
+    }
+
+    #[test]
     fn a_space_without_a_choice_draws_stage() {
         assert_eq!(read(&prefs()).style, PageStyle::Stage, "no key means the page as it is");
     }

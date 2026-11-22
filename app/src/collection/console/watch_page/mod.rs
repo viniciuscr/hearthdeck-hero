@@ -65,7 +65,7 @@ const COLUMN_GAP: f32 = 40.;
 /// the rest of the page, from its top edge to its bottom.
 const LEFT_W: f32 = 420.;
 /// The list card's width in Cinema, design px.
-const CINEMA_LIST_W: f32 = 460.;
+const WIDE_LIST_W: f32 = 460.;
 /// The details panel's corners and its own padding, design px.
 const PANEL_RADIUS: f32 = 20.;
 const PANEL_PAD: f32 = 26.;
@@ -240,7 +240,7 @@ impl CollectionView {
     /// The console page of a film or a series. The title, its marks and its list
     /// keep the left column; the details panel beside them runs from the page's
     /// top edge to its bottom — the room the header band used to sit in.
-    /// The page in the space's arrangement. Film is the only one today; a new
+    /// The page in the space's arrangement. Stage and Stage Wide today; a new
     /// style adds an arm here, and the engine and the sections do not change
     /// (`style.rs`, `docs/WATCH-PAGE.md` §6).
     pub(super) fn render_watch_game_page(&mut self, key: &SharedString, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -402,7 +402,7 @@ impl CollectionView {
         // its marks, the list, and the details. Only one arm runs, so the pieces
         // are moved there and nowhere else.
         let page = match layout {
-            // Film: the title, its marks and its list lead; the details read
+            // Stage: the title, its marks and its list lead; the details read
             // beside them.
             crate::fork::watch::page_config::PageStyle::Stage => div()
                 .relative()
@@ -441,7 +441,7 @@ impl CollectionView {
                         .child(kit::tabs(&tabs, active))
                         .child(div().flex_1().min_h_0().flex().flex_col().child(body)),
                 ),
-            // Cinema: a title band across the top, then two full-width cards —
+            // Stage Wide: a title band across the top, then two full-width cards —
             // the details and the list side by side under it.
             crate::fork::watch::page_config::PageStyle::StageWide => div()
                 .relative()
@@ -460,7 +460,7 @@ impl CollectionView {
                         .gap(u(COLUMN_GAP))
                         .child(
                             card_surface()
-                                .w(u(CINEMA_LIST_W))
+                                .w(u(WIDE_LIST_W))
                                 .min_h_0()
                                 .p(u(18.))
                                 .rounded(u(PANEL_RADIUS))
