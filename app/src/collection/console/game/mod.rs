@@ -92,10 +92,13 @@ impl CollectionView {
         }
         let mut rows = vec![primary];
         // Watch titles have no install, status, saves, settings, playtime or
-        // manage rows: Play resolves the film's streams and the streams
-        // themselves are the page's rows (`watch_playback.rs`).
+        // manage rows: Play resolves the film's streams, and the film page's own
+        // rows (season, episodes, streams) are what a row list shows — so
+        // upstream's pages draw our content in their own layout.
         if !self.space.capabilities().install {
-            rows.extend(self.watch_console_rows(g));
+            let details = self.watch_details(&g.key);
+            let locale = self.lib.as_ref().map(|lib| lib.date_locale).unwrap_or_default();
+            rows.extend(self.watch_rows(g, details.as_deref(), locale));
             return rows;
         }
         // The actions the user added; one that plays waits for the game to end.

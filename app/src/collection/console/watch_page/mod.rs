@@ -691,7 +691,12 @@ impl CollectionView {
     /// The page's rows: Play, then for a series the season row and that
     /// season's episodes. The marks and the streams are not rows: the marks are
     /// the icons above the list, and the streams are the card's second tab.
-    fn watch_rows(&mut self, game: &CollectionGame, details: Option<&TitleDetails>, locale: DateLocale) -> Vec<Row> {
+    pub(in crate::collection::console) fn watch_rows(
+        &mut self,
+        game: &CollectionGame,
+        details: Option<&TitleDetails>,
+        locale: DateLocale,
+    ) -> Vec<Row> {
         // A title no source here has: one line, and nothing that pretends it can
         // play or be marked (there is no local record to mark).
         if crate::fork::watch::sources::imported(game) {
