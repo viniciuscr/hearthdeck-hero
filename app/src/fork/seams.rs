@@ -113,6 +113,18 @@ const SEAMS: &[Seam] = &[
         why: "a cover's grey state and its caption follow the space",
     },
     Seam {
+        file: "app/src/collection/console/activity.rs",
+        register: &["F-023"],
+        sites: &["Fork-Seam: F-023", "pub(in crate::collection) fn console_notify"],
+        why: "the Watch space's messages ride the console's own notification queue, not a second alert",
+    },
+    Seam {
+        file: "app/src/images.rs",
+        register: &["F-023"],
+        sites: &["Fork-Seam: F-023", "could not be loaded"],
+        why: "a cover that never loads says so at a level a shipped run keeps",
+    },
+    Seam {
         file: "app/src/collection/console/layouts/carousel.rs",
         register: &["F-008", "F-019"],
         sites: &["Fork-Seam: F-008", "crate::fork::watch::sources::dimmed"],

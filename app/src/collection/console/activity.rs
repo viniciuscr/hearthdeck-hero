@@ -346,9 +346,23 @@ impl CollectionView {
     fn push_activity_toast(&mut self, icon: Icon, tone: Tone, title: String, detail: Option<String>) {
         let ui = &mut self.console.activity;
         ui.seq += 1;
-        ui.toasts.push(Toast { id: ui.seq, icon, tone, title, detail, at: Instant::now() });
-        let extra = ui.toasts.len().saturating_sub(TOASTS);
-        ui.toasts.drain(..extra);
+        push_toast(&mut ui.toasts, ui.seq, icon, tone, title, detail, Instant::now());
+    }
+
+    /// One screen's own message, in **the console's notification**: the same
+    /// corner card a background task's toast uses, with its tone, its life and its
+    /// place in the queue — not a second, differently-shaped alert drawn by the
+    /// screen itself.
+    ///
+    /// The film page's "Opening the trailer…" and its refusals are the fork's;
+    /// the card is upstream's (`docs/WATCH.md`).
+    // Fork-Seam: F-023 — upstream's console notification, driven by a screen
+    // rather than by a background task.
+    pub(in crate::collection) fn console_notify(&mut self, text: impl Into<SharedString>, error: bool, cx: &mut Context<Self>) {
+        let tone = message_tone(error);
+        let icon = if error { Icon::Warning } else { Icon::InfoOutlined };
+        self.push_activity_toast(icon, tone, text.into().to_string(), None);
+        cx.notify();
     }
 
     /// One read: toasts for what started and ended, and a repaint when
@@ -623,6 +637,24 @@ impl CollectionView {
     }
 }
 
+/// The tone a screen's own message takes: a refusal or a failure is `Failed`,
+/// anything else `Info` — the same two cards a task's start and end use. A
+/// message is never `Started`: it has no progress to show.
+fn message_tone(error: bool) -> Tone {
+    if error {
+        Tone::Failed
+    } else {
+        Tone::Info
+    }
+}
+
+/// Adds a toast and keeps the queue at [`TOASTS`], the oldest going first.
+fn push_toast(toasts: &mut Vec<Toast>, seq: u64, icon: Icon, tone: Tone, title: String, detail: Option<String>, at: Instant) {
+    toasts.push(Toast { id: seq, icon, tone, title, detail, at });
+    let extra = toasts.len().saturating_sub(TOASTS);
+    toasts.drain(..extra);
+}
+
 /// A toast: the task's icon in a disc of its tone, what happened and a line
 /// more, on the session card's glass.
 fn toast(t: &Toast) -> AnyElement {
@@ -688,9 +720,13 @@ fn toast(t: &Toast) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{changes, metadata_end, nothing_to_download, pill_text, Kind, Task, Tone};
+    use super::{changes, message_tone, metadata_end, nothing_to_download, pill_text, push_toast, Kind, Task, Toast, Tone, TOASTS};
+    use std::time::Instant;
+
     use heronite_data::cover_family::CoverFamily;
     use heronite_metadata::JobTally;
+
+    use crate::icons::Icon;
 
     fn covers(job: u64, done: usize) -> Task {
         Task { kind: Kind::Metadata { job, covers: Some(CoverFamily::Square) }, count: Some((done, 195)), progress: None, waiting: None }
@@ -738,6 +774,31 @@ mod tests {
         let none = metadata_end(Some(CoverFamily::Square), &JobTally { not_found: 14, ..Default::default() });
         assert_eq!(none, (Tone::Done, "No new square covers".into(), Some("14 not found".into())), "never \"0 updated\"");
         assert_eq!(metadata_end(None, &JobTally::default()), (Tone::Done, "Nothing new for these games".into(), None));
+    }
+
+    #[test]
+    fn a_screens_message_is_one_of_the_two_cards_a_task_ends_on() {
+        // Never `Started` (a message has no progress), and a refusal is the
+        // failing card, which stays longer than the informational one.
+        assert_eq!(message_tone(false), Tone::Info);
+        assert_eq!(message_tone(true), Tone::Failed);
+        let at = Instant::now();
+        let toast = |tone| Toast { id: 1, icon: Icon::InfoOutlined, tone, title: "Opening the trailer…".into(), detail: None, at };
+        assert!(toast(Tone::Failed).life() > toast(Tone::Info).life(), "a failure is read, not glimpsed");
+    }
+
+    #[test]
+    fn the_toast_column_keeps_the_newest_and_never_grows() {
+        // A screen's message and a task's toast share one queue: the oldest goes,
+        // and a burst cannot fill the corner.
+        let mut toasts: Vec<Toast> = Vec::new();
+        let at = Instant::now();
+        for seq in 1..=(TOASTS as u64 + 2) {
+            push_toast(&mut toasts, seq, Icon::InfoOutlined, Tone::Info, format!("{seq}"), None, at);
+        }
+        assert_eq!(toasts.len(), TOASTS);
+        assert_eq!(toasts.last().map(|t| t.title.as_str()), Some("5"), "the newest is the one on screen");
+        assert!(!toasts.iter().any(|t| t.title == "1"), "the oldest went");
     }
 
     #[test]

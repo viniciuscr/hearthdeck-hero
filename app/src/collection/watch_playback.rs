@@ -181,6 +181,11 @@ pub(super) struct WatchPlayback {
     streams_nav: ListNav,
     /// The mark of the page's icon row the pad is on (`console/watch_page.rs`).
     mark: usize,
+    /// The watched mark the page last **drew** (`watched_mark`'s answer), `None`
+    /// when the row had none. The pad predicts the row's shape from this instead
+    /// of asking the record again: the icon a press lands on is the icon that was
+    /// drawn, and a press costs no file read.
+    drawn: Option<bool>,
     /// The title the page last opened: another one starts on the list.
     page: Option<String>,
     /// Play the first stream as soon as this title/episode's list arrives (A on
@@ -432,7 +437,7 @@ impl CollectionView {
                 if this.watch.trailer_pending.as_deref() == Some(key.as_str()) {
                     this.watch.trailer_pending = None;
                     if matches!(this.watch.info.state, TitleState::Failed) {
-                        this.show_toast(tr!("Details unavailable right now."), true, cx);
+                        this.watch_notify(tr!("Details unavailable right now."), true, cx);
                     } else if let Some(game) = this.lib.as_ref().and_then(|lib| lib.get(&key)).cloned() {
                         this.watch_play_trailer(&game, cx);
                     }
@@ -673,6 +678,22 @@ impl CollectionView {
 
     /// Loads the streams of `game` (or of one episode, when `video` names it)
     /// unless that answer is already there. Play resets a failure to ask again.
+    /// Says something about the Watch space where the screen says it.
+    ///
+    /// In console mode it is **upstream's console notification** — the corner
+    /// card a background task's toast uses, with its tone, its life and its place
+    /// in the queue (`console_notify`) — because that is where a person watching
+    /// the console looks, and a second alert shape at the bottom of the screen is
+    /// the fork inventing a vocabulary upstream already has. On the desk it stays
+    /// the collection's own toast, which is where a desktop window puts one.
+    pub(super) fn watch_notify(&mut self, text: impl Into<SharedString>, error: bool, cx: &mut Context<Self>) {
+        if crate::console::active() {
+            self.console_notify(text, error, cx);
+        } else {
+            self.watch_notify(text, error, cx);
+        }
+    }
+
     pub(super) fn watch_ensure_streams(&mut self, game: &CollectionGame, video: Option<&str>, cx: &mut Context<Self>) {
         let key = game.key.clone();
         let video = video.map(str::to_owned);
@@ -706,10 +727,16 @@ impl CollectionView {
                     // series' is one episode's and says nothing about the show.
                     if kind == "movie" {
                         if let Ok(streams) = &answer {
+                            log::info!("watch streams: {provider}:{title_id} found {}", streams.len());
                             if let Err(error) = heronite_watch::streams::note(&app, &provider, &kind, &title_id, streams.len()) {
                                 log::warn!("recording the stream probe: {error:#}");
                             }
                         }
+                    } else if answer.is_ok() {
+                        // A series' answer is one episode's, so it is not kept:
+                        // the card cannot dim from it, and that is worth a line
+                        // when a person asks why nothing greys.
+                        log::info!("watch streams: {provider}:{title_id} is a series; its answer is one episode's, so no probe is kept");
                     }
                     answer
                 })
@@ -734,7 +761,7 @@ impl CollectionView {
                 if play_now {
                     match (has_streams, this.lib.as_ref().and_then(|lib| lib.get(&key)).cloned()) {
                         (true, Some(game)) => this.watch_play_stream(&game, 0, cx),
-                        (false, _) => this.show_toast(tr!("No streams found for this title."), true, cx),
+                        (false, _) => this.watch_notify(tr!("No streams found for this title."), true, cx),
                         (true, None) => {}
                     }
                 }
@@ -764,7 +791,7 @@ impl CollectionView {
     /// stops it.
     pub(super) fn watch_play_picked(&mut self, game: &CollectionGame, video: Option<&str>, cx: &mut Context<Self>) {
         if crate::fork::watch::sources::imported(game) {
-            self.show_toast(tr!("Not currently present in any available stream source."), true, cx);
+            self.watch_notify(tr!("Not currently present in any available stream source."), true, cx);
             return;
         }
         if self.watch.running.as_ref().is_some_and(|running| running.key == game.key) {
@@ -778,7 +805,7 @@ impl CollectionView {
                 return;
             }
             (true, StreamsState::Ready(_)) => {
-                self.show_toast(tr!("No streams found for this title."), true, cx);
+                self.watch_notify(tr!("No streams found for this title."), true, cx);
                 return;
             }
             (true, StreamsState::Loading) => {
@@ -849,7 +876,7 @@ impl CollectionView {
             if running.key == game.key {
                 running.stop.store(true, Ordering::Relaxed);
             } else {
-                self.show_toast(tr!("Another title is playing. Stop it first."), true, cx);
+                self.watch_notify(tr!("Another title is playing. Stop it first."), true, cx);
             }
             cx.notify();
             return;
@@ -857,7 +884,7 @@ impl CollectionView {
         let url = match self.watch_trailer(&game.key) {
             Trailer::Found(url) => url,
             Trailer::NotFound => {
-                self.show_toast(tr!("No trailer for this title."), true, cx);
+                self.watch_notify(tr!("No trailer for this title."), true, cx);
                 return;
             }
             Trailer::Unavailable => {
@@ -879,7 +906,7 @@ impl CollectionView {
         self.watch.running = Some(Running { key: game.key.clone(), stop: stop.clone() });
         // mpv resolves the page through yt-dlp before it shows a frame, which
         // takes a moment: say it is opening, or the press looks like it missed.
-        self.show_toast(tr!("Opening the trailer…"), false, cx);
+        self.watch_notify(tr!("Opening the trailer…"), false, cx);
         let (tx, rx) = futures::channel::oneshot::channel();
         std::thread::Builder::new()
             .name("watch-trailer".into())
@@ -909,7 +936,7 @@ impl CollectionView {
         }
         if let Ok(Err(error)) = result {
             log::warn!("watch trailer: {error:#}");
-            self.show_toast(tr!("Could not play the trailer: {error}", error = format!("{error:#}")), true, cx);
+            self.watch_notify(tr!("Could not play the trailer: {error}", error = format!("{error:#}")), true, cx);
         }
         cx.notify();
     }
@@ -941,6 +968,20 @@ impl CollectionView {
         self.watch.rail = 0;
         self.watch.pane = Pane::List;
         self.watch.mark = 0;
+        // Until this title is drawn, the row's shape is the previous title's.
+        self.watch.drawn = None;
+    }
+
+    /// The watched mark the page last drew (`None` when the row has none), which
+    /// is how the pad knows the row's shape without asking the record again.
+    pub(super) fn watch_drawn(&self) -> Option<bool> {
+        self.watch.drawn
+    }
+
+    /// Records the row the render drew: the pad reads it back (`watch_drawn`), so
+    /// the two cannot disagree about which icon a press is on.
+    pub(super) fn watch_set_drawn(&mut self, drawn: Option<bool>) {
+        self.watch.drawn = drawn;
     }
 
     /// The mark of the icon row the pad is on (clamped to `len`).
@@ -1025,12 +1066,12 @@ impl CollectionView {
                 // Say it happened: the row's label flips, but a mark a person is
                 // only "pretty sure" about gets pressed again.
                 let message = if watched { tr!("Marked as watched") } else { tr!("Marked as not watched") };
-                self.show_toast(message, false, cx);
+                self.watch_notify(message, false, cx);
                 self.watch_drain_trackers(cx);
             }
             Err(error) => {
                 log::warn!("marking {id} watched={watched}: {error:#}");
-                self.show_toast(format!("{error:#}"), true, cx);
+                self.watch_notify(format!("{error:#}"), true, cx);
             }
         }
         cx.notify();
@@ -1150,14 +1191,14 @@ impl CollectionView {
         let Some(stream) = streams.get(index).cloned() else { return };
         if let Some(running) = &self.watch.running {
             if running.key != game.key {
-                self.show_toast(tr!("Another title is playing. Stop it first."), true, cx);
+                self.watch_notify(tr!("Another title is playing. Stop it first."), true, cx);
             }
             return;
         }
         // A torrent needs the local service: start it first when it is down
         // (`watch_service.rs`); the play here runs again once it answers.
         if stream.info_hash.is_some() && !self.watch_service_ready() && !self.watch_service.starting {
-            self.show_toast(tr!("Starting the Stremio service…"), false, cx);
+            self.watch_notify(tr!("Starting the Stremio service…"), false, cx);
             self.watch_service_start(game.key.clone(), index, cx);
             return;
         }
@@ -1235,7 +1276,7 @@ impl CollectionView {
             }
             Ok(Err(error)) => {
                 log::warn!("watch playback: {error:#}");
-                self.show_toast(tr!("Could not play: {error}", error = format!("{error:#}")), true, cx);
+                self.watch_notify(tr!("Could not play: {error}", error = format!("{error:#}")), true, cx);
             }
             Err(_) => {}
         }

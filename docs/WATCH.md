@@ -235,6 +235,69 @@ the rules that apply while building it.
 > report the right thumb click, `Pad::R3` carries it, `R` is its keyboard key,
 > and `Btn::R3` draws `RS` / `R3` in the hint bar.
 >
+> **Revision 2026-11-27 — the console's own notification, not a fork-made
+> alert.** The page's messages ("Opening the trailer…", "Starting the Stremio
+> service…", "No streams found for this title.", its refusals) went through the
+> collection's desktop toast — a card at the bottom of the window that console
+> mode inherited rather than chose. Upstream's console mode has its own
+> notification: the top-right corner card a background task's toast uses
+> (`collection/console/activity.rs`: a queue of three, an icon disc per tone, a
+> life of 3.5 / 5 / 8 s for started / done / failed). Every Watch message now goes
+> through `watch_notify`, which hands it to that card while console mode is on
+> (`console_notify`) and keeps the desktop toast on the desk, where a window puts
+> one. A message never says "started" — it has no progress — so it takes the
+> informative or the failing card; the two are the same ones a task ends on, and
+> they share the queue, so a burst cannot fill the corner.
+>
+> **Revision 2026-11-27 — the no-source grey shows, and a coverless card gets a
+> cover.** The grey never appeared because four of the five F-019 sites ANDed the
+> fork's rule with upstream's "not installed" gate: a film whose stream probe came
+> back empty is `is_installed: true` (its record is fine, it just has no stream),
+> so `dimmed && !installed` was always false. All five sites now call one rule,
+> `sources::greyed(theme_switch, installed, dimmed)` — the theme's switch only
+> decides the *not installed* reason (`docs/FORK.md` F-019) — and a title with no
+> art at all fades instead of greying a picture it has not got. Only movies whose
+> page was opened or played are probed (`streams::note`), and a series' answer is
+> one episode's, so most cards stay `Unknown`: the probe is recorded where it
+> runs, and the logs say so (`info` per title, `warn` when `streams.json` cannot
+> be read).
+>
+> The coverless cards were records named without art: Stremio's list entries and
+> Simkl's watchlist placeholders arrive bare. `record_of` now falls back to the
+> addon's own host, `https://images.metahub.space/poster/medium/{imdb}/img`, so
+> every record with an IMDb id draws a cover; a source's own poster still wins.
+> Every image failure is now logged at `warn` (it was `debug`, invisible at the
+> default level) with the loader's per-candidate reason, once per picture.
+>
+> **Revision 2026-11-27 — the two shelf flags work on every title, and a press
+> reaches the providers.** Two bugs met here. The first was in the pull: Simkl's
+> `date_from` narrows `/sync/all-items` to the rows whose activity moved, and the
+> reconcile read that delta as if it were the list — so a watchlisted title with
+> no recent activity on the account was "removed there" and taken off the shelf,
+> which is how a full watchlist emptied itself on 2026-11-19 (`docs/WATCH-SYNC-RULES.md`
+> now states the precondition). The second was that a press wrote the list and
+> nothing else: no decision, so the reconciler could not tell the person's add
+> from the pull's stale `out`, and nothing was ever sent.
+>
+> Now: a press writes the list **and** the decision (`origin: Local`) in one
+> `watch-personal.json` write, and a forced pull a moment later
+> (`import::tick_now`) derives the `PushAdd` / `PushRemove` from that ledger and
+> delivers it to every enabled tracker — local first, then the providers, with no
+> second outbox. Presses are never lost and never pile up: two pulls for one
+> provider never run at once, a press during a pull gets one more pass (two
+> passes at most per burst), and a press after it starts another. A tracker
+> that cannot answer now reads the same ledger next tick. The pull also asks for
+> the **whole** listing whenever a list's own activity stamp moved, so a removal
+> there is still found; `CURSOR_SCHEMA` is 2, so every existing cursor refetches a
+> baseline once and the emptied lists come back.
+>
+> And the two flags no longer need a local record: **a title only a provider
+> knows** (a greyed placeholder) draws the bookmark and the heart, and R3 keeps
+> it. Only the watched tick stays off — it writes a progress record, and there is
+> none to write. The row's shape is now decided by one function, `watched_mark`,
+> that the render and the pad both call, so a press lands on the icon it shows
+> even when the watched mark is not drawn.
+>
 > **Revision 2026-11-19 — the trailer moves to L3, on every screen.** Y was the
 > trailer's on the film page, but Y is the list's search: one press cannot be two
 > things, and a person who learned the trailer on the page could not play it

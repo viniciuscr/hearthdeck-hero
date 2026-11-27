@@ -186,21 +186,6 @@ impl PersonalLibrary {
         };
         list.iter().any(|item| item.id == id).then_some(Membership::In)
     }
-    /// The membership this file implies for a title **regardless of provider**: a
-    /// list entry from a sync carries no provider, and the ledger keeps it under
-    /// an empty one.
-    pub fn membership_any(&self, kind: &str, id: &str) -> Option<Membership> {
-        if let Some(decision) = self.decision(kind, "", id) {
-            return Some(decision.state);
-        }
-        let list = match kind {
-            WATCHLIST => &self.watchlist,
-            FAVOURITES => &self.favourites,
-            _ => return None,
-        };
-        list.iter().any(|item| item.id == id).then_some(Membership::In)
-    }
-
     /// Takes a title out of a list by its id, whatever kind or provider the entry
     /// was kept as. A sync removal knows the id, not the entry.
     pub fn remove_any(&mut self, kind: &str, id: &str) -> bool {
@@ -214,6 +199,51 @@ impl PersonalLibrary {
         list.len() != before
     }
 
+    /// The membership this file implies for a title **regardless of provider**: a
+    /// list entry from a sync carries no provider, and the ledger keeps it under
+    /// an empty one.
+    ///
+    /// The person's own intent, which is what a sync reconciles against: their
+    /// press when the newest decision for the title is theirs (`origin: Local`),
+    /// else the list entry itself. A decision an import wrote says what a provider
+    /// reported, not what the person wants, so it never speaks for them — a pull
+    /// that wrote one by mistake cannot make a title the person kept look removed.
+    pub fn local_membership(&self, kind: &str, id: &str) -> Option<Membership> {
+        let newest = self
+            .decisions
+            .iter()
+            .filter_map(|(key, decision)| {
+                let mut parts = key.splitn(3, ':');
+                (parts.next() == Some(kind) && parts.next().is_some() && parts.next() == Some(id)).then_some(decision)
+            })
+            // Two decisions can share an instant (a press and a pull in the same
+            // second): the person's wins, so the tie-break cannot hand their
+            // intent to a row an import wrote.
+            .max_by_key(|decision| (decision.changed_at, decision.origin == Origin::Local));
+        match newest {
+            Some(decision) if decision.origin == Origin::Local => Some(decision.state),
+            // Nothing of the person's to go by: the list itself, which is what a
+            // file written before the ledger has, and what an import's add edits.
+            _ => {
+                let list = match kind {
+                    WATCHLIST => &self.watchlist,
+                    FAVOURITES => &self.favourites,
+                    _ => return None,
+                };
+                list.iter().any(|item| item.id == id).then_some(Membership::In)
+            }
+        }
+    }
+
+    /// Records where a list stands after the person's own press: the decision a
+    /// sync reads back as their intent, and the one the send side pushes.
+    ///
+    /// Provider-less on purpose: a press is about the title, not about which
+    /// source played it (the same rule [`same_title`] follows).
+    fn decide_local(&mut self, kind: &str, id: &str, state: Membership) {
+        self.decide(kind, "", id, ListDecision { state, changed_at: Utc::now(), origin: Origin::Local, imported_from: None });
+    }
+
     /// Adds a title to the watchlist, or refreshes the snapshot of one already
     /// there without moving it. `true` when it was not in the list before.
     pub fn add_watchlist(&mut self, item: &ShelfTitle) -> bool {
@@ -225,13 +255,19 @@ impl PersonalLibrary {
     }
 
     /// Adds or removes, and says where it stands afterwards: `true` = in.
+    ///
+    /// A press records where the list stands (`decide_local`) as well as editing
+    /// it: the ledger is the intent a sync pushes, so pressing again after a pull
+    /// said "removed" is a decision, not a silent edit the next tick undoes.
     pub fn toggle_watchlist(&mut self, item: &ShelfTitle) -> bool {
-        if self.remove_watchlist(item) {
+        let member = if self.remove_watchlist(item) {
             false
         } else {
             self.add_watchlist(item);
             true
-        }
+        };
+        self.decide_local(WATCHLIST, &item.id, membership_of(member));
+        member
     }
 
     pub fn watchlisted(&self, item: &ShelfTitle) -> bool {
@@ -247,12 +283,14 @@ impl PersonalLibrary {
     }
 
     pub fn toggle_favourite(&mut self, item: &ShelfTitle) -> bool {
-        if self.remove_favourite(item) {
+        let member = if self.remove_favourite(item) {
             false
         } else {
             self.add_favourite(item);
             true
-        }
+        };
+        self.decide_local(FAVOURITES, &item.id, membership_of(member));
+        member
     }
 
     pub fn favourited(&self, item: &ShelfTitle) -> bool {
@@ -279,6 +317,15 @@ impl PersonalLibrary {
             Some(list) => drop(&mut list.items, item),
             None => false,
         }
+    }
+}
+
+/// The membership a list edit left behind: `true` is in the list.
+fn membership_of(member: bool) -> Membership {
+    if member {
+        Membership::In
+    } else {
+        Membership::Out
     }
 }
 
@@ -412,6 +459,73 @@ mod tests {
         assert!(library.remove_from_list("sci-fi", &matrix));
         assert!(!library.remove_from_list("sci-fi", &matrix), "already gone");
         assert!(!library.add_to_list("nope", &matrix), "no such list");
+    }
+
+    #[test]
+    fn a_press_records_the_intent_a_sync_pushes() {
+        let mut library = PersonalLibrary::default();
+        let matrix = item("stremio", "movie", "tt0133093");
+
+        assert!(library.toggle_watchlist(&matrix));
+        assert_eq!(library.local_membership(WATCHLIST, "tt0133093"), Some(Membership::In), "the press is the decision");
+        let decision = library.decision(WATCHLIST, "", "tt0133093").expect("recorded under no provider");
+        assert_eq!(decision.origin, Origin::Local, "the person's, not a pull's");
+
+        assert!(!library.toggle_watchlist(&matrix));
+        assert_eq!(library.local_membership(WATCHLIST, "tt0133093"), Some(Membership::Out), "and so is the second press");
+        assert_eq!(library.local_membership(FAVOURITES, "tt0133093"), None, "the other flag was never touched");
+    }
+
+    #[test]
+    fn a_decision_a_pull_wrote_never_speaks_for_the_person() {
+        // What the delta-pull bug left behind: an `out` an import derived from a
+        // partial answer, with the title back in the list the person kept.
+        let mut library = PersonalLibrary::default();
+        let matrix = item("stremio", "movie", "tt0149460");
+        library.add_watchlist(&matrix);
+        library.decide(
+            WATCHLIST,
+            "",
+            "tt0149460",
+            ListDecision { state: Membership::Out, changed_at: Utc::now(), origin: Origin::Imported, imported_from: Some("simkl".into()) },
+        );
+
+        assert_eq!(
+            library.local_membership(WATCHLIST, "tt0149460"),
+            Some(Membership::In),
+            "the import's row is a report, not an intent: the list is the answer"
+        );
+
+        // A press after it is the person's, and outranks it.
+        assert!(!library.toggle_watchlist(&matrix));
+        assert_eq!(library.local_membership(WATCHLIST, "tt0149460"), Some(Membership::Out));
+    }
+
+    #[test]
+    fn a_tie_between_the_person_and_a_pull_goes_to_the_person() {
+        // Both wrote in the same instant: only the origin can break the tie, and
+        // the person's intent must win it (a pull's row is a report).
+        let mut library = PersonalLibrary::default();
+        let matrix = item("stremio", "movie", "tt1");
+        let at = Utc::now();
+        library.decide(
+            WATCHLIST,
+            "",
+            "tt1",
+            ListDecision { state: Membership::Out, changed_at: at, origin: Origin::Local, imported_from: None },
+        );
+        // A second writer's row for the same title, in the same instant: the
+        // ledger keeps one row per `kind:provider:id`, so it lives under a key of
+        // its own and the scan over the title has to choose.
+        library.decide(
+            WATCHLIST,
+            "simkl",
+            "tt1",
+            ListDecision { state: Membership::In, changed_at: at, origin: Origin::Imported, imported_from: Some("simkl".into()) },
+        );
+
+        assert!(!library.watchlisted(&matrix), "the list is empty: the pull only reported");
+        assert_eq!(library.local_membership(WATCHLIST, "tt1"), Some(Membership::Out), "the person's press stands");
     }
 
     #[test]

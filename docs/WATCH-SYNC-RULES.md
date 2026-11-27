@@ -17,6 +17,39 @@ action   ∈ { None, AddLocal, RemoveLocal, PushAdd, PushRemove, Conflict }
 `seen` is `cursor.listIds` (per list kind). It is advanced **only** after a tick
 fully applies. "Absent" never means removed by itself.
 
+Two preconditions, both learned the hard way (2026-11-27: a watchlist emptied
+itself):
+
+- **`remote` must come from a whole listing.** A provider asked for "what changed
+  since" answers with a delta, and a delta's silence about a title says nothing
+  about the list. `Pulled::lists` says which kind of answer this is
+  (`ListAnswer::Whole` / `Delta`, delta by default); a delta may `AddLocal` but
+  may never `RemoveLocal`, and it widens `seen` with what the last tick saw
+  instead of narrowing it to its own rows. Simkl asks for the whole listing
+  whenever a list's own activity stamp moved (`plantowatch`,
+  `removed_from_list`, `favorites`, `custom_lists`), which is the only moment a
+  removal can be there to find — and it reports `Whole` only when every bucket
+  answered: a listing it refused to send whole is a delta.
+- **`local` is the person's intent**, not what a pull wrote:
+  `PersonalLibrary::local_membership` — the newest decision when it is theirs
+  (`origin: Local`, written by the press), else the list entry. A row an import
+  derived from a partial answer cannot make a kept title look removed, and the
+  next whole answer brings it back.
+
+A press writes both: the list, and a `ListDecision { state, changedAt, origin:
+Local }` under no provider (`decide` with `provider = ""`). The app then asks for
+a pull at once (`import::tick_now`), which is the send side: the same
+reconciliation derives `PushAdd` / `PushRemove` and `trackers::deliver_list`
+hands it to each enabled tracker. A tracker that cannot answer now stays owed —
+the ledger still says so — and the next tick derives it again. One provider never
+has two forced pulls at once; a press during one gets the second pass, and the
+pass count is bounded (`FORCED_PASSES`).
+
+TABLE 2 is **not implemented**: a membership carries no remote stamp here, so
+`Conflict` (`Out` here, `In` there, never `seen`) resolves to "the person's
+decision stands" — nothing is written or pushed — until a provider reports when
+its own list changed.
+
 ---
 
 ## Lists

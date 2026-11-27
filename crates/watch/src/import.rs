@@ -16,7 +16,7 @@ use heronite_watch_core::http::UreqTransport;
 use heronite_watch_core::personal::ShelfTitle;
 use heronite_watch_core::personal::{ListDecision, Membership, FAVOURITES, WATCHLIST};
 use heronite_watch_core::provider::Ctx;
-use heronite_watch_core::pull::{Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
+use heronite_watch_core::pull::{ListAnswer, Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
 use heronite_watch_core::sync_rules::{reconcile, Action, Local, Remote, Seen};
 use heronite_watch_core::tracker::{Delivery, ListChange, TrackedTitle, TrackedView};
 use heronite_watch_core::types::{EpisodeProgress, MovieProgress, Origin};
@@ -35,7 +35,12 @@ const ECHO: chrono::Duration = chrono::Duration::minutes(5);
 /// What the current pull asks for. Bumped when a pull's shape changes, so a cursor
 /// written by an older build is refetched as a baseline: a snapshot sends only
 /// deltas, and the rows a previous build skipped would never arrive otherwise.
-pub const CURSOR_SCHEMA: u32 = 1;
+///
+/// 2: list membership is only trusted whole. The pull before this one read a
+/// delta as if it were the list, so a cursor it wrote remembers nothing reliable
+/// about the lists — and the local lists may have been emptied by it. A baseline
+/// asks for the whole listing, which restores what the person kept.
+pub const CURSOR_SCHEMA: u32 = 2;
 
 /// What one import did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -192,14 +197,94 @@ pub fn status(app: &AppPaths, provider: &str) -> Option<cursor::LastImport> {
 /// Every enabled provider whose pull is due, run once. Called from the app on a
 /// timer, on opening Watch, and after a playback: never from a background service.
 pub fn tick(app: &AppPaths) -> Vec<(&'static str, Result<Report>)> {
+    run_tick(app, false)
+}
+
+/// How many passes one burst of presses gets: the pull that reads the ledger, and
+/// the one that reads whatever was pressed while it ran.
+const FORCED_PASSES: u8 = 2;
+
+/// The pull a **local change** asks for — the person pressed a shelf flag, so a
+/// configured tracker is owed the decision just written to the ledger.
+///
+/// The schedule is ignored: the change is news now, not in fifteen minutes. The
+/// pull is the same one the timer runs — it derives what is owed from the ledger
+/// and delivers it, so there is still no second outbox. Presses are cheap and
+/// never lost: while a forced pull runs, the presses land as *pending* and get
+/// one more pass (`FORCED_PASSES`), so a burst costs at most two pulls and the
+/// last press is always read; a press after that simply starts another.
+pub fn tick_now(app: &AppPaths) -> Vec<(&'static str, Result<Report>)> {
+    if !take_forced_pull() {
+        log::debug!("import: a pull is already reading the ledger; this change rides its next pass");
+        return Vec::new();
+    }
+    let mut ran = Vec::new();
+    let mut passes = 0u8;
+    loop {
+        ran.extend(run_tick(app, true));
+        passes += 1;
+        if !next_forced_pass(passes < FORCED_PASSES) {
+            break;
+        }
+    }
+    ran
+}
+
+/// Where the forced pulls stand: whether one is running, and whether a press
+/// arrived that no pass has read yet.
+#[derive(Default)]
+struct Forced {
+    running: bool,
+    pending: bool,
+}
+
+/// The forced pulls, under one small lock: the press (the UI thread) and the pull
+/// (a background one) are its two writers, and it is never held across an await.
+static FORCED: std::sync::Mutex<Forced> = std::sync::Mutex::new(Forced { running: false, pending: false });
+
+/// Takes the right to run a forced pull, or records the press as pending — two
+/// pulls for one provider must never run at once, and a press during one is the
+/// next pass's news.
+fn take_forced_pull() -> bool {
+    let mut forced = FORCED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if forced.running {
+        forced.pending = true;
+        return false;
+    }
+    forced.running = true;
+    forced.pending = false;
+    true
+}
+
+/// After one pass: another when a press arrived while it ran and `more_comes`,
+/// otherwise the forced pull is over.
+fn next_forced_pass(more_comes: bool) -> bool {
+    let mut forced = FORCED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if more_comes && forced.pending {
+        forced.pending = false;
+        return true;
+    }
+    forced.pending = false;
+    forced.running = false;
+    false
+}
+
+/// [`tick`] and [`tick_now`]: `force` skips the schedule, nothing else.
+fn run_tick(app: &AppPaths, force: bool) -> Vec<(&'static str, Result<Report>)> {
+    run_tick_with(app, providers(), force)
+}
+
+/// [`run_tick`] over the pullers it is given, so the schedule is testable without
+/// the network.
+fn run_tick_with(app: &AppPaths, sources: &[&dyn WatchSync], force: bool) -> Vec<(&'static str, Result<Report>)> {
     let enabled = heronite_watch_state::settings::read(app).import_providers;
     let mut ran = Vec::new();
-    for sync in providers() {
+    for sync in sources {
         if !enabled.iter().any(|id| id == sync.id()) {
             continue;
         }
         let stored = cursor::read(app, sync.id());
-        if !due(&stored, Utc::now()) {
+        if !force && !due(&stored, Utc::now()) {
             // A tick that decides not to ask says so: "no logs" must never be the
             // same trace as "the schedule was silent about skipping".
             match stored.next_at {
@@ -255,7 +340,7 @@ pub fn run_with(app: &AppPaths, sync: &dyn WatchSync, ctx: &Ctx<'_>) -> Result<R
         }
     }
 
-    let pulled = sync.pull(ctx, since.as_ref())?;
+    let pulled = sync.pull(ctx, since.as_ref(), &now)?;
     let (report, seen) = apply(app, provider, &pulled, stored.last_pull_at, &stored.list_ids)?;
     log::info!(
         "{provider} pull: {} watched, {} positions, {} skipped, {} added to a list, {} removed, {} list changes delivered",
@@ -489,6 +574,13 @@ fn apply(
 /// Reconciles each list against the ledger with the three-way table
 /// (`docs/WATCH-SYNC-RULES.md`): the local decision, what the last tick saw the
 /// provider holding, and what it holds now. Absence alone never removes.
+///
+/// Two facts gate the table: the local side is the person's **intent**
+/// (`PersonalLibrary::local_membership`), so a row a pull wrote never votes for
+/// them; and a **delta** answer (`Pulled::lists` = `ListAnswer::Delta`) says nothing
+/// about the titles it left out, so it can add a title to a list but never remove
+/// one. A whole answer — a baseline, or the pull a moved list asks for — is what
+/// finds a removal there.
 fn apply_lists(
     app: &AppPaths,
     provider: &str,
@@ -500,6 +592,7 @@ fn apply_lists(
     let mut added = 0usize;
     let mut removed = 0usize;
     let mut pushes: Vec<ListChange> = Vec::new();
+    let whole = pulled.lists == ListAnswer::Whole;
 
     // What the provider says each list holds now.
     let mut remote: BTreeMap<String, Vec<&RemoteMembership>> = BTreeMap::new();
@@ -528,7 +621,7 @@ fn apply_lists(
         }
 
         for imdb in universe {
-            let local = match library.membership_any(kind, &imdb) {
+            let local = match library.local_membership(kind, &imdb) {
                 Some(Membership::In) => Local::In,
                 Some(Membership::Out) => Local::Out,
                 None => Local::Unset,
@@ -544,6 +637,11 @@ fn apply_lists(
                 imported_from: Some(provider.to_owned()),
             };
             let action = reconcile(local, seen, is);
+            // A delta left this title out: it was not reported, which is not the
+            // same as "not there". Only a whole answer may remove here.
+            if !whole && matches!(action, Action::RemoveLocal) {
+                continue;
+            }
             match action {
                 Action::AddLocal => {
                     let Some(title) = title else { continue };
@@ -571,11 +669,19 @@ fn apply_lists(
                         pushes.push(ListChange { title: target, list: kind.to_owned(), member: matches!(action, Action::PushAdd) });
                     }
                 }
-                // Both moved: the local state wins until the send side exists.
+                // Both moved: the local state wins on both sides.
                 Action::Conflict | Action::None => {}
             }
         }
-        held_now.insert(kind.to_owned(), now_ids);
+        // What this tick can say the provider holds: a whole answer is the list;
+        // a delta is the rows it named, and everything the last tick saw that it
+        // was silent about. Narrowing `seen` to a delta would make the next tick
+        // read the titles it left out as removed.
+        let mut held: BTreeSet<String> = now_ids.iter().cloned().collect();
+        if !whole {
+            held.extend(was.iter().cloned());
+        }
+        held_now.insert(kind.to_owned(), held.into_iter().collect());
     }
 
     if added + removed > 0 {
@@ -1038,6 +1144,11 @@ mod tests {
         assert!(library.watchlist.is_empty(), "a favourite is not a watchlist entry");
     }
 
+    /// A whole answer about the lists: every title it does not name is not there.
+    fn whole(pulled: Pulled) -> Pulled {
+        Pulled { lists: ListAnswer::Whole, ..pulled }
+    }
+
     #[test]
     fn a_title_removed_on_the_phone_leaves_the_watchlist() {
         let root = tempfile::tempdir().unwrap();
@@ -1045,10 +1156,77 @@ mod tests {
         keep_local(&app, "tt1");
         let seen = BTreeMap::from([("watchlist".to_owned(), vec!["tt1".to_owned()])]);
 
-        let (report, after) = apply(&app, "simkl", &Pulled::default(), None, &seen).unwrap();
+        let (report, after) = apply(&app, "simkl", &whole(Pulled::default()), None, &seen).unwrap();
         assert_eq!(report.lists_removed, 1, "{report:?}");
         assert!(watchlist(&app).is_empty(), "gone here too");
         assert!(after.get("watchlist").is_none_or(|ids| ids.is_empty()));
+    }
+
+    #[test]
+    fn a_delta_that_says_nothing_about_a_title_never_removes_it() {
+        // The wipe this fix is about: a delta pull carries the rows that moved
+        // and nothing else, so a watchlisted title with no activity on the
+        // provider is simply absent from the answer. It is absent from the
+        // *answer*, not from the list.
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        keep_local(&app, "tt1");
+        let seen = BTreeMap::from([("watchlist".to_owned(), vec!["tt1".to_owned()])]);
+
+        let (report, after) = apply(&app, "simkl", &Pulled::default(), None, &seen).unwrap();
+        assert_eq!(report.lists_removed, 0, "{report:?}");
+        assert_eq!(watchlist(&app), ["tt1"], "the shelf keeps what the person kept");
+        assert_eq!(after.get("watchlist"), Some(&vec!["tt1".to_owned()]), "and the next tick still knows the provider had it");
+        assert!(report.pushes.is_empty(), "nothing is owed either way: the answer said nothing");
+    }
+
+    #[test]
+    fn an_import_that_wrote_removed_does_not_keep_the_title_off_the_shelf() {
+        // What the delta-pull bug left in `watch-personal.json`: an `out` an
+        // import derived, with the title still on the provider's list. The next
+        // whole answer brings it back, and nothing is pushed to take it away
+        // there.
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        let mut library = heronite_watch_state::personal::read(&app);
+        library.decide(
+            "watchlist",
+            "",
+            "tt1",
+            heronite_watch_core::personal::ListDecision {
+                state: heronite_watch_core::personal::Membership::Out,
+                changed_at: Utc::now(),
+                origin: Origin::Imported,
+                imported_from: Some("simkl".into()),
+            },
+        );
+        heronite_watch_state::personal::write(&app, &library).unwrap();
+
+        let (report, _) =
+            apply(&app, "simkl", &whole(Pulled { memberships: vec![membership("tt1")], ..Default::default() }), None, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(report.lists_added, 1, "{report:?}");
+        assert_eq!(watchlist(&app), ["tt1"], "the shelf holds it again");
+        assert!(report.pushes.is_empty(), "and the provider is not asked to remove what it has");
+    }
+
+    #[test]
+    fn a_press_after_a_whole_answer_is_pushed_as_the_removal_it_is() {
+        // The person takes the title off the shelf; the provider still has it, and
+        // the ledger says so. That is the one row that owes a removal.
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        let mut library = heronite_watch_state::personal::read(&app);
+        let item = ShelfTitle { id: "tt1".into(), kind: "movie".into(), name: "A Film".into(), ..ShelfTitle::default() };
+        library.toggle_watchlist(&item);
+        assert!(!library.toggle_watchlist(&item), "the second press takes it off");
+        heronite_watch_state::personal::write(&app, &library).unwrap();
+        let seen = BTreeMap::from([("watchlist".to_owned(), vec!["tt1".to_owned()])]);
+
+        let (report, _) =
+            apply(&app, "simkl", &whole(Pulled { memberships: vec![membership("tt1")], ..Default::default() }), None, &seen).unwrap();
+        assert_eq!(report.pushes.len(), 1, "{report:?}");
+        assert!(!report.pushes[0].member, "a removal, derived from the person's own press");
     }
 
     #[test]
@@ -1085,10 +1263,38 @@ mod tests {
         fn unchanged(&self, _: &Value, _: &Value) -> bool {
             false
         }
-        fn pull(&self, _: &Ctx<'_>, since: Option<&Value>) -> Result<Pulled> {
+        fn pull(&self, _: &Ctx<'_>, since: Option<&Value>, _: &Value) -> Result<Pulled> {
             *self.since.lock().unwrap() = since.cloned();
             Ok(self.pulled.clone())
         }
+    }
+
+    #[test]
+    fn a_local_change_pulls_now_even_when_the_schedule_says_later() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app(root.path());
+        set_enabled(&app, "simkl", true).unwrap();
+        // A pull just ran: the schedule says "not for another hour".
+        cursor::update(&app, "simkl", |cursor| {
+            cursor.next_at = Some(Utc::now() + chrono::Duration::hours(1));
+            Ok(())
+        })
+        .unwrap();
+
+        let sync = Recording { pulled: Pulled::default(), since: Default::default() };
+        let sources: [&dyn WatchSync; 1] = [&sync];
+        assert!(run_tick_with(&app, &sources, false).is_empty(), "the timer respects the schedule");
+        assert_eq!(run_tick_with(&app, &sources, true).len(), 1, "a press does not");
+    }
+
+    #[test]
+    fn a_burst_of_presses_shares_one_pull_and_the_last_one_is_not_lost() {
+        assert!(take_forced_pull(), "the first press pulls");
+        assert!(!take_forced_pull(), "a press while it runs asks for another pass, never a parallel pull");
+        assert!(next_forced_pass(true), "and that pass is taken, not dropped");
+        assert!(!next_forced_pass(true), "then the forced pull is over");
+        assert!(take_forced_pull(), "the next press starts another");
+        assert!(!next_forced_pass(false), "a pass with nothing pressed lands nothing more");
     }
 
     #[test]
@@ -1145,7 +1351,7 @@ mod tests {
         fn unchanged(&self, since: &Value, now: &Value) -> bool {
             since == now
         }
-        fn pull(&self, _: &Ctx<'_>, _: Option<&Value>) -> Result<Pulled> {
+        fn pull(&self, _: &Ctx<'_>, _: Option<&Value>, _: &Value) -> Result<Pulled> {
             Ok(self.pulled.clone())
         }
     }

@@ -514,7 +514,7 @@ impl CollectionView {
                         feed.looking_up = None;
                         feed.retry_at = Some(Instant::now() + RETRY);
                         log::warn!("watch catalog {kind}: {error:#}");
-                        this.show_toast(tr!("Could not load more titles: {error}", error = format!("{error:#}")), true, cx);
+                        this.watch_notify(tr!("Could not load more titles: {error}", error = format!("{error:#}")), true, cx);
                     }
                 }
                 cx.notify();

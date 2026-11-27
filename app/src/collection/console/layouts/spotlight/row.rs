@@ -142,8 +142,11 @@ impl CollectionView {
                     // Requested once at the focused size; smaller, it is scaled.
                     let src = self.console_shaped_art(key, theme.tiles.shape, on.0, on.1, priority, window).0;
                     let g = self.lib.as_ref().and_then(|l| l.get(key));
-                    let grey = (theme.tiles.grey_uninstalled && g.is_some_and(|g| !g.installed))
-                        || g.is_some_and(|g| crate::fork::watch::sources::dimmed(g));
+                    let grey = crate::fork::watch::sources::greyed(
+                        theme.tiles.grey_uninstalled,
+                        g.is_some_and(|g| g.installed),
+                        g.is_some_and(|g| crate::fork::watch::sources::dimmed(g)),
+                    );
                     let running = g.and_then(|g| {
                         if self.preparing.contains_key(&g.app_name) {
                             Some(tr!("Preparing"))

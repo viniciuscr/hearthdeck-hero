@@ -65,9 +65,20 @@ fn path(app: &AppPaths) -> PathBuf {
     app.cache.join(ROOT).join(FILE)
 }
 
-/// Every probe as stored; a missing or unreadable file is none.
+/// Every probe as stored; a missing file is none.
+///
+/// A file that is there but unreadable is a fault, not an empty cache: it is said
+/// in the log, because every title then reads as `Unknown` and no card dims
+/// (`docs/WATCH-SYNC-RULES.md` on why the probe has to be visible).
 pub fn read(root: &Path) -> HashMap<String, Probe> {
-    json_store::read::<ProbesFile>(&root.join(FILE)).map(|file| file.probes).unwrap_or_default()
+    let path = root.join(FILE);
+    match json_store::read::<ProbesFile>(&path) {
+        Ok(file) => file.probes,
+        Err(error) => {
+            log::warn!("watch streams: {} could not be read ({error:#}); no title dims from it", path.display());
+            HashMap::new()
+        }
+    }
 }
 
 /// What the probes say about a title now.
@@ -101,6 +112,20 @@ mod tests {
 
     fn app(dir: &Path) -> AppPaths {
         AppPaths::for_data(&heronite_data::DataPaths::at(dir.to_path_buf()))
+    }
+
+    #[test]
+    fn a_corrupt_probe_file_reads_as_none_and_says_so() {
+        // A file that is there but broken is a fault, not an empty cache: it must
+        // not panic, and every title then reads `Unknown` (nothing dims) — the
+        // warning is the only trace, so the read cannot fail silently.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(ROOT);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(FILE), b"{ not json").unwrap();
+
+        assert!(read(&root).is_empty(), "a broken file is no probes");
+        assert_eq!(availability(&read(&root), "stremio", "movie", "tt1"), Availability::Unknown);
     }
 
     #[test]

@@ -204,7 +204,12 @@ impl CollectionView {
             wide_title: (landscape_art && logo.is_none() && src.is_some()).then(|| title.clone()),
             src,
             logo,
-            grey: (theme.tiles.grey_uninstalled || game.as_ref().is_some_and(|g| crate::fork::watch::sources::dimmed(g))) && missing,
+            grey: crate::fork::watch::sources::greyed(
+                theme.tiles.grey_uninstalled,
+                !missing,
+                game.as_ref().is_some_and(|g| crate::fork::watch::sources::dimmed(g)),
+            ),
+            dim: game.as_ref().is_some_and(|g| crate::fork::watch::sources::dimmed(g)),
             badge: if theme.tiles.badges == Badges::Off { None } else { running },
             favourite: all_badges && game.as_ref().is_some_and(|g| g.favourite),
             new: all_badges && game.as_ref().is_some_and(|g| self.tile_is_new(g)),
@@ -284,7 +289,12 @@ struct TileArt {
     logo: Option<ImageSource>,
     /// The name over the art (a wide tile without a logo).
     wide_title: Option<String>,
+    /// Drawn dimmed: the theme's "not installed" reason, or no source can play it.
     grey: bool,
+    /// No source here can play it (`sources::dimmed`): information, so it shows
+    /// on a tile with no art too — a dimmed picture is the least it can do when
+    /// there is no picture (`docs/FORK.md` F-019).
+    dim: bool,
     /// "Preparing" / "Playing".
     badge: Option<&'static str>,
     favourite: bool,
@@ -354,7 +364,7 @@ impl TileArt {
                 })
                 .when(!circles.is_empty(), |d| d.child(div().flex().gap(u(4.)).children(circles)))
         });
-        let picture = match self.src.clone() {
+        let picture: AnyElement = match self.src.clone() {
             Some(s) => {
                 round(img(s).size_full().object_fit(ObjectFit::Cover).grayscale(self.grey), top_r, bottom_r, inner).into_any_element()
             }
@@ -385,6 +395,9 @@ impl TileArt {
             )
             .into_any_element(),
         };
+        // A title nothing can play is dimmed over the picture it has; with no
+        // art at all, the fade is all the tile can show for it.
+        let picture = div().size_full().when(self.dim, |d| d.opacity(0.55)).child(picture);
         div()
             .relative()
             .flex_1()

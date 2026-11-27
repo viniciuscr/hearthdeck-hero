@@ -129,6 +129,9 @@ impl ImageStore {
         }
         let chain = chain();
         if chain.is_empty() {
+            // No URL at all (not a failed one): the tile or card draws its own
+            // fallback, and this is the line that says why.
+            log::info!("art: {id} has no source; the tile shows its own fallback");
             self.failed.insert(id.clone());
             return None;
         }
@@ -167,7 +170,11 @@ impl ImageStore {
                 self.evict();
             }
             Err(err) => {
-                log::debug!("image {id}: {err}");
+                // Fork-Seam: F-023 — the terminal answer for one picture, and
+                // the only one a shipped run writes: the loader's own lines are
+                // debug, and the default level is info (app/src/main.rs). Once per
+                // id per session — the `failed` set stops the retries.
+                log::warn!("art: {id} could not be loaded: {err}");
                 self.failed.insert(id);
             }
         }

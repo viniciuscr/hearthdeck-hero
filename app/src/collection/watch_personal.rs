@@ -88,6 +88,11 @@ impl CollectionView {
 
     /// Adds or removes the title from one of the two flags, then keeps the view in
     /// step. The file is the truth, so the marks redraw from it.
+    ///
+    /// Local first, then the providers (`docs/WATCH-SYNC-RULES.md`): the press
+    /// writes the list and the intent in the same file, and the pull a moment
+    /// later derives what the configured trackers are owed from that ledger and
+    /// delivers it. Nothing waits on the network — the shelf is already right.
     pub(super) fn watch_toggle_personal(&mut self, game: &CollectionGame, flag: Flag, cx: &mut Context<Self>) {
         let item = crate::fork::watch::sources::personal_item(game);
         match flag.flip(&self.app_paths, &item) {
@@ -98,12 +103,54 @@ impl CollectionView {
                 self.watch_personal_ready = true;
                 self.forget_watch_shelves();
                 cx.notify();
+                self.watch_push_shelf(flag, cx);
             }
             Err(error) => {
                 log::warn!("watch shelf: {error:#}");
-                self.show_toast(tr!("Could not save that: {error}", error = format!("{error:#}")), true, cx);
+                self.watch_notify(tr!("Could not save that: {error}", error = format!("{error:#}")), true, cx);
             }
         }
+    }
+
+    /// Sends the change the press just wrote to every enabled tracker, off the UI
+    /// thread.
+    ///
+    /// The same pull the timer runs: it derives what the ledger owes and delivers
+    /// it, so a provider that cannot answer now simply reads the same ledger on
+    /// the next tick. What it brings back can add titles to the lists (a phone's
+    /// add, a removal of ours it confirms), so the rails are dropped when it ends.
+    fn watch_push_shelf(&self, flag: Flag, cx: &mut Context<Self>) {
+        let app = self.app_paths.clone();
+        cx.spawn(async move |this, cx| {
+            let ran = cx
+                .background_spawn(async move {
+                    if heronite_watch::import::enabled(&app).is_empty() {
+                        return Vec::new();
+                    }
+                    heronite_watch::import::tick_now(&app)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                for (provider, result) in ran {
+                    match result {
+                        Ok(report) if report.lists_delivered > 0 => {
+                            log::info!("{provider}: the {flag:?} press reached the provider");
+                        }
+                        Ok(report) => log::debug!(
+                            "{provider}: the {flag:?} press stays owed ({} added, {} removed, {} delivered)",
+                            report.lists_added,
+                            report.lists_removed,
+                            report.lists_delivered
+                        ),
+                        Err(error) => log::warn!("{provider}: the shelf change was not sent: {error:#}"),
+                    }
+                }
+                this.forget_watch_shelves();
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 }
 

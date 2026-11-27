@@ -13,27 +13,26 @@ use heronite_watch::metadata::Episode;
 use crate::collection::watch_personal::Flag;
 use crate::collection::CollectionView;
 
-use super::super::{has_marks, watched_mark_label, watched_state, Mark, MarkState, Picked};
+use super::super::{watched_mark_label, Mark, MarkState};
 
 impl CollectionView {
     /// The marks the page draws, in the order it draws them: the watched mark
-    /// first, then the two flags. A series whose episode list the page does not
-    /// have yet has nothing to mark, and a title no source here has has no local
-    /// record to mark at all: its row is the page, and the icon row stays empty.
+    /// first (when `watched` says the row has one), then the two flags.
+    ///
+    /// `watched` is [`watched_mark`]'s answer, computed by the render and by the
+    /// pad from one predicate — this function does not decide the row's shape, so
+    /// an icon cannot be drawn where a press expects another one. A series the
+    /// page knows no episode of, and a title no source here has, have no watched
+    /// mark; the two shelf flags are drawn for every title.
     pub(in crate::collection::console::watch_page) fn watch_marks(
         &mut self,
         game: &CollectionGame,
-        progress: Option<&heronite_watch::progress::MovieProgress>,
+        watched: Option<bool>,
         episode: Option<&Episode>,
     ) -> Vec<MarkState> {
-        if !has_marks(game) {
-            return Vec::new();
-        }
         // No record is a mark that is off, not one that is missing: a film nobody
         // has played is exactly what "Mark as watched" is for, and so is an
         // episode watched elsewhere.
-        let picked = episode.map(|episode| Picked { id: episode.id.as_str(), season: episode.season, number: episode.number });
-        let watched = watched_state(progress, picked, crate::fork::watch::sources::kind(game));
         let item = crate::fork::watch::sources::personal_item(game);
         let personal = self.watch_personal_states(&item);
         let mut marks = Vec::with_capacity(1 + Flag::ALL.len());

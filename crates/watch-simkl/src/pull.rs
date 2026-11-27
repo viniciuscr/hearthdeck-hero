@@ -13,7 +13,7 @@ use url::Url;
 
 use heronite_watch_core::http::HttpStatus;
 use heronite_watch_core::provider::Ctx;
-use heronite_watch_core::pull::{Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
+use heronite_watch_core::pull::{ListAnswer, Pulled, RemoteMembership, RemotePosition, RemoteWatch, WatchSync};
 use heronite_watch_core::tracker::{TrackedTitle, TrackedView};
 
 use crate::auth::{client_id_of, tokens_of};
@@ -47,13 +47,26 @@ impl WatchSync for SimklPull {
         }
     }
 
-    fn pull(&self, ctx: &Ctx<'_>, since: Option<&Value>) -> Result<Pulled> {
+    fn pull(&self, ctx: &Ctx<'_>, since: Option<&Value>, now: &Value) -> Result<Pulled> {
         let (client_id, token) = credentials(ctx)?;
         let mut pulled = Pulled::default();
 
-        let since = since.and_then(|since| since.get("all")).and_then(Value::as_str);
-        let (answers, unreachable) = self.all_items(ctx, &client_id, &token, since)?;
+        // A list is only knowable whole. `date_from` narrows the listing to the
+        // rows whose activity moved, so a title the person keeps with no activity
+        // is simply not in the answer — absent from the answer, not from the
+        // list. When a list's own stamp moved (or there is no baseline to
+        // compare with) the listing is asked for whole, which is also the only
+        // answer where a missing title means "removed there".
+        let whole = since.is_none_or(|since| list_stamps(since) != list_stamps(now));
+        let window = if whole { None } else { since.and_then(|since| since.get("all")).and_then(Value::as_str) };
+        let (answers, unreachable) = self.all_items(ctx, &client_id, &token, window)?;
         pulled.skipped += unreachable;
+        // A listing Simkl refused to send whole is not a whole answer: a bucket
+        // that stayed too big is missing from it, and a title it alone held
+        // would look removed. Only silence that covers every bucket may claim it.
+        if whole && unreachable == 0 {
+            pulled.lists = ListAnswer::Whole;
+        }
         for answer in answers {
             for movie in answer.movies {
                 match movie.status.as_str() {
@@ -142,6 +155,42 @@ impl SimklPull {
         Ok(Size::Fits(serde_json::from_slice(&body).context("Simkl all-items")?))
     }
 }
+
+/// The stamps that say a list moved: every status bucket that is a list
+/// (`plantowatch`), what was taken off one, and the custom lists themselves.
+///
+/// Simkl answers the activities query with one object per media type, each with
+/// a stamp per status; a build that only compares `all` cannot tell "a film was
+/// watched" from "a title left the watchlist", and would fetch a delta for both.
+fn list_stamps(snapshot: &Value) -> Vec<(String, String)> {
+    fn walk(value: &Value, at: &str, out: &mut Vec<(String, String)>) {
+        match value {
+            Value::Object(fields) => {
+                for (key, child) in fields {
+                    let path = if at.is_empty() { key.clone() } else { format!("{at}.{key}") };
+                    if LIST_STAMPS.contains(&key.as_str()) || key == "custom_lists" {
+                        out.push((path.clone(), child.to_string()));
+                        continue;
+                    }
+                    walk(child, &path, out);
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    walk(child, &format!("{at}[{index}]"), out);
+                }
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(snapshot, "", &mut out);
+    out.sort();
+    out
+}
+
+/// The keys of Simkl's activities answer that are a list's own stamps.
+const LIST_STAMPS: [&str; 3] = ["plantowatch", "removed_from_list", "favorites"];
 
 /// One listing's URL: full rows with the episode stamps, and the window.
 fn items_url(client_id: &str, path: &str, since: Option<&str>) -> Result<Url> {
@@ -480,11 +529,37 @@ mod tests {
         let credentials = credentials();
         let ctx = Ctx { http: &fake, credentials: &credentials };
 
-        let pulled = SimklPull.pull(&ctx, None).unwrap();
+        let pulled = SimklPull.pull(&ctx, None, &Value::Null).unwrap();
         assert_eq!(pulled.watches.len(), 1, "the film came from its own request");
+        assert_eq!(pulled.lists, ListAnswer::Whole, "every bucket answered, so the lists are whole");
         let seen = fake.seen.lock().unwrap().clone();
         assert!(seen.iter().any(|url| url.contains("/sync/all-items/movies")), "{seen:?}");
         assert!(seen.iter().any(|url| url.contains("/sync/all-items/shows")), "{seen:?}");
+    }
+
+    #[test]
+    fn a_listing_with_a_bucket_left_out_is_not_a_whole_list() {
+        // The last rung still refuses: the shows are missing from this answer, so
+        // a show on the watchlist would look removed. It counts as a delta, and a
+        // delta never removes anything (`docs/WATCH-SYNC-RULES.md`).
+        let mut answers = HashMap::new();
+        answers.insert("/sync/all-items", (400, r#"{"error":"max_items"}"#));
+        answers.insert("/sync/all-items/movies", (200, r#"{"movies":[]}"#));
+        answers.insert("/sync/all-items/shows", (400, r#"{"error":"max_items"}"#));
+        answers.insert("/sync/all-items/shows/watching", (400, r#"{"error":"max_items"}"#));
+        answers.insert("/sync/all-items/shows/plantowatch", (400, r#"{"error":"max_items"}"#));
+        answers.insert("/sync/all-items/shows/hold", (400, r#"{"error":"max_items"}"#));
+        answers.insert("/sync/all-items/shows/completed", (400, r#"{"error":"max_items"}"#));
+        answers.insert("/sync/all-items/shows/dropped", (400, r#"{"error":"max_items"}"#));
+        answers.insert("/sync/all-items/anime", (200, r#"{"anime":[]}"#));
+        answers.insert("/sync/playback", (200, "[]"));
+        let fake = Sized { answers, seen: Mutex::new(Vec::new()) };
+        let credentials = credentials();
+        let ctx = Ctx { http: &fake, credentials: &credentials };
+
+        let pulled = SimklPull.pull(&ctx, None, &Value::Null).unwrap();
+        assert!(pulled.skipped > 0, "the missing bucket is counted: {pulled:?}");
+        assert_eq!(pulled.lists, ListAnswer::Delta, "a bucket nobody answered cannot be called absent");
     }
 
     #[test]
@@ -496,7 +571,7 @@ mod tests {
         let credentials = credentials();
         let ctx = Ctx { http: &fake, credentials: &credentials };
 
-        let error = SimklPull.pull(&ctx, None).unwrap_err();
+        let error = SimklPull.pull(&ctx, None, &Value::Null).unwrap_err();
         assert!(format!("{error:#}").contains("HTTP 400"), "{error:#}");
         assert_eq!(fake.seen.lock().unwrap().len(), 1, "no ladder on a different refusal");
     }
@@ -542,7 +617,7 @@ mod tests {
         let fake = Fake::new();
         let credentials = credentials();
         let ctx = Ctx { http: &fake, credentials: &credentials };
-        let _ = SimklPull.pull(&ctx, None).unwrap();
+        let _ = SimklPull.pull(&ctx, None, &Value::Null).unwrap();
         let seen = fake.asked();
         assert!(seen.iter().any(|url| url.contains("include_all_episodes=yes")), "{seen:?}");
         assert!(
@@ -553,7 +628,7 @@ mod tests {
         );
 
         let since = serde_json::json!({"all": "2026-01-01T00:00:00Z"});
-        let _ = SimklPull.pull(&ctx, Some(&since)).unwrap();
+        let _ = SimklPull.pull(&ctx, Some(&since), &Value::Null).unwrap();
         let seen = fake.asked();
         let delta: Vec<&String> = seen.iter().filter(|url| url.contains("date_from=")).collect();
         assert!(!delta.is_empty(), "{seen:?}");
@@ -565,7 +640,7 @@ mod tests {
         let fake = Fake::new();
         let credentials = credentials();
         let ctx = Ctx { http: &fake, credentials: &credentials };
-        let _ = SimklPull.pull(&ctx, None).unwrap();
+        let _ = SimklPull.pull(&ctx, None, &Value::Null).unwrap();
         let seen = fake.asked();
         assert!(seen.iter().any(|url| url.contains("/sync/all-items?") && !url.contains("date_from")), "{seen:?}");
         assert!(seen.iter().all(|url| url.contains("client_id=client-1") && url.contains("app-name=hearthdeck-hero")), "{seen:?}");
@@ -573,7 +648,7 @@ mod tests {
         let fake = Fake::new();
         let ctx = Ctx { http: &fake, credentials: &credentials };
         let since = serde_json::json!({"all": "2026-01-01T00:00:00Z"});
-        let _ = SimklPull.pull(&ctx, Some(&since)).unwrap();
+        let _ = SimklPull.pull(&ctx, Some(&since), &Value::Null).unwrap();
         let seen = fake.asked();
         assert!(
             seen.iter().any(|url| url.contains("date_from=2026-01-01T00%3A00%3A00Z") || url.contains("date_from=2026-01-01T00:00:00Z")),
@@ -582,11 +657,59 @@ mod tests {
     }
 
     #[test]
+    fn a_list_that_moved_asks_for_the_whole_listing() {
+        // A title left the watchlist on the phone: `movies.plantowatch` moved. A
+        // delta would not name the title that stayed, so the listing is asked for
+        // whole and its silence can mean "removed there".
+        let fake = Fake::new();
+        let credentials = credentials();
+        let ctx = Ctx { http: &fake, credentials: &credentials };
+        let since = serde_json::json!({
+            "all": "2026-01-01T00:00:00Z",
+            "movies": {"all": "2026-01-01T00:00:00Z", "plantowatch": "2025-12-30T00:00:00Z"},
+        });
+        let now = serde_json::json!({
+            "all": "2026-01-05T00:00:00Z",
+            "movies": {"all": "2026-01-05T00:00:00Z", "plantowatch": "2026-01-04T00:00:00Z"},
+        });
+
+        let pulled = SimklPull.pull(&ctx, Some(&since), &now).unwrap();
+        assert_eq!(pulled.lists, ListAnswer::Whole, "a list that moved is only knowable whole");
+        let seen = fake.asked();
+        assert!(
+            seen.iter().filter(|url| url.contains("/sync/all-items")).all(|url| !url.contains("date_from")),
+            "the whole listing, not a delta: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn a_pull_where_no_list_moved_keeps_its_window() {
+        // Watching a film moves `all` and `movies.all`, never a list's stamp: the
+        // delta is enough, and what it says about the lists is partial.
+        let fake = Fake::new();
+        let credentials = credentials();
+        let ctx = Ctx { http: &fake, credentials: &credentials };
+        let since = serde_json::json!({
+            "all": "2026-01-01T00:00:00Z",
+            "movies": {"all": "2026-01-01T00:00:00Z", "plantowatch": "2025-12-30T00:00:00Z"},
+        });
+        let now = serde_json::json!({
+            "all": "2026-01-05T00:00:00Z",
+            "movies": {"all": "2026-01-05T00:00:00Z", "plantowatch": "2025-12-30T00:00:00Z"},
+        });
+
+        let pulled = SimklPull.pull(&ctx, Some(&since), &now).unwrap();
+        assert_eq!(pulled.lists, ListAnswer::Delta, "a delta says nothing about the titles it leaves out");
+        let seen = fake.asked();
+        assert!(seen.iter().any(|url| url.contains("/sync/all-items") && url.contains("date_from=")), "the window is kept: {seen:?}");
+    }
+
+    #[test]
     fn a_completed_film_is_a_watch_and_the_rest_is_counted() {
         let fake = Fake::new();
         let credentials = credentials();
         let ctx = Ctx { http: &fake, credentials: &credentials };
-        let pulled = SimklPull.pull(&ctx, None).unwrap();
+        let pulled = SimklPull.pull(&ctx, None, &Value::Null).unwrap();
         assert_eq!(pulled.watches.len(), 3, "{:?}", pulled.watches);
         let watch = &pulled.watches[0];
         assert_eq!(watch.title.imdb.as_deref(), Some("tt1375666"));
@@ -612,7 +735,7 @@ mod tests {
         let fake = Fake::new();
         let credentials = credentials();
         let ctx = Ctx { http: &fake, credentials: &credentials };
-        let pulled = SimklPull.pull(&ctx, None).unwrap();
+        let pulled = SimklPull.pull(&ctx, None, &Value::Null).unwrap();
         assert_eq!(pulled.positions.len(), 2);
         assert_eq!(pulled.positions[0].percent, 40.0);
         assert_eq!(pulled.positions[0].view, TrackedView::Movie);

@@ -151,17 +151,27 @@ struct MarkState {
     label: SharedString,
 }
 
-/// Whether the title has any mark to draw. An imported title has none — there is
-/// no local record to mark — and every other title has at least its two flags.
-fn has_marks(game: &CollectionGame) -> bool {
-    !crate::fork::watch::sources::imported(game)
-}
-
-/// Whether the row draws the watched mark: a film always has one (marked or
-/// not), a series once the page knows its episodes — a film's mark on a show is
-/// not something a tracker can record.
-fn shows_watched(kind: &str, episodes_known: bool) -> bool {
-    kind != "series" || episodes_known
+/// Where the watched mark stands, and `None` when the row does not draw it.
+///
+/// The **only** place the row's shape is decided: the render draws from this and
+/// the pad predicts from it, so the icon a press lands on is the icon that was
+/// drawn — a row that closed over a missing mark would otherwise toggle its
+/// neighbour.
+///
+/// A title no source here has (an imported placeholder) has no local record to
+/// mark: its row is the two shelf flags, which work anywhere (`docs/WATCH.md`).
+/// A series draws it once the page knows which episode it is about — a film's
+/// mark on a show is not something a tracker can record.
+fn watched_mark(
+    imported: bool,
+    progress: Option<&heronite_watch::progress::MovieProgress>,
+    picked: Option<Picked<'_>>,
+    kind: &str,
+) -> Option<bool> {
+    if imported {
+        return None;
+    }
+    watched_state(progress, picked, kind)
 }
 
 /// Where the watched mark stands: the film's own record, or the picked
@@ -178,8 +188,9 @@ fn watched_state(progress: Option<&heronite_watch::progress::MovieProgress>, pic
     }
 }
 
-/// Why a title has no mark: it is in no source's catalogue here, so the page has
-/// no local record to write (one message for the row and for the R3 press).
+/// Why a title cannot be played: it is in no source's catalogue here, so the
+/// page has no stream to start (the row's one line; the two shelf flags still
+/// work, and are drawn above it).
 fn not_present() -> &'static str {
     tr!("Not currently present in any available stream source.")
 }
@@ -310,7 +321,18 @@ impl CollectionView {
         };
         let header = self.watch_header(key, &g, &facts, watched, &*window);
 
-        let marks = self.watch_marks(&g, progress.as_ref(), picked.as_ref());
+        // The row's shape, decided here for the render and by the same function
+        // for the pad: the icon a press lands on is the icon that was drawn.
+        let watched_on = watched_mark(
+            crate::fork::watch::sources::imported(&g),
+            progress.as_ref(),
+            picked.as_ref().map(|episode| Picked { id: episode.id.as_str(), season: episode.season, number: episode.number }),
+            crate::fork::watch::sources::kind(&g),
+        );
+        // The pad reads this back instead of asking again: one answer, drawn and
+        // pressed alike.
+        self.watch_set_drawn(watched_on);
+        let marks = self.watch_marks(&g, watched_on, picked.as_ref());
         let mark_focus = self.watch_mark_focus(marks.len());
         // What the focused mark is, beside the icons: the label the tooltip shows,
         // drawn while the pad is on the row so a person does not have to press to
@@ -627,7 +649,7 @@ impl CollectionView {
                 Err(error) => {
                     this.watch_take_opening();
                     log::warn!(target: "heronite_app", "watch rails: adopting the opened title failed: {error:#}");
-                    this.show_toast(tr!("Could not open that title: {error}", error = format!("{error:#}")), true, cx);
+                    this.watch_notify(tr!("Could not open that title: {error}", error = format!("{error:#}")), true, cx);
                 }
             })
             .ok();
@@ -776,14 +798,12 @@ impl CollectionView {
         }
         // R3 (the right stick's click) is the watchlist's, from anywhere on the
         // page: the hint bar names it (`watch_later_hint`), and this is the
-        // press that promise takes. An imported title has no local record to
-        // mark, and the page says so instead of writing a mark nowhere.
+        // press that promise takes. The shelf flags are local snapshots, not a
+        // record of something played, so a title only a provider knows is marked
+        // like any other — and a title that can be played here keeps its page
+        // beside the flag (`docs/WATCH.md`).
         if watch_later_press(pad) {
-            if !has_marks(&game) {
-                self.show_toast(not_present(), true, cx);
-            } else {
-                self.watch_toggle_personal(&game, Flag::Watchlist, cx);
-            }
+            self.watch_toggle_personal(&game, Flag::Watchlist, cx);
             return true;
         }
         // LB / RB: the card beside this one, with the pad where that card
@@ -815,15 +835,13 @@ impl CollectionView {
         }
         // The marks row: ◀ ▶ move along it, A presses the mark, ↓ (or B) leaves
         // it for the list. Nothing under it runs while it has the pad.
-        if self.watch_pane() == Pane::Marks && has_marks(&game) {
+        if self.watch_pane() == Pane::Marks {
             // The row's shape, not its contents: a press moves along the marks
-            // the page drew, and reading the record again would be a disk read
-            // per cursor move.
-            let watched = shows_watched(
-                crate::fork::watch::sources::kind(&game),
-                details.as_deref().is_some_and(|details| !details.episodes.is_empty()),
-            );
-            let len = marks_len(watched);
+            // the page drew, and `drawn` is what the render last put there — the
+            // same predicate, so a press cannot land on a neighbour of the icon
+            // it shows. No record is read here: a press costs no disk.
+            let drawn = self.watch_drawn().is_some();
+            let len = marks_len(drawn);
             let focus = self.watch_mark_focus(len);
             return match pad {
                 Pad::Left => {
@@ -837,7 +855,7 @@ impl CollectionView {
                     true
                 }
                 Pad::A => {
-                    if let Some(mark) = mark_at(focus, watched) {
+                    if let Some(mark) = mark_at(focus, drawn) {
                         self.watch_press_mark(&game, mark, cx);
                     }
                     cx.notify();
@@ -968,12 +986,10 @@ impl CollectionView {
                 }
                 true
             }
-            // ↑ on the first row: the marks above it, when the title has any
-            // (an imported title has no local record to mark).
+            // ↑ on the first row: the marks above it. Every title has the two
+            // shelf flags, so the row is always there to reach.
             Outcome::Edge(Pad::Up) => {
-                if has_marks(&game) {
-                    self.watch_focus_pane(Pane::Marks);
-                }
+                self.watch_focus_pane(Pane::Marks);
                 cx.notify();
                 true
             }
@@ -1003,13 +1019,12 @@ impl CollectionView {
     pub(super) fn watch_page_hints(&self, key: &SharedString) -> Vec<Hint> {
         let primary = self.lib.as_ref().and_then(|lib| lib.get(key)).map(|game| self.primary_label(game)).unwrap_or(tr!("Play"));
         let has_trailer = self.watch_details(key).is_some_and(|details| !details.trailers.is_empty());
-        let on_the_shelf = self.lib.as_ref().and_then(|lib| lib.get(key)).is_some_and(|game| has_marks(game));
         // On a rail, A opens the card the pad is on rather than selecting a row.
         let primary_hint = if self.watch_tab().is_rail() { tr!("Open") } else { tr!("Select") };
         let mut hints = vec![hint(Btn::A, primary_hint), hint(Btn::LeftRight, tr!("Panels")), hint(Btn::Bumpers, tr!("Tabs"))];
         hints.push(hint(Btn::X, primary));
         hints.extend(trailer_hint(has_trailer));
-        hints.extend(watch_later_hint(on_the_shelf));
+        hints.extend(watch_later_hint());
         hints.push(hint(Btn::B, tr!("Back")));
         hints.push(hint(Btn::Start, tr!("Menu")));
         hints
@@ -1040,11 +1055,11 @@ fn trailer_press(pad: Pad) -> bool {
 /// it, so the label and what it does cannot drift apart.
 const WATCH_LATER_BTN: Btn = Btn::R3;
 
-/// The hint bar's R3, on a title the shelf can hold: the press adds it to (or
-/// takes it from) the watchlist. An imported title has no local record to mark,
-/// so it has no hint either.
-fn watch_later_hint(on_the_shelf: bool) -> Option<Hint> {
-    on_the_shelf.then(|| hint(WATCH_LATER_BTN, tr!("Watch later")))
+/// The hint bar's R3: the press adds the title to (or takes it from) the
+/// watchlist. Every title has the flag — a title only a provider knows is kept
+/// as the snapshot its card shows — so the hint is always offered.
+fn watch_later_hint() -> Option<Hint> {
+    Some(hint(WATCH_LATER_BTN, tr!("Watch later")))
 }
 
 /// Whether `pad` is the watch-later press: the click of the right stick, never
@@ -1322,9 +1337,12 @@ mod tests {
 
     #[test]
     fn the_row_lists_the_watched_mark_then_the_two_flags() {
-        assert!(shows_watched("movie", false), "a film always has a mark, played or not");
-        assert!(shows_watched("series", true));
-        assert!(!shows_watched("series", false), "a show whose episodes are not here has nothing to mark");
+        assert_eq!(watched_mark(false, None, None, "movie"), Some(false), "a film always has a mark, played or not");
+        assert_eq!(watched_mark(false, None, None, "series"), None, "a show whose episodes are not here has nothing to mark");
+        let episode = Picked { id: "tt1:1:2", season: 1, number: 2 };
+        assert_eq!(watched_mark(false, None, Some(episode), "series"), Some(false), "an episode watched elsewhere can be marked");
+        assert_eq!(watched_mark(true, None, None, "movie"), None, "a placeholder has no local record: its row is the two flags");
+        assert_eq!(watched_mark(true, None, Some(episode), "series"), None, "nor does a placeholder show");
 
         assert_eq!(marks_len(true), 3, "the tick and the two flags");
         assert_eq!(marks_len(false), 2, "a series without its episodes keeps its two flags");
@@ -1352,8 +1370,7 @@ mod tests {
 
     #[test]
     fn the_watch_later_hint_names_the_press_that_writes_it() {
-        assert!(watch_later_hint(false).is_none(), "an imported title has no record to mark");
-        let offered = watch_later_hint(true).expect("the shelf holds what a source here has");
+        let offered = watch_later_hint().expect("every title can be kept, so the press is always offered");
         assert_eq!(offered.btn, Btn::R3, "the right stick's click");
         assert_eq!(offered.label, "Watch later");
         assert!(watch_later_press(Pad::R3), "the hint's press is the one the page takes");

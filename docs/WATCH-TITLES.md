@@ -368,10 +368,13 @@ unchanged, `lastPlayed` is normalized, and a placeholder round-trips as one
 (written `is_installed: false` with `extra.imported: true`, read back with no
 provider). The film/series collision is explicit and tested: the wire key carries
 no kind, so the first title wins. The shelf's **reads** are canonical —
-`watchlisted`/`favourited` through `same_title`, and `membership_any` for the
+`watchlisted`/`favourited` through `same_title`, and `membership` for the
 ledger — so a title kept from one provider reads as
 kept when another provider's card asks; the ledger key stays `kind:provider:id`
-(landed in `085ad29e`/`297d62a7`).
+(landed in `085ad29e`/`297d62a7`). The **sync's** read is narrower since
+2026-11-27: `local_membership` answers with the person's intent (their newest
+`origin: Local` decision, else the list), so a row a pull wrote never votes for
+them (`docs/WATCH-SYNC-RULES.md`).
 
 **P5 — the screens read titles (done).** `app/src/fork/watch/sources.rs` is the
 one reader of the projection's keys: it gains `title(game)` (the typed view,

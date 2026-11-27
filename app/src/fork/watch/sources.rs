@@ -98,6 +98,20 @@ pub fn dimmed(game: &CollectionGame) -> bool {
     imported(game) || streams(game) == Some(false)
 }
 
+/// Whether a cover is drawn dimmed, from the theme's own switch and the title's
+/// state.
+///
+/// One rule for every layout, and the reason F-019 exists: the theme's "grey
+/// uninstalled" switch only decides the *not installed* reason. The fork's
+/// no-source dim is **not** gated by it and not by `installed` either — a film
+/// whose probe came back empty is installed (its record is `is_installed: true`,
+/// there is just no stream), so ANDing the two together is what kept every grey
+/// off. `docs/FORK.md` F-019; the five callers are the layouts and the two card
+/// renderers.
+pub fn greyed(theme_grey_uninstalled: bool, installed: bool, dimmed: bool) -> bool {
+    (theme_grey_uninstalled && !installed) || dimmed
+}
+
 /// The catalogue or provider that listed the title (`extra.watchSource`):
 /// `cinemeta`, `tmdb`, `stremio`; `None` when the record names none.
 pub fn origin(game: &CollectionGame) -> Option<&str> {
@@ -351,6 +365,22 @@ mod tests {
         assert_eq!(parse_day("2026-11-14T00:00:00.000Z").map(|day| day.to_string()), Some("2026-11-14".to_owned()));
         assert_eq!(parse_day("2026"), None);
         assert_eq!(parse_day(""), None);
+    }
+
+    #[test]
+    fn the_themes_switch_never_gates_the_no_source_dim() {
+        // What the theme says only decides the not-installed reason.
+        assert!(!greyed(false, false, false));
+        assert!(greyed(true, false, false), "not installed, and the theme asks for it");
+        assert!(!greyed(true, true, false), "installed: the theme's switch has nothing to grey");
+        assert!(!greyed(false, true, false), "installed, nothing to say");
+        // The fork's dim stands on its own: whatever the switch and whether the
+        // record says installed (a probed-empty film is installed).
+        for theme in [false, true] {
+            for installed in [false, true] {
+                assert!(greyed(theme, installed, true), "theme {theme}, installed {installed}: a title nothing can play stays dim");
+            }
+        }
     }
 
     #[test]

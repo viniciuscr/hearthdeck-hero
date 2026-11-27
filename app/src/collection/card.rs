@@ -113,7 +113,7 @@ pub fn card(
         BoxShadow { color: theme::shadow_a(0.38), offset: point(px(0.), px(8.)), blur_radius: px(20.), spread_radius: px(0.), inset: false }
     };
 
-    let grey = ((s.grey_uninstalled || vm.imported) && !vm.installed || vm.hidden) && !s.hovered;
+    let grey = (crate::fork::watch::sources::greyed(s.grey_uninstalled, vm.installed, vm.imported) || vm.hidden) && !s.hovered;
     // The categories: the circles join the star's row; the corner styles
     // give way to the selection's tick and push the copies badge left.
     let style = look.categories.filter(|_| !s.categories.is_empty());
@@ -159,7 +159,9 @@ pub fn card(
                 el.into_any_element()
             }
         }
-        // No art at all: the title, so the card still says which game it is.
+        // No art at all: the title, so the card still says which game it is. A
+        // title nothing can play fades, since there is no picture to grey
+        // (`docs/FORK.md` F-019).
         None if s.no_art => div()
             .size_full()
             .flex()
@@ -167,6 +169,7 @@ pub fn card(
             .justify_center()
             .p(px(12.))
             .bg(theme::ink_a(0.05))
+            .when(vm.imported, |d| d.opacity(0.55))
             .child(
                 div()
                     .w_full()

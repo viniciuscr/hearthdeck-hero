@@ -341,6 +341,25 @@ fn stored_item(game: &Value, metadata: &Value, timestamps: &Value) -> Option<Mov
 /// `with_watch` puts the title's watch state on this record. Only one record per
 /// title carries it: upstream's copies total sums every copy, so writing the
 /// same minutes on each would double the "N in all" figure on the grouped card.
+/// The poster a title without one gets.
+///
+/// A catalogue can list a title bare, and a provider's list (Simkl's watchlist)
+/// names one with nothing to draw; the addon host answers a poster for every IMDb
+/// id, so a card still has its picture. `docs/WATCH.md` — an art-less card is a
+/// grey square the person cannot read.
+fn poster_of(title: &Title) -> Option<String> {
+    title.art.poster.clone().or_else(|| imdb_poster(title.key.id.as_str()))
+}
+
+/// `https://images.metahub.space/poster/medium/{imdb}/img`, the host the addon
+/// answers with, for an IMDb id. `None` for an id in a provider's own space (a
+/// YouTube video has no poster there) and for an empty one.
+fn imdb_poster(id: &str) -> Option<String> {
+    let id = id.trim();
+    let digits = id.strip_prefix("tt").is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()));
+    digits.then(|| format!("https://images.metahub.space/poster/medium/{id}/img"))
+}
+
 fn record_of(title: &Title, provider: Option<&ProviderId>, with_watch: bool) -> MovieItem {
     // The catalogue that listed it, even when a collection mark names it first:
     // the rail source is what a card says the title comes from.
@@ -354,7 +373,7 @@ fn record_of(title: &Title, provider: Option<&ProviderId>, with_watch: bool) -> 
         kind: title.key.kind.as_str().to_owned(),
         name: title.name.clone(),
         year: title.release.clone(),
-        poster: title.art.poster.clone(),
+        poster: poster_of(title),
         background: title.art.background.clone(),
         logo: title.art.logo.clone(),
         description: title.description.clone(),
@@ -660,6 +679,32 @@ mod tests {
         assert_eq!(game.game.art_cover.as_deref(), Some("https://img/tt1/poster.jpg"));
         assert_eq!(game.metadata.as_deref().and_then(|m| m.description.as_deref()), Some("A plot"));
         assert_eq!(game.metadata.as_deref().map(|m| m.genres.clone()), Some(vec!["Drama".to_owned()]));
+    }
+
+    #[test]
+    fn a_title_named_without_art_draws_the_addon_poster() {
+        // A provider's list names a title with nothing to draw; the addon host
+        // answers a poster for its IMDb id, so the card is not a grey square.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let bare = Title::new(TitleKey::of_source("movie", "tt0133093", &provider()), "The Matrix");
+        assert!(bare.art.poster.is_none(), "the title arrives bare");
+        write_root(root, &[bare]).unwrap();
+
+        let lib = Library::load_with(&DataPaths::at(root.to_path_buf()), true).unwrap();
+        assert_eq!(
+            lib.games[0].game.art_cover.as_deref(),
+            Some("https://images.metahub.space/poster/medium/tt0133093/img"),
+            "the fallback names the id the user's own record has"
+        );
+
+        // A poster a source gave wins, and an id in a provider's own space has no
+        // IMDb poster to fall back to.
+        assert_eq!(poster_of(&title("tt1", "A Film")).as_deref(), Some("https://img/tt1/poster.jpg"));
+        assert_eq!(imdb_poster("yt:dQw4w9WgXcQ"), None);
+        assert_eq!(imdb_poster("tt"), None);
+        assert_eq!(imdb_poster(""), None);
+        assert_eq!(imdb_poster("tt0133093").as_deref(), Some("https://images.metahub.space/poster/medium/tt0133093/img"));
     }
 
     #[test]

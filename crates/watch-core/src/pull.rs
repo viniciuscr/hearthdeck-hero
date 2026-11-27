@@ -46,6 +46,22 @@ pub struct RemoteMembership {
     pub member: bool,
 }
 
+/// What a pull's list membership is worth.
+///
+/// The type exists so the dangerous reading cannot be typed by accident: a pull
+/// that hears about some rows says [`ListAnswer::Delta`] — the default — and a
+/// caller may only read a missing title as "removed there" from
+/// [`ListAnswer::Whole`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ListAnswer {
+    /// Some of what a list holds: the rows this pull heard about, and nothing
+    /// said about the rest.
+    #[default]
+    Delta,
+    /// The whole contents of each list: a title missing from it is not there.
+    Whole,
+}
+
 /// What one pull brought.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Pulled {
@@ -53,6 +69,14 @@ pub struct Pulled {
     pub positions: Vec<RemotePosition>,
     #[doc = "List membership: what the provider says is in each list today."]
     pub memberships: Vec<RemoteMembership>,
+    /// What `memberships` is worth: the whole of each list, or only the rows this
+    /// pull heard about.
+    ///
+    /// A provider asked for "what changed since" answers with a delta: a title
+    /// missing from it says nothing about the list, so only [`ListAnswer::Whole`]
+    /// lets the caller read an absent title as removed there — the rule
+    /// `docs/WATCH-SYNC-RULES.md` calls "absence never removes by itself".
+    pub lists: ListAnswer,
     /// Items the provider had that cannot be used here (no IMDb id, a
     /// show-level fact): counted, so a pull can say what it left behind.
     pub skipped: usize,
@@ -68,6 +92,8 @@ pub trait WatchSync: Send + Sync {
     fn snapshot(&self, ctx: &Ctx<'_>) -> Result<Value>;
     /// Whether `now` says nothing moved since `since` — the cheap path.
     fn unchanged(&self, since: &Value, now: &Value) -> bool;
-    /// Pulls the axes that moved; `since` is `None` on the first pull.
-    fn pull(&self, ctx: &Ctx<'_>, since: Option<&Value>) -> Result<Pulled>;
+    /// Pulls the axes that moved; `since` is `None` on the first pull and `now`
+    /// is the snapshot this run took, so a provider can tell whether a whole list
+    /// has to be fetched (a list that moved) or a delta will do.
+    fn pull(&self, ctx: &Ctx<'_>, since: Option<&Value>, now: &Value) -> Result<Pulled>;
 }

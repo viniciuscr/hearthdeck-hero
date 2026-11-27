@@ -590,7 +590,9 @@ impl CollectionView {
             let src = self.console_shaped_art(&key, theme.tiles.shape, cw, ch, priority, window).0;
             let floor = (reflect && near <= 3).then(|| self.carousel_floor(&key, landscape, pw, ph, priority - 30)).flatten();
             let ring = i == index && !pills_focus;
-            let grey = (grey || crate::fork::watch::sources::dimmed(&g)) && !g.installed;
+            // The theme's switch only decides the not-installed reason: a title
+            // nothing can play stays dim whatever it says (F-019).
+            let grey = crate::fork::watch::sources::greyed(grey, g.installed, crate::fork::watch::sources::dimmed(&g));
             let title = g.title.clone();
             let categories = self.console_categories(&key);
             let d = i as f32 - index as f32;
