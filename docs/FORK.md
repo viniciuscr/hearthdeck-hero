@@ -357,6 +357,24 @@ date, upstream commit, files, and resolution.
     it is outside F-005's registered surfaces.
   - No new seam: `app/src/fork/seams.rs` is unchanged, and its eight guards pass.
 
+- **2026-11-27, upstream `10e74f4f`** (9 commits: RPCS3, shadPS4 and Xenia
+  trophies read from the emulators' own files, Eden plus Steam ROM Manager in the
+  ROM globs, and the bounds on the trophy readers). One file conflicted, the F-005
+  rename against new upstream copy:
+  - `crates/i18n/locales/fr/achievements.json`: both sides appended new keys after
+    `"{signed} of {total} signed in"` — upstream the achievements settings copy
+    (the desktop notification, Steam's own session, the points/XP rows) and French
+    for the GOG-of-Comet rows, which this file had never carried. Upstream's block
+    was taken whole and the rename re-applied.
+  - Rebranded outside the conflict (F-005), in code and locales together (the
+    coverage test matches them): the trophies row upstream added ("… from their
+    own files on this PC. **Hearthdeck Hero** only reads them. shadPS4 has trophies
+    only with its trophy key.") in `app/src/pages/settings/achievements/mod.rs` and
+    the four `achievements.json`, plus French's two Comet rows ("Hearthdeck Hero
+    runs Comet…", "… Hearthdeck Hero can register Comet's stand-in…"), whose key
+    already read that way in the code and in de/es/pt-BR.
+  - No new seam, no register change: the merged code touches none of the fork's.
+
 ## Releases
 
 - Cut a release from `fork/main` with the **Fork Release** workflow
