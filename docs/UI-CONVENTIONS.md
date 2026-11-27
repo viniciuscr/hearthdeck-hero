@@ -442,7 +442,17 @@ with its icon, a line on where it stands (its games, "Not logged in", "Not set u
 signed in / set up, amber something to do, accent working, ring not used), then a dashed "Other launchers" link at the
 bottom that opens Settings → Other launchers; on the right the store's name, its lead and its page (LB / RB switch
 stores in console mode, whose pages keep their tabs). The list reads the services and repaints only when what it shows
-changes (`stores::watch`); the row (and the console sidebar's) opens the store shown last. A client's page
+changes (`stores::watch`); the row (and the console sidebar's) opens the store shown last. Epic Games, GOG and
+Amazon Games split the account (name, Log out) from the library (counts, Refresh, Import) on the left; the right
+column holds the "Install folder" card, then the EOS Overlay (Epic) or the achievements switch (GOG), then About.
+The "Install folder" card (`pages::store_folder`, one entity per page, also its console rows) shows where the store's
+new games go: the default install folder ("Default install folder, from Settings → General", Change…) until one is
+chosen, then that folder ("Only for <store>", Open, Change…, Use default); the install dialogs start in it. Under
+Wine a client's page has it under its installed games ("Inside its Wine prefix", Choose…; chosen, also "Path in
+<client>" with the `Z:\` path and Copy), and the note says whether Heronite sets it in the client (EA app, Ubisoft
+Connect) or the client asks for each game (Battle.net, Rockstar Games); changed while the client is open, it says to
+close and reopen it (`HERONITE_DEBUG_STORE_FOLDER=reopen` with `HERONITE_DEBUG_CLIENT=<id>:running`). Steam and Xbox
+have none. A client's page
 (`pages/clients/`, one `ClientPage<K>` for the four) is a card with the client's state and its main action (Set up, the
 setup's step with Cancel, Open, Close), its prefix and Wine with "Wine settings" (`dialogs/client_settings`: the game
 settings panel bound to the client's own settings), the sign-in the client's files show, on Linux its Shortcuts (a
@@ -539,14 +549,16 @@ the cards from the last one clicked, Ctrl A selects every card on screen, and th
 games are selected do the cards get a round tick on the top-right (filled = selected, the others dimmed, no play bar),
 a plain click ticks or unticks, group headers get "Select group", the grid's drawer steps aside, and the dock floats at
 the bottom: × (or Esc) ends it, the count and "Select all N", Status ▾ and Categories ▾ (popovers above the dock),
-Favourite, Hide, Metadata ▾ (a popover above the dock, see below) and Edit (F3). Right-clicking a selected card opens
+Favourite, Hide, Metadata ▾ (a popover above the dock, see below), Edit (F3) and, with two or more, Merge ("Link as
+copies of one game": romhacks, regions or editions become one card; its toast's Undo, also Ctrl Z while it shows, puts
+the copies back as they were). Right-clicking a selected card opens
 the same actions as a menu, its Metadata row a flyout with the popover's rows. Categories have three states (round tick: all, dash: some, ring: none); each click moves
 some → all → none → as it was (Playnite's assign / remove / leave alone), the next step shows under the pointer. Every
 batch change writes off the UI thread and its toast offers Undo (also Ctrl Z, 20 steps). F3 opens
 `dialogs/batch_edit.rs`: a drawer with the series and the tag fields of all the selected games; a tag only some have is
 dashed with "3/7" (click: give it to all), × takes one out of all, typing + Enter adds one to all; nothing is written
 until "Apply". Debug: `HERONITE_DEBUG_MULTI=<n>`, `HERONITE_DEBUG_DOCK=status|categories|metadata`,
-`HERONITE_DEBUG_DIALOG=batchedit`, `HERONITE_DEBUG_BATCH=status:<id>,cat:<name>,fav,hide,undo` (data copy only),
+`HERONITE_DEBUG_DIALOG=batchedit`, `HERONITE_DEBUG_BATCH=status:<id>,cat:<name>,fav,hide,undo,merge,undo-copies` (data copy only),
 `HERONITE_DEBUG_MENU_METADATA=1` (with `HERONITE_DEBUG_MENU` on a selected game: the batch menu's Metadata flyout).
 
 The **Metadata popover** (`collection/metadata_menu.rs`, 300px, above the dock's Metadata button; the dock's button
@@ -1140,7 +1152,7 @@ Statistics performance: the page renders again on every scroll frame and mouse m
   cell under the cursor comes from its rectangle). The month strip builds only the cards in view.
 - Lists are capped: Journeys lanes by 40 with "Show more", "Show all" games at 100, the Backlog's covers at the latest 60.
 - `crates/data/tests/stats_scale.rs` times every period function on 3,000 games and ~180,000 sessions
-  (`cargo test --release -p heronite-data --test stats_scale -- --ignored --nocapture`).
+  (`cargo test --release -p heronite-data --features manual-tests --test stats_scale -- --ignored --nocapture`).
 
 **Console mode** (`app/src/console/`, shell in `collection/console/`): an extra controller-first TV mode
 entered from ☰ › Console mode or the palette,
@@ -1437,7 +1449,7 @@ keeps its desktop render and, when `crate::console::active()`, returns its conso
 - Debug: `HERONITE_DEBUG_CONSOLE=1` (or `=game:<key>` for a game page, `=menu`, `=customize`, `=filters`) starts in console mode
   without saving it; `HERONITE_DEBUG_CONSOLE_PRESET=<theme id>` / `HERONITE_DEBUG_CONSOLE_LAYOUT=<layout>` start with
   that theme / every tab in that layout (not saved); `HERONITE_DEBUG_IDLE_SECS=<n>` shows the idle screen sooner;
-  `HERONITE_NO_GAMEPAD=1` ignores controllers (test copies must not follow the one in use; `shot.sh` and `idle-cost.sh` set it); `HERONITE_DEBUG_PAD=down,a,wait:500,b` plays presses (`up down left right a b x y lb rb lt rt start select sup sdown`); `HERONITE_DEBUG_MOUSE=click:0.5:0.4,wheel:-1,right` plays mouse events (points as fractions of the window; on a
+  `HERONITE_NO_GAMEPAD=1` ignores controllers (test copies must not follow the one in use; `shot.sh` and `idle-cost.sh` set it); `HERONITE_DEBUG_PAD=down,a,wait:500,b` plays presses (`up down left right a b x y lb rb lt rt start select sup sdown sleft sright`); `HERONITE_DEBUG_MOUSE=click:0.5:0.4,wheel:-1,right` plays mouse events (points as fractions of the window; on a
   hidden workspace keep capturing it with `grim -T`, or the clicks hit the last frame it presented).
 
 **Do not** use uppercase labels, outlined buttons, underlined tabs, square
@@ -1510,7 +1522,18 @@ limiting") starts with that switch off. Home's rows scroll to keep the focus in
 sight when the panel is short for them. Home's captures share one "Capture" row (by user decision: option B2): a round button each
 for the screenshot, the replay (while it records) and the moment (with a journal), ◀ ▶ choose one, A runs it and the
 description and the A hint name it; a click on a button runs that one. With only the screenshot it is a plain "Take
-screenshot" row. The Screenshots and Notes tabs keep their own rows. "Back to game" comes before "Back to Heronite" only
+screenshot" row. Home (under the mixer) and Audio (first, over it) have a media row while a media player is there (`panel/media.rs`,
+`heronite_overlay::media`: MPRIS players on Linux, the system media controls on Windows; read when the panel opens and
+every 2 s while Home or Audio shows, the focus kept on its row when the media row comes or goes): the cover (44 px,
+rounded; a note, or a globe for a browser, without one), the title (else the app's name) over "Paused · artist · app",
+and round ⏮ ⏯ ⏭ buttons like the "Capture" row's: ◀ ▶ choose (skipping the ones the player does not take, drawn faded),
+A runs it, the A hint names it (Play / Pause, Next, Previous). With several players, dots under the row show which one it
+is (the one shown longer): ◀ ▶ past the first or last button go to the player before or after (landing on the button
+they came in by), the right stick ← → too (Play / Pause chosen), a click on a dot shows that one, and Y ("Other player")
+goes to the next, round. Playing players come first, then the others; within each, the one used last leads (a command
+from the overlay, playing or pausing since the last read, Windows' current session). A command keeps its player on the
+row. Like apps playing, the media row takes
+the room of Home's recent captures. The Screenshots and Notes tabs keep their own rows. "Back to game" comes before "Back to Heronite" only
 while the game has a window and another one has the focus (`heronite_overlay::game_window`, read when the panel opens):
 it gives that window the focus and closes the panel. Only Hyprland can be asked (`hyprctl clients -j` has each window's
 pid); elsewhere the row never shows. The game's panel has the same, as a round → button beside Stop (where Play has its
@@ -1548,6 +1571,9 @@ it (no layer-shell): Settings says so. Debug: `HERONITE_DEBUG_OVERLAY=window[:<a
 window (`app.heronite.overlay`) as if the game ran (Hyprland ignores its size requests there; audio changes are skipped
 under any `HERONITE_DEBUG_OVERLAY`), `=layer` the real surface; `HERONITE_DEBUG_OVERLAY_PAD=rb,down,a`
 plays presses, then `HERONITE_DEBUG_OVERLAY_MOUSE` mouse events (as `HERONITE_DEBUG_MOUSE`); `HERONITE_DEBUG_OVERLAY_NOTICE=volume|shot|replay` adds a notice (`app.heronite.overlay-notice`), `=achievement|achievement-queue` one or six made-up achievement notices (icon from `HERONITE_DEBUG_OVERLAY_NOTICE_ICON`);
+`HERONITE_DEBUG_OVERLAY_MEDIA=playing|paused|browser|two|none` shows made-up players (cover from
+`HERONITE_DEBUG_OVERLAY_MEDIA_ART`, a file or URL; presses change them in place), `=live` the real ones and sends them
+the presses (otherwise nothing is sent under the debug hooks);
 `HERONITE_DEBUG_OVERLAY_FPS=<limit>` shows the FPS limit row as gamescope's, `=mangohud:<limit>` (or `mangohud-hidden:<limit>`) MangoHud's two rows (nothing applied); `HERONITE_DEBUG_OVERLAY=window:none` opens it with no game;
 `HERONITE_DEBUG_OVERLAY_KEYBOARD=1` opens
 it as the keyboard shortcut does, `=shortcut` registers the real shortcut instead; `HERONITE_DEBUG_OVERLAY_DISPLAY=<px>` stands in for the display height (800 for a Steam Deck, 2160 for 4K), and

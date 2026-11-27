@@ -19,6 +19,7 @@ pub mod dxvk;
 pub mod emulators;
 pub mod env;
 pub mod epic_native_setup;
+pub mod fake_epic;
 pub mod ffmpeg_install;
 pub mod first_launch;
 pub mod fps_limit;
@@ -69,6 +70,7 @@ pub mod wine_tools;
 pub mod winetricks;
 mod xbox;
 
+pub use args::split_windows_args;
 pub use plan::{build_plan, build_plan_with_settings, Command, LaunchOptions, LaunchPlan, PlanContext, ProcessPlan, StopSpec, WineRuntime};
 pub use probe::{Probe, SystemProbe};
 pub use runtime::{

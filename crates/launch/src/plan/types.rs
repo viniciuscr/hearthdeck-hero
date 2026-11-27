@@ -92,6 +92,10 @@ pub struct ProcessPlan {
     /// Windows: the card the program asks Windows for, written right before
     /// it starts and put back after (see [`crate::gpu::preference`]).
     pub gpu_preference: Option<crate::gpu::preference::Preference>,
+    /// The game's own program (a Windows `.exe`, a Linux binary), also when
+    /// legendary or wrappers start it: MangoHud picks a config of the game's
+    /// own by its name (see [`crate::live_fps`]).
+    pub game_program: Option<String>,
 }
 
 /// How to find a game another launcher started when the command that asked
@@ -178,6 +182,10 @@ pub struct PrepSpec {
     /// A GOG game's Windows build: Comet stands in for GOG Galaxy's service
     /// while it runs (see [`crate::galaxy`]).
     pub galaxy: bool,
+    /// Epic game with `USE_FAKE_EPIC_EXE` enabled: download and stage
+    /// `EpicGamesLauncher.exe` so `LEGENDARY_WRAPPER_EXE` can run the game
+    /// under it (see [`crate::fake_epic`]).
+    pub fake_epic_exe: bool,
 }
 
 /// What a game needs the first time it runs in a Wine prefix (the prefix

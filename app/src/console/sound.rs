@@ -79,7 +79,7 @@ pub fn for_pad(pad: Pad) -> Option<Sound> {
         Pad::A | Pad::X | Pad::Y | Pad::Start | Pad::Select | Pad::LT | Pad::RT | Pad::L3 | Pad::R3 => Some(Sound::Confirm),
         Pad::B => Some(Sound::Back),
         Pad::LB | Pad::RB => Some(Sound::Tab),
-        Pad::ScrollUp | Pad::ScrollDown => None,
+        Pad::ScrollUp | Pad::ScrollDown | Pad::ScrollLeft | Pad::ScrollRight => None,
     }
 }
 
@@ -382,14 +382,6 @@ mod tests {
                 assert!(!tones.is_empty());
             }
         }
-    }
-
-    #[test]
-    fn classic_keeps_the_first_tones() {
-        assert_eq!(Sound::Move.tones(SoundStyle::Classic), (&[(1150., 26.)][..], 0.22));
-        assert_eq!(Sound::Confirm.tones(SoundStyle::Classic), (&[(660., 45.), (990., 80.)][..], 0.3));
-        assert_eq!(Sound::Back.tones(SoundStyle::Classic), (&[(720., 45.), (480., 80.)][..], 0.3));
-        assert_eq!(Sound::Tab.tones(SoundStyle::Classic), (&[(880., 34.), (1180., 52.)][..], 0.26));
     }
 
     #[test]

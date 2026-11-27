@@ -128,6 +128,9 @@
   "System tray": "Zone de notification",
   "When a game starts and ends": "Au lancement et à la fermeture d’un jeu",
   "Show Hearthdeck Hero again when the game ends": "Réafficher Hearthdeck Hero à la fermeture du jeu",
+  "Start Steam in the background": "Démarrer Steam en arrière-plan",
+  "Keep Steam's window out of the way when Hearthdeck Hero opens it for a game.": "Garde la fenêtre de Steam masquée lorsqu’Hearthdeck Hero l’ouvre pour un jeu.",
+  "Keep Steam's window out of the way when Hearthdeck Hero opens it for a game": "Garde la fenêtre de Steam masquée lorsqu’Hearthdeck Hero l’ouvre pour un jeu",
   "Close Steam when the game ends": "Fermer Steam à la fermeture du jeu",
   "Only when Steam was not running before Hearthdeck Hero started the game.": "Uniquement si Steam n’était pas ouvert avant qu’Hearthdeck Hero lance le jeu.",
   "Only when Steam was not running before Hearthdeck Hero started the game": "Uniquement si Steam n’était pas ouvert avant qu’Hearthdeck Hero lance le jeu",
@@ -533,5 +536,12 @@
   "Restart Hearthdeck Hero": "Redémarrer Hearthdeck Hero",
   "The tray changes apply once Hearthdeck Hero starts again.": "Les modifications de la zone de notification s’appliquent au prochain démarrage d’Hearthdeck Hero.",
   "Copy path": "Copier le chemin",
-  "Copied": "Copié"
+  "Copied": "Copié",
+  "Open the window on": "Ouvrir la fenêtre sur",
+  "Where it was left": "Là où elle était",
+  "Screen {n}": "Écran {n}",
+  "Screen {n} (main)": "Écran {n} (principal)",
+  "Applies the next time the window opens. Screens are numbered from left to right. If the screen is not connected, the window opens where it was left.": "S'applique à la prochaine ouverture de la fenêtre. Les écrans sont numérotés de gauche à droite. Si l'écran n'est pas branché, la fenêtre s'ouvre là où elle était.",
+  "Applies the next time the window opens.": "S'applique à la prochaine ouverture de la fenêtre.",
+  "A screen that is not connected": "Un écran qui n'est pas branché"
 }

@@ -21,6 +21,7 @@ What works on Windows, what is left, and what Windows does not need.
 - Desktop and Start menu shortcuts, Add to Steam
 - Installer, portable zip, self-update, releases
 - Installer languages: English, Brazilian Portuguese, Spanish and German; silent updates retain the selected language
+- Appearance → "From the desktop": reads Windows' accent colour and follows its changes; the panel is Windows 11's light or dark app background
 - Steam's per-game launch options (Settings → Launch of a Steam game, `Feature::SteamGameSettings`): through the running client, or in `userdata\<account>\config\localconfig.vdf` while Steam is closed, as on Linux; the account is the registry's `ActiveProcess\ActiveUser`, else the latest login. No compatibility tool: Steam starts Windows games as they are
 - Native launch extras: before/after scripts (`.bat`, `.cmd`, `.ps1`, programs), delayed companions and presets (variables and arguments); for Steam games they run around `steam://rungameid` (`heronite_launch::steam_extras`); real-process tests cover environment, working folders, normal exit, stop and cancellation before a companion starts
 - Restoring a backup made on Linux
@@ -37,7 +38,6 @@ What works on Windows, what is left, and what Windows does not need.
 - Ludusavi registry entries: in a backup made on Windows, Ludusavi restores them itself, but they are missing from the restore preview and from the undo copy
 - Screenshots of games in legacy exclusive fullscreen: Desktop Duplication loses the display while such a game holds it. HDR capture also still needs a check on a real HDR monitor
 - A new tray icon starts in Windows 11's hidden-icons flyout until the user pins it
-- Appearance → "From the desktop" (accent and panel colour) reads only Linux desktops (`app/src/system/desktop_colours.rs`); on Windows it gets no colour and falls back. It should read Windows' accent colour and light/dark app mode
 
 ## 🚧 Console mode controllers
 
@@ -80,11 +80,23 @@ does not inject code into games.
   panel is open it owns the foreground, so games that ignore the controller
   in the background (SDL's default, Unity, Unreal: most of them) do not see
   the navigation; games that poll XInput regardless still do. Non-XInput controllers need an XInput mapping here (console
-  mode reads them through SDL). Battery levels
-  are coarse estimates; transport and Bluetooth disconnect are unavailable.
+  mode reads them through SDL). Battery levels come from the drivers of
+  `heronite-platform::pad_battery` for the controllers they know, which the
+  Controller tab lists even when XInput does not; for other Xbox controllers,
+  from Windows.Gaming.Input, else XInput's coarse estimate. Transport and
+  Bluetooth disconnect are unavailable.
 - **Panel:** Home, Screenshots, Notes (including the on-screen keyboard),
   Audio and Controller reuse the Linux views. Screenshot capture uses the
   existing Windows backend.
+- **Media:** the media row of Home and Audio reads the system media
+  transport controls (`Windows.Media.Control`, what the volume flyout
+  shows: Spotify, Apple Music, Media Player, a browser tab playing media)
+  and sends play / pause, next and previous to the chosen session. A
+  browser has a session per tab: a command goes to the tab playing the
+  title shown. Thumbnails come as bytes and are kept in
+  `%LOCALAPPDATA%\heronite\cache\overlay-media`. A desktop program that
+  is not a packaged app is named from its id ("Spotify.exe" → Spotify,
+  Chrome, MSEdge); Firefox's id is a hash, so it shows without an app name.
 - **Audio:** Core Audio supplies system volume/mute, microphone mute and
   active app/game audio sessions. The output and the microphone are switched
   from the panel (Y on Home's mixer, the Output and Microphone rows on Audio)

@@ -260,7 +260,17 @@ impl CollectionView {
 
     /// Card play button / focus primary button. A game with actions that
     /// count as playing asks how to play first ([`Self::ask_how_to_play`]).
+    /// A group of ROM versions asks which one first ([`Self::ask_which_version`]).
     pub(super) fn primary_action(&mut self, key: &str, cx: &mut Context<Self>) {
+        if self.ask_which_version(key, cx) {
+            return;
+        }
+        self.play_copy_now(key, cx);
+    }
+
+    /// [`Self::primary_action`] for the copy `key` itself, without asking
+    /// which version (a version just chosen, a launch tried again).
+    pub(super) fn play_copy_now(&mut self, key: &str, cx: &mut Context<Self>) {
         if self.ask_how_to_play(key, cx) {
             return;
         }
@@ -381,6 +391,18 @@ impl CollectionView {
         let anchor = self.scroll_anchor();
         self.groups = groups;
         self.rebuild_with(anchor);
+    }
+
+    /// Folds or opens group `gid`, from its header in the list or from the
+    /// copy pinned over it. Folding from far down the group lands on its
+    /// header (see `vm::resolve_anchor`).
+    pub(super) fn toggle_group_fold(&mut self, gid: &SharedString, cx: &mut Context<Self>) {
+        let Some(g) = self.groups.iter_mut().find(|g| g.id == *gid) else { return };
+        g.collapsed = !g.collapsed;
+        self.ui.toggle_group(gid);
+        self.save_ui();
+        self.rebuild_items();
+        cx.notify();
     }
 
     pub(super) fn rebuild_items(&mut self) {

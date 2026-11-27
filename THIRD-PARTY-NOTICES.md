@@ -9,6 +9,13 @@ Heronite is licensed under the [GNU General Public License v3.0](LICENSE). It in
 - **License:** GPL-3.0 ([`LICENSE`](LICENSE))
 - **Used in Heronite:** parts of the code are ported from Heroic. This includes the Epic Games integration through legendary, the Wine Manager, game settings, Steam shortcuts, and the data formats Heronite reads and writes.
 
+## BatteryHub
+
+- **Project:** [BatteryHub](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor) (formerly Wireless Battery)
+- **Copyright:** the BatteryHub contributors
+- **License:** GPL-3.0 ([`LICENSE`](LICENSE))
+- **Used in Heronite:** the controller battery drivers in `crates/platform/src/pad_battery/` are ported from its `src/drivers/`. Each driver names the protocol references it was ported with.
+
 ## Fonts
 
 | Font | Files | Copyright | License |
@@ -69,6 +76,7 @@ The Rust crates Heronite depends on are listed in [`Cargo.lock`](Cargo.lock). Ea
 Heronite runs these programs if they are installed. It does not include them:
 
 - [legendary](https://github.com/derrod/legendary) (GPL-3.0) for Epic Games
+- [heroic-epic-integration](https://github.com/BananaWorks07/heroic-epic-integration) (MIT) for the dummy `EpicGamesLauncher.exe` wrapper used by Epic games with `USE_FAKE_EPIC_EXE`, downloaded from its GitHub releases when a game needs it
 - [Comet](https://github.com/imLinguin/comet) (GPL-3.0) for the achievements of GOG games, with its dummy `GalaxyCommunication` service, downloaded from its GitHub releases when a GOG game first needs it
 - [Ludusavi](https://github.com/mtkennerly/ludusavi) (MIT) for save backups
 - [rclone](https://github.com/rclone/rclone) (MIT) for the cloud accounts of Settings → Cloud, downloaded from rclone's site when it is not installed

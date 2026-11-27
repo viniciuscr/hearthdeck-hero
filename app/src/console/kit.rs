@@ -30,11 +30,13 @@ thread_local! {
     static PILLS: Cell<u32> = const { Cell::new(0) };
 }
 
-/// Scales the design to the window: `height / 800`, between 1 and 2. Runs
-/// once at the start of every console frame.
+/// Scales the design to the window: `height / 800`, at most 2. Runs once at
+/// the start of every console frame. It goes below 1 so the design always
+/// fits: a screen whose scale leaves fewer than 800 px of height (SteamOS'
+/// Game Mode on a 1920×1200 handheld) would else cut off its bottom.
 pub fn set_scale(window: &Window) {
     let size = crate::ui::content_size(window);
-    let scale = (f32::from(size.height) / 800.).clamp(1., 2.) * look::scale();
+    let scale = (f32::from(size.height) / 800.).clamp(0.5, 2.) * look::scale();
     SCALE.store(scale.to_bits(), Ordering::Relaxed);
     VW.store((f32::from(size.width) / scale).to_bits(), Ordering::Relaxed);
     PILLS.with(|c| c.set(0));
@@ -1117,43 +1119,40 @@ mod tests {
     }
 
     #[test]
-    fn xbox_and_deck_name_the_buttons_by_letter() {
-        assert_eq!(mark(Glyphs::Xbox, Btn::A, false), Mark::Letter("A", Face::South));
-        assert_eq!(mark(Glyphs::Deck, Btn::Y, false), Mark::Letter("Y", Face::North));
-        assert_eq!(mark(Glyphs::Xbox, Btn::Bumpers, false), Mark::Pair("LB", "RB"));
-        assert_eq!(mark(Glyphs::Deck, Btn::LB, false), Mark::Cap("L1"));
-        assert_eq!(mark(Glyphs::Xbox, Btn::L3, false), Mark::Cap("LS"));
-        assert_eq!(mark(Glyphs::Deck, Btn::L3, false), Mark::Cap("L3"));
-        assert_eq!(mark(Glyphs::Deck, Btn::Start, false), Mark::Menu);
-    }
-
-    #[test]
-    fn nintendo_labels_follow_the_positions() {
-        // Confirm is the south button, which Nintendo calls B.
-        assert_eq!(mark(Glyphs::Nintendo, Btn::A, false), Mark::Letter("B", Face::South));
-        assert_eq!(mark(Glyphs::Nintendo, Btn::B, false), Mark::Letter("A", Face::East));
-        assert_eq!(mark(Glyphs::Nintendo, Btn::X, false), Mark::Letter("Y", Face::West));
-        assert_eq!(mark(Glyphs::Nintendo, Btn::Y, false), Mark::Letter("X", Face::North));
-        assert_eq!(mark(Glyphs::Nintendo, Btn::LT, false), Mark::Cap("ZL"));
-        assert_eq!(mark(Glyphs::Nintendo, Btn::Start, false), Mark::Cap("+"));
-    }
-
-    #[test]
-    fn playstation_draws_symbols_and_names_l1_r1() {
-        assert_eq!(mark(Glyphs::PlayStation, Btn::A, false), Mark::Shape(Face::South));
-        assert_eq!(mark(Glyphs::PlayStation, Btn::B, false), Mark::Shape(Face::East));
-        assert_eq!(mark(Glyphs::PlayStation, Btn::RB, false), Mark::Cap("R1"));
-        assert_eq!(mark(Glyphs::PlayStation, Btn::Start, false), Mark::Cap("Options"));
-        assert_eq!(mark(Glyphs::PlayStation, Btn::L3, false), Mark::Cap("L3"));
-    }
-
-    #[test]
-    fn swapping_a_and_b_moves_confirm_to_the_east_button() {
-        assert_eq!(mark(Glyphs::Xbox, Btn::A, true), Mark::Letter("B", Face::East));
-        assert_eq!(mark(Glyphs::Xbox, Btn::B, true), Mark::Letter("A", Face::South));
-        assert_eq!(mark(Glyphs::Nintendo, Btn::A, true), Mark::Letter("A", Face::East));
-        assert_eq!(mark(Glyphs::PlayStation, Btn::A, true), Mark::Shape(Face::East));
-        // X and Y stay where they are.
-        assert_eq!(mark(Glyphs::Xbox, Btn::X, true), Mark::Letter("X", Face::West));
+    fn each_controller_family_marks_its_buttons() {
+        use Face::*;
+        use Glyphs::*;
+        use Mark::*;
+        for (glyphs, btn, swapped, want) in [
+            // Xbox and Deck name the buttons by letter.
+            (Xbox, Btn::A, false, Letter("A", South)),
+            (Deck, Btn::Y, false, Letter("Y", North)),
+            (Xbox, Btn::Bumpers, false, Pair("LB", "RB")),
+            (Deck, Btn::LB, false, Cap("L1")),
+            (Xbox, Btn::L3, false, Cap("LS")),
+            (Deck, Btn::L3, false, Cap("L3")),
+            (Deck, Btn::Start, false, Menu),
+            // Nintendo's labels follow the positions: confirm is the south button, which it calls B.
+            (Nintendo, Btn::A, false, Letter("B", South)),
+            (Nintendo, Btn::B, false, Letter("A", East)),
+            (Nintendo, Btn::X, false, Letter("Y", West)),
+            (Nintendo, Btn::Y, false, Letter("X", North)),
+            (Nintendo, Btn::LT, false, Cap("ZL")),
+            (Nintendo, Btn::Start, false, Cap("+")),
+            // PlayStation draws symbols and names L1 / R1.
+            (PlayStation, Btn::A, false, Shape(South)),
+            (PlayStation, Btn::B, false, Shape(East)),
+            (PlayStation, Btn::RB, false, Cap("R1")),
+            (PlayStation, Btn::L3, false, Cap("L3")),
+            (PlayStation, Btn::Start, false, Cap("Options")),
+            // Swapping A and B moves confirm to the east button; X and Y stay where they are.
+            (Xbox, Btn::A, true, Letter("B", East)),
+            (Xbox, Btn::B, true, Letter("A", South)),
+            (Nintendo, Btn::A, true, Letter("A", East)),
+            (PlayStation, Btn::A, true, Shape(East)),
+            (Xbox, Btn::X, true, Letter("X", West)),
+        ] {
+            assert_eq!(mark(glyphs, btn, swapped), want, "{glyphs:?} {btn:?} swapped: {swapped}");
+        }
     }
 }

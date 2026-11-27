@@ -13,6 +13,9 @@
 //!   (one on screen, four waiting, then the sixth: one past the queue shows
 //!   as itself, more as "N more achievements"), with the icon of
 //!   `HERONITE_DEBUG_OVERLAY_NOTICE_ICON` (a URL or a file) when set.
+//! - `HERONITE_DEBUG_OVERLAY_MEDIA=playing|paused|browser|two|none` shows
+//!   made-up media players; `live` lets the presses reach the real ones
+//!   (`panel::media`).
 //! - `HERONITE_DEBUG_OVERLAY_FPS=<limit>` pretends the game's limiter can
 //!   change while it runs (the FPS limit row shows; nothing is applied).
 //! - `HERONITE_DEBUG_OVERLAY_KEYBOARD=1` opens it as the keyboard shortcut
@@ -150,6 +153,7 @@ fn debug_live_fps(v: &str) -> Option<heronite_launch::live_fps::LiveFps> {
         "mangohud" | "mangohud-hidden" => Some(LiveFps::MangoHud {
             file: std::env::temp_dir().join("heronite-debug-mangohud.conf"),
             base: String::new(),
+            base_file: None,
             smooth: false,
             limit,
             hud: kind == "mangohud",

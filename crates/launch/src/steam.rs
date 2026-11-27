@@ -19,6 +19,23 @@ use crate::vdf::Vdf;
 /// `StateFlags` bit meaning "fully installed".
 pub const STEAM_FULLY_INSTALLED: u64 = 4;
 
+/// `StateFlags` bits meaning Steam is actively updating, verifying, staging,
+/// or committing an app (not merely `UpdateRequired` or `UpdateStarted`).
+const STEAM_UPDATING_MASK: u64 = 256        // UpdateRunning
+    | 65_536     // Reconfiguring
+    | 131_072    // Validating
+    | 262_144    // AddingFiles
+    | 524_288    // Preallocating
+    | 1_048_576  // Downloading
+    | 2_097_152  // Staging
+    | 4_194_304; // Committing
+
+/// `StateFlags` bits meaning an update is paused, stopping, or the app is
+/// being uninstalled (so a launch wait must not treat it as active progress).
+const STEAM_UPDATE_STOPPED_MASK: u64 = 512        // UpdatePaused
+    | 2_048      // Uninstalling
+    | 8_388_608; // UpdateStopping
+
 /// Proton, runtimes and tools that appear as Steam apps but are not games.
 pub const SKIP_STEAM_APP_IDS: &[&str] = &[
     "228980", "858280", "961940", "1070560", "1113280", "1161040", "1245040", "1391110", "1420170", "1493710", "1580130", "1628350",
@@ -244,6 +261,32 @@ impl SteamLocator {
             .collect()
     }
 
+    /// The Steam install whose libraries hold `app_id` (a fully installed
+    /// manifest beats a leftover partial one), else `self.steam_path`.
+    pub fn install_for_app(&self, app_id: &str) -> PathBuf {
+        let valid_id = !app_id.is_empty() && app_id.bytes().all(|b| b.is_ascii_digit());
+        if !valid_id {
+            return self.steam_path.clone();
+        }
+        let manifest = format!("appmanifest_{app_id}.acf");
+        let installs = dedup_existing(std::iter::once(self.steam_path.clone()).chain(self.installs()).collect());
+        let mut partial: Option<PathBuf> = None;
+        for install in installs {
+            for lib in std::iter::once(install.clone()).chain(library_folders(&install.join("steamapps").join("libraryfolders.vdf"))) {
+                let Ok(text) = fs::read_to_string(lib.join("steamapps").join(&manifest)) else {
+                    continue;
+                };
+                if parse_app_manifest(&text, app_id).fully_installed {
+                    return install;
+                }
+                if partial.is_none() {
+                    partial = Some(install.clone());
+                }
+            }
+        }
+        partial.unwrap_or_else(|| self.steam_path.clone())
+    }
+
     /// Steam's `userdata` folder that keeps `app_id`'s saves. Of the Steam
     /// installs with a `userdata` folder (the chosen one first): one whose
     /// libraries hold the game (the one with a folder for the game in an
@@ -315,15 +358,19 @@ impl SteamLocator {
         })
     }
 
-    /// Steam console logs that mention game processes.
-    pub fn log_files(&self) -> Vec<PathBuf> {
-        const NAMES: [&str; 3] = ["console_log.txt", "console-linux.txt", "console-windows.txt"];
+    /// Whether any library's manifest for `app_id` currently reports an active
+    /// update (downloading, staging, committing, validating, or reconfiguring).
+    pub fn is_app_updating(&self, app_id: &str) -> bool {
+        self.app_manifests(app_id).iter().any(|(_, text)| is_manifest_updating(text))
+    }
+
+    fn log_files_named(&self, names: &[&str]) -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = self.library_roots().into_iter().map(|r| r.join("logs")).collect();
         dirs.extend(self.platform_roots.iter().map(|r| r.join("logs")));
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for dir in dirs {
-            for name in NAMES {
+            for name in names {
                 let file = dir.join(name);
                 if file.exists() {
                     let key = fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
@@ -336,8 +383,18 @@ impl SteamLocator {
         out
     }
 
+    /// Steam console logs that mention game processes and `GameAction` steps.
+    pub fn log_files(&self) -> Vec<PathBuf> {
+        self.log_files_named(&["console_log.txt", "console-linux.txt", "console-windows.txt"])
+    }
+
+    /// Steam content logs (`content_log.txt`) that report app updates and queuing.
+    pub fn content_log_files(&self) -> Vec<PathBuf> {
+        self.log_files_named(&["content_log.txt"])
+    }
+
     /// Whether the Steam client runs: the platform's client check, or on
-    /// Linux a native/Flatpak `steam.pid` naming a live process.
+    /// Linux a native/Flatpak/Snap `steam.pid` naming a live `steam` process.
     pub fn client_running(&self, procs: &dyn Procs) -> bool {
         if cfg!(windows) {
             return procs.steam_client_running();
@@ -348,9 +405,19 @@ impl SteamLocator {
         let mut files = vec![self.steam_path.join("steam.pid"), self.home.join(".steam/steam.pid")];
         files.extend(self.steam_path.parent().map(|p| p.join("steam.pid")));
         files.push(self.home.join(".var/app").join(FLATPAK_STEAM_ID).join(".steam/steam.pid"));
-        files.iter().any(|f| fs::read_to_string(f).ok().and_then(|s| s.trim().parse::<u32>().ok()).is_some_and(|pid| procs.is_alive(pid)))
+        files.push(self.home.join("snap/steam/common/.steam/steam.pid"));
+        files.iter().any(|f| {
+            fs::read_to_string(f)
+                .ok()
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .is_some_and(|pid| procs.is_alive(pid) && procs.comm(pid).as_deref() == Some("steam"))
+        })
     }
 }
+
+/// Global setting: start Steam silently (in the background, without its main
+/// window) when Heronite opens it for a game. On by default.
+pub const KEY_START_SILENT: &str = "heroniteStartSteamSilent";
 
 /// Global setting: close Steam once the game that made Heronite open it ends.
 pub const KEY_CLOSE_AFTER_GAME: &str = "heroniteCloseSteamAfterGame";
@@ -413,6 +480,17 @@ fn non_game_regexes() -> &'static [Regex; 3] {
 /// Proton builds, runtimes, SDKs, soundtracks and servers are not games.
 pub fn is_non_game_steam_app(name: &str, app_id: &str) -> bool {
     SKIP_STEAM_APP_IDS.contains(&app_id) || non_game_regexes().iter().any(|r| r.is_match(name))
+}
+
+/// Whether an `appmanifest_<id>.acf`'s `StateFlags` report an active update.
+pub fn is_manifest_updating(text: &str) -> bool {
+    let Ok(doc) = Vdf::parse(text) else {
+        return false;
+    };
+    let Some(flags) = doc.get("AppState").and_then(|s| s.str_of("StateFlags")).and_then(|f| f.trim().parse::<u64>().ok()) else {
+        return false;
+    };
+    (flags & STEAM_UPDATING_MASK) != 0 && (flags & STEAM_UPDATE_STOPPED_MASK) == 0
 }
 
 /// Parses an `appmanifest_<id>.acf`. A file that does not parse counts as an
@@ -597,11 +675,22 @@ mod tests {
         } else {
             write(&locator.steam_path.join("steam.pid"), "101\n");
             assert!(!locator.client_running(&procs), "stale pid");
+            // A pid reused by an unrelated process (or a Flatpak sandbox pid
+            // colliding with a host kernel thread) is not Steam.
+            procs.start(101, "kthreadd", None);
+            assert!(!locator.client_running(&procs));
+            procs.exit(101);
             procs.start(101, "steam", None);
         }
         assert!(locator.client_running(&procs));
         procs.exit(101);
         assert!(!locator.client_running(&procs));
+        if !cfg!(windows) {
+            write(&locator.home.join("snap/steam/common/.steam/steam.pid"), "202\n");
+            procs.start(202, "steam", None);
+            assert!(locator.client_running(&procs), "Snap steam.pid is checked too");
+            procs.exit(202);
+        }
     }
 
     fn acf(id: &str, name: &str, flags: &str) -> String {
@@ -619,6 +708,20 @@ mod tests {
         let broken = parse_app_manifest("\"AppState\" {", "9");
         assert_eq!((broken.app_id.as_str(), broken.name.as_str(), broken.fully_installed), ("9", "", true));
         assert_eq!(parse_app_manifest(&acf("12", "  Spaced  ", "4"), "1").name, "Spaced");
+
+        // Active update flags (downloading, staging, committing, running update).
+        assert!(!is_manifest_updating(&acf("400", "Portal", "4")));
+        assert!(!is_manifest_updating(&acf("400", "Portal", "6"))); // UpdateRequired | FullyInstalled
+        assert!(!is_manifest_updating(&acf("400", "Portal", "1026"))); // UpdateRequired | UpdateStarted
+        assert!(is_manifest_updating(&acf("400", "Portal", "260"))); // UpdateRunning | FullyInstalled
+        assert!(is_manifest_updating(&acf("400", "Portal", "1048836"))); // Downloading | UpdateRunning | FullyInstalled
+        assert!(is_manifest_updating(&acf("400", "Portal", "2097412"))); // Staging | UpdateRunning | FullyInstalled
+        assert!(is_manifest_updating(&acf("400", "Portal", "4194564"))); // Committing | UpdateRunning | FullyInstalled
+                                                                         // Paused, stopping, or uninstalling are not active progress.
+        assert!(!is_manifest_updating(&acf("400", "Portal", "772"))); // UpdatePaused | UpdateRunning | FullyInstalled
+        assert!(!is_manifest_updating(&acf("400", "Portal", "8388868"))); // UpdateStopping | UpdateRunning | FullyInstalled
+        assert!(!is_manifest_updating(&acf("400", "Portal", "2308"))); // Uninstalling | UpdateRunning | FullyInstalled
+        assert!(!is_manifest_updating("\"AppState\" {"));
     }
 
     #[test]
@@ -805,11 +908,19 @@ mod tests {
             system_roots: vec![],
             platform_roots: vec![stale.clone(), snap.clone(), leftover.clone()],
         };
-        assert_eq!(loc.library_roots(), [stale, snap, hdd.clone(), leftover]);
+        assert_eq!(loc.library_roots(), [stale.clone(), snap.clone(), hdd.clone(), leftover]);
         assert!(is_steam_app_installed(&loc, "400"));
         assert!(is_steam_app_installed(&loc, "730"));
         assert!(!is_steam_app_installed(&loc, "9"));
         assert_eq!(loc.install_dir("1245620"), Some(hdd.join("steamapps/common/ELDEN RING")));
+        assert_eq!(loc.install_for_app("400"), snap);
+        assert_eq!(loc.install_for_app("730"), snap);
+        assert_eq!(loc.install_for_app("9999"), stale);
+
+        // A leftover partial manifest in the chosen folder loses to a fully
+        // installed copy in another Steam install.
+        write(&stale.join("steamapps/appmanifest_400.acf"), &acf("400", "Portal", "1026"));
+        assert_eq!(loc.install_for_app("400"), snap);
     }
 
     /// Restoring a Steam game's saves goes to the `userdata` of the Steam that
@@ -933,12 +1044,6 @@ mod tests {
         assert!(open_steam_client_uri(&spawner, &with_steam, SteamAction::Install, "1").unwrap_err().contains("xdg-open"));
     }
 
-    #[test]
-    fn uri_building() {
-        assert_eq!(steam_uri("rungameid", "400"), "steam://rungameid/400");
-        assert_eq!(steam_uri(SteamAction::Uninstall.as_str(), "7"), "steam://uninstall/7");
-    }
-
     // Windows makes symlinks only in Developer Mode or as an administrator.
     #[cfg(unix)]
     #[test]
@@ -957,5 +1062,36 @@ mod tests {
         };
         let files = loc.log_files();
         assert_eq!(files.len(), 1, "{files:?}");
+        write(&home.join(".local/share/Steam/logs/content_log.txt"), "x");
+        assert_eq!(loc.content_log_files().len(), 1);
+    }
+
+    #[test]
+    fn is_app_updating_checks_any_library_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let steam = dir.path().join("home/.steam/steam");
+        let extra = dir.path().join("extra/SteamLibrary");
+        write(
+            &steam.join("steamapps/libraryfolders.vdf"),
+            &format!(
+                "\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} \"1\" {{ \"path\" \"{}\" }} }}",
+                vdf_path(&steam),
+                vdf_path(&extra)
+            ),
+        );
+        // Primary library has a fully installed copy, second library has an
+        // in-progress install/update without the FullyInstalled bit set.
+        write(&steam.join("steamapps/appmanifest_400.acf"), &acf("400", "Portal", "4"));
+        write(&extra.join("steamapps/appmanifest_400.acf"), &acf("400", "Portal", "1048832"));
+        let loc = SteamLocator {
+            home: dir.path().join("home"),
+            steam_path: steam.clone(),
+            system_roots: vec![],
+            platform_roots: vec![steam.clone()],
+        };
+        assert!(loc.is_app_updating("400"));
+        assert!(!loc.is_app_updating("999"));
+        write(&extra.join("steamapps/appmanifest_400.acf"), &acf("400", "Portal", "4"));
+        assert!(!loc.is_app_updating("400"));
     }
 }

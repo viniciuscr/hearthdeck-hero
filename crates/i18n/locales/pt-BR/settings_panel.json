@@ -128,6 +128,9 @@
   "System tray": "Bandeja do sistema",
   "When a game starts and ends": "Ao iniciar e fechar um jogo",
   "Show Hearthdeck Hero again when the game ends": "Mostrar o Hearthdeck Hero de novo quando o jogo fechar",
+  "Start Steam in the background": "Iniciar o Steam em segundo plano",
+  "Keep Steam's window out of the way when Hearthdeck Hero opens it for a game.": "Mantém a janela do Steam oculta quando o Hearthdeck Hero o abre para um jogo.",
+  "Keep Steam's window out of the way when Hearthdeck Hero opens it for a game": "Mantém a janela do Steam oculta quando o Hearthdeck Hero o abre para um jogo",
   "Close Steam when the game ends": "Fechar o Steam quando o jogo fechar",
   "Only when Steam was not running before Hearthdeck Hero started the game.": "Só quando o Steam não estava aberto antes de o Hearthdeck Hero iniciar o jogo.",
   "Only when Steam was not running before Hearthdeck Hero started the game": "Só quando o Steam não estava aberto antes de o Hearthdeck Hero iniciar o jogo",
@@ -533,5 +536,12 @@
   "Restart Hearthdeck Hero": "Reiniciar o Hearthdeck Hero",
   "The tray changes apply once Hearthdeck Hero starts again.": "As mudanças da bandeja valem quando o Hearthdeck Hero abrir de novo.",
   "Copy path": "Copiar caminho",
-  "Copied": "Copiado"
+  "Copied": "Copiado",
+  "Open the window on": "Abrir a janela na",
+  "Where it was left": "Onde ficou da última vez",
+  "Screen {n}": "Tela {n}",
+  "Screen {n} (main)": "Tela {n} (principal)",
+  "Applies the next time the window opens. Screens are numbered from left to right. If the screen is not connected, the window opens where it was left.": "Vale a partir da próxima vez que a janela abrir. As telas são numeradas da esquerda para a direita. Se a tela não estiver conectada, a janela abre onde ficou da última vez.",
+  "Applies the next time the window opens.": "Vale a partir da próxima vez que a janela abrir.",
+  "A screen that is not connected": "Uma tela que não está conectada"
 }

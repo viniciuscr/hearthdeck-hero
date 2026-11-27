@@ -325,6 +325,36 @@ date, upstream commit, files, and resolution.
     `HERONITE_DEBUG_EA_ACCOUNT` shows, not shipped copy.
   - No new seam: `app/src/fork/seams.rs` is unchanged, and its eight guards pass.
 
+- **2026-11-27, upstream `fc3b5f31`** (107 commits: a store's own install folder, a
+  client's games out of its Wine prefix, the overlay's media-player controls, controller
+  batteries read by drivers ported from BatteryHub, the main window's screen, the replays'
+  PipeWire sound, the DLsite metadata extension, the console sheets' fit). Eighteen paths
+  conflicted, in two shapes: upstream's rewrite meeting a fork seam, and the F-005 rename
+  meeting new upstream copy.
+  - `app/src/console/kit.rs`: upstream collapsed three glyph tests into one table
+    (`each_controller_family_marks_its_buttons`). Its table is taken, with the fork's
+    three **L3** rows inserted where the film page's press reads them — Xbox `LS`,
+    Deck and PlayStation `L3` — the F-012 seam those rows cover.
+  - `app/src/overlay/labels.rs`: upstream added "music" to the Settings → Overlay blurb;
+    its two sentences are taken with "Hearthdeck Hero" in place of the app name.
+  - `crates/i18n/locales/{de,es,fr,pt-BR}/{epic,overlay,settings_panel,windows_overlay}.json`:
+    upstream's side taken whole and the rename re-applied, which adds the Epic account
+    text upstream rewrote, the Steam rows (background start, keep the window away), the
+    overlay blurb with music, and Windows overlay's two new keys. The fork's rebranded
+    keys are replaced by the rebranded upstream ones, so the English key still matches
+    the Rust string.
+  - Rebranded outside the conflicts (F-005), in code and locales together (the coverage
+    test matches them): the two Steam rows upstream added
+    (`dialogs/settings_panel/{general,console}.rs` → `settings_panel.json`), the store
+    install folder's sentence (`pages/store_folder.rs` → the new `store_folders.json`),
+    and the play-time notice (`crates/launch/src/runtime/process.rs` → `system.json`,
+    where the French value was already rebranded and its key was not).
+  - Left as they were: `console_controls.json`'s two pending strings (F-005), and the
+    `crates/launch` error text upstream words "the release Heronite expects" —
+    `store_tools.rs` and `galaxy.rs` already carried it before this reconciliation, and
+    it is outside F-005's registered surfaces.
+  - No new seam: `app/src/fork/seams.rs` is unchanged, and its eight guards pass.
+
 ## Releases
 
 - Cut a release from `fork/main` with the **Fork Release** workflow
