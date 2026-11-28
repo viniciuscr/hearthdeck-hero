@@ -84,10 +84,9 @@ mod tests {
 
     #[test]
     fn accepts_numbers_nulls_and_objects() {
-        let s: Sample = serde_json::from_str(
-            r#"{"id": 44535815, "size": 1024, "dlcs": ["1", 2, {"id": 3}, {"appName": "4"}, null], "pinned": null}"#,
-        )
-        .unwrap();
+        let s: Sample =
+            serde_json::from_str(r#"{"id": 44535815, "size": 1024, "dlcs": ["1", 2, {"id": 3}, {"appName": "4"}, null], "pinned": null}"#)
+                .unwrap();
         assert_eq!(s.id, "44535815");
         assert_eq!(s.size.as_deref(), Some("1024"));
         assert_eq!(s.dlcs, ["1", "2", "3", "4"]);

@@ -512,9 +512,11 @@ mod tests {
         let data_paths = DataPaths::at(dir.path().join("h"));
         let manifests = dir.path().join("manifests");
         std::fs::create_dir_all(&manifests).unwrap();
+        let (root_mount, offline_mount, offline_path) =
+            if cfg!(windows) { (r"C:\", r"Z:\", r"Z:\OfflineGame") } else { ("/", "/run/media/offline", "/run/media/offline/OfflineGame") };
         let gone_dir = dir.path().join("Games/GoneGame");
         let kept_dir = dir.path().join("KeptGame");
-        let offline_dir = Path::new("/run/media/offline/OfflineGame");
+        let offline_dir = Path::new(offline_path);
 
         // KeptGame is still in EGL manifests; GoneGame and OfflineGame are not.
         launcher_install(dir.path(), &manifests, "KeptGame", "Kept Game", json!({}));
@@ -531,14 +533,15 @@ mod tests {
         install_origins::record(&data_paths, "legendary", "KeptGame", Origin::EpicLauncher, &kept_dir.to_string_lossy()).unwrap();
         install_origins::record(&data_paths, "legendary", "OfflineGame", Origin::EpicLauncher, &offline_dir.to_string_lossy()).unwrap();
         let mounts_online = Mounts::from_entries(vec![
-            MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() },
-            MountPoint { point: PathBuf::from("/run/media/offline"), fs: "ext4".into(), source: "/dev/sdb1".into() },
+            MountPoint { point: PathBuf::from(root_mount), fs: "ext4".into(), source: "/dev/root".into() },
+            MountPoint { point: PathBuf::from(offline_mount), fs: "ext4".into(), source: "/dev/sdb1".into() },
         ]);
         let mut cache = MountCache::default();
         cache.observe("legendary_OfflineGame", offline_dir, &mounts_online);
         cache.save(&data_paths);
 
-        let mounts = Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() }]);
+        let mounts =
+            Mounts::from_entries(vec![MountPoint { point: PathBuf::from(root_mount), fs: "ext4".into(), source: "/dev/root".into() }]);
         assert_eq!(reconcile_uninstalled_from(&data_paths, &manifests, &mounts), 1);
         let remaining = library::installed_games(&data_paths);
         assert!(!remaining.contains_key("GoneGame"));

@@ -240,9 +240,7 @@ fn read(paths: &DataPaths, clients: &[Client], sync: bool) -> Vec<(Client, Read)
                 Some(collection::sync(paths, client, &status.games).map_err(|e| format!("{e:#}")))
             } else if sync && client_removed {
                 match (mounts.as_ref(), mount_cache.as_ref()) {
-                    (Some(m), Some(cache)) => {
-                        Some(collection::mark_all_uninstalled(paths, client, m, cache).map_err(|e| format!("{e:#}")))
-                    }
+                    (Some(m), Some(cache)) => Some(collection::mark_all_uninstalled(paths, client, m, cache).map_err(|e| format!("{e:#}"))),
                     _ => None,
                 }
             } else {

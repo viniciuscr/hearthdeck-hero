@@ -185,13 +185,7 @@ pub fn import_all(paths: &DataPaths, nile: &Nile, db: &Path, cancel: &dyn Fn() -
 }
 
 fn remember(paths: &DataPaths, app_name: &str, folder: &str) -> Result<()> {
-    let _ = heronite_data::install_origins::record(
-        paths,
-        "nile",
-        app_name,
-        heronite_data::install_origins::Origin::AmazonApp,
-        folder,
-    );
+    let _ = heronite_data::install_origins::record(paths, "nile", app_name, heronite_data::install_origins::Origin::AmazonApp, folder);
     json_store::update_value(&paths.nile_store(STORE), |doc| {
         let obj = doc.as_object_mut().expect("object");
         let imported = obj.entry("imported").or_insert_with(|| json!({}));
@@ -455,9 +449,13 @@ mod tests {
 
         let env = Env::new();
         env.write_nile_file("library.json", LIBRARY);
+        let (root_mount, offline_mount, offline) = if cfg!(windows) {
+            (r"C:\", r"Z:\", r"Z:\Third".to_string())
+        } else {
+            ("/", "/run/media/offline", "/run/media/offline/Third".to_string())
+        };
         let kept = game_folder(&env, "Cool Game");
         let gone = env.root().join("games/Gone").to_string_lossy().into_owned();
-        let offline = "/run/media/offline/Third".to_string();
         env.write_nile_file(
             "installed.json",
             &json!([
@@ -471,8 +469,8 @@ mod tests {
         remember(&env.paths, "amzn1.adg.product.BBB", &gone).unwrap();
         remember(&env.paths, "amzn1.adg.product.CCC", &offline).unwrap();
         let mounts_online = Mounts::from_entries(vec![
-            MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() },
-            MountPoint { point: PathBuf::from("/run/media/offline"), fs: "ext4".into(), source: "/dev/sdb1".into() },
+            MountPoint { point: PathBuf::from(root_mount), fs: "ext4".into(), source: "/dev/root".into() },
+            MountPoint { point: PathBuf::from(offline_mount), fs: "ext4".into(), source: "/dev/sdb1".into() },
         ]);
         let mut cache = MountCache::default();
         cache.observe("nile_amzn1.adg.product.CCC", Path::new(&offline), &mounts_online);
@@ -480,7 +478,8 @@ mod tests {
 
         // App database marks AAA installed and BBB uninstalled (0).
         let db = app_database(&env, &[("amzn1.adg.product.AAA", &kept, "Cool Game", 1), ("amzn1.adg.product.BBB", &gone, "Other Game", 0)]);
-        let mounts = Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() }]);
+        let mounts =
+            Mounts::from_entries(vec![MountPoint { point: PathBuf::from(root_mount), fs: "ext4".into(), source: "/dev/root".into() }]);
 
         assert_eq!(reconcile_uninstalled_from(&env.paths, &db, &mounts), 1);
         assert!(installed::get(&env.paths, "amzn1.adg.product.AAA").is_some());

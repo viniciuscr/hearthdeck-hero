@@ -500,19 +500,22 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let paths = DataPaths::at(dir.path());
+        let (root_mount, offline_mount, offline_path) =
+            if cfg!(windows) { (r"C:\", r"Z:\", r"Z:\Game") } else { ("/", "/run/media/offline", "/run/media/offline/Game") };
         let local_game = ClientGame { id: "1".into(), title: "Local".into(), folder: Some(dir.path().join("local")), launch: "x".into() };
         let offline_game =
-            ClientGame { id: "2".into(), title: "Offline".into(), folder: Some(PathBuf::from("/run/media/offline/Game")), launch: "y".into() };
+            ClientGame { id: "2".into(), title: "Offline".into(), folder: Some(PathBuf::from(offline_path)), launch: "y".into() };
         sync(&paths, Client::Ea, &[local_game, offline_game]).unwrap();
         mark_removed(&paths, Client::Ea, "ea_3", &[]).unwrap();
 
         let mounts_online = Mounts::from_entries(vec![
-            MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() },
-            MountPoint { point: PathBuf::from("/run/media/offline"), fs: "ext4".into(), source: "/dev/sdb1".into() },
+            MountPoint { point: PathBuf::from(root_mount), fs: "ext4".into(), source: "/dev/root".into() },
+            MountPoint { point: PathBuf::from(offline_mount), fs: "ext4".into(), source: "/dev/sdb1".into() },
         ]);
         let mut cache = MountCache::default();
-        cache.observe("sideload_ea_2", std::path::Path::new("/run/media/offline/Game"), &mounts_online);
-        let mounts_offline = Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() }]);
+        cache.observe("sideload_ea_2", std::path::Path::new(offline_path), &mounts_online);
+        let mounts_offline =
+            Mounts::from_entries(vec![MountPoint { point: PathBuf::from(root_mount), fs: "ext4".into(), source: "/dev/root".into() }]);
 
         let rep = mark_all_uninstalled(&paths, Client::Ea, &mounts_offline, &cache).unwrap();
         assert_eq!(rep, Report { added: 0, updated: 1 });

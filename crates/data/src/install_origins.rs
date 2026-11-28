@@ -162,10 +162,7 @@ mod tests {
         record(&paths, "legendary", "Calluna", Origin::Heroic, "/games/Control").unwrap();
         record(&paths, "nile", "amzn1.a", Origin::AmazonApp, "/games/Fallout").unwrap();
 
-        assert_eq!(
-            get(&paths, "gog", "1207658924"),
-            Some(OriginRecord { origin: Origin::Heroic, install_path: "/games/Witcher3".into() })
-        );
+        assert_eq!(get(&paths, "gog", "1207658924"), Some(OriginRecord { origin: Origin::Heroic, install_path: "/games/Witcher3".into() }));
         let heroic = by_origin(&paths, Origin::Heroic);
         assert_eq!(heroic.len(), 2);
 

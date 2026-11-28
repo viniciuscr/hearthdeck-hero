@@ -121,9 +121,7 @@ impl Mounts {
                 .flat_map(|v| {
                     let fs = v.fs;
                     let source = v.id;
-                    v.mount_points
-                        .into_iter()
-                        .map(move |point| MountPoint { point, fs: fs.clone(), source: source.clone() })
+                    v.mount_points.into_iter().map(move |point| MountPoint { point, fs: fs.clone(), source: source.clone() })
                 })
                 .collect();
             Self { entries }
@@ -143,10 +141,7 @@ impl Mounts {
     /// The longest mounted point that contains `path`.
     pub fn mount_of(&self, path: &Path) -> Option<&MountPoint> {
         let norm = canonicalize_prefix(path);
-        self.entries
-            .iter()
-            .filter(|m| path_starts_with(&norm, &m.point))
-            .max_by_key(|m| m.point.as_os_str().len())
+        self.entries.iter().filter(|m| path_starts_with(&norm, &m.point)).max_by_key(|m| m.point.as_os_str().len())
     }
 
     /// Whether `point` is currently mounted (comparing canonicalized paths).
@@ -245,12 +240,7 @@ impl MountCache {
 
 /// Checks whether `path` is present, on unmounted/inaccessible storage, or
 /// genuinely missing (`MissingReason::FolderGone` / `ExecutableGone`).
-pub fn check_path(
-    path: &Path,
-    remembered: Option<&RememberedMount>,
-    mounts: &Mounts,
-    not_found_reason: MissingReason,
-) -> InstallPresence {
+pub fn check_path(path: &Path, remembered: Option<&RememberedMount>, mounts: &Mounts, not_found_reason: MissingReason) -> InstallPresence {
     match std::fs::metadata(path) {
         Ok(_) => InstallPresence::Present,
         Err(err) if err.kind() != ErrorKind::NotFound => {
@@ -670,9 +660,12 @@ fn unescape_mountinfo(s: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::library::Library;
+    #[cfg(unix)]
     use serde_json::json;
 
+    #[cfg(unix)]
     #[test]
     fn parses_mountinfo_and_unescapes_spaces_and_utf8() {
         let sample = "\
@@ -703,6 +696,7 @@ mod tests {
         assert_eq!(strip_verbatim(PathBuf::from("/mnt/games/Control")), PathBuf::from("/mnt/games/Control"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn non_not_found_error_on_mounted_volume_is_not_storage_unavailable() {
         let dir = tempfile::tempdir().unwrap();
@@ -718,7 +712,8 @@ mod tests {
     #[test]
     fn distinguishes_unmounted_external_drive_from_deleted_folder() {
         let dir = tempfile::tempdir().unwrap();
-        let mounts = Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/nvme0n1p2".into() }]);
+        let mounts =
+            Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/nvme0n1p2".into() }]);
 
         // Under `/run/media/<user>/<vol>` with nothing mounted there -> StorageUnavailable.
         let on_sd = Path::new("/run/media/rafa/SDCard/Games/Witcher 3");
@@ -729,7 +724,8 @@ mod tests {
 
         // Remembered custom mount point `/home/rafa/GamesHDD` now unmounted -> StorageUnavailable.
         let custom = dir.path().join("GamesHDD/Control");
-        let remembered = RememberedMount { mount_point: dir.path().join("GamesHDD").to_string_lossy().into_owned(), source: "/dev/sdb1".into() };
+        let remembered =
+            RememberedMount { mount_point: dir.path().join("GamesHDD").to_string_lossy().into_owned(), source: "/dev/sdb1".into() };
         assert_eq!(
             check_path(&custom, Some(&remembered), &mounts, MissingReason::FolderGone),
             InstallPresence::StorageUnavailable { mount_hint: Some(dir.path().join("GamesHDD")) }
@@ -737,10 +733,7 @@ mod tests {
 
         // Regular local folder deleted on mounted filesystem -> FolderGone.
         let local_gone = dir.path().join("Games/Deleted");
-        assert_eq!(
-            check_path(&local_gone, None, &mounts, MissingReason::FolderGone),
-            InstallPresence::Missing(MissingReason::FolderGone)
-        );
+        assert_eq!(check_path(&local_gone, None, &mounts, MissingReason::FolderGone), InstallPresence::Missing(MissingReason::FolderGone));
     }
 
     #[cfg(unix)]
@@ -761,11 +754,8 @@ mod tests {
             &json!({"games":[{"runner":"gog","app_name":"123","title":"Witcher","is_installed":true,"install":{"platform":"windows","install_path":gog_dir}}],"__timestamp":{"games":"x"}}),
         )
         .unwrap();
-        json_store::write(
-            &paths.gog_installed(),
-            &json!({"installed":[{"appName":"123","platform":"windows","install_path":gog_dir}]}),
-        )
-        .unwrap();
+        json_store::write(&paths.gog_installed(), &json!({"installed":[{"appName":"123","platform":"windows","install_path":gog_dir}]}))
+            .unwrap();
         json_store::write(
             &paths.nile_library(),
             &json!({"library":[{"runner":"nile","app_name":"amzn1.a","title":"Fallout","is_installed":true,"install":{"platform":"Windows","install_path":nile_dir}}],"__timestamp":{"library":"x"}}),

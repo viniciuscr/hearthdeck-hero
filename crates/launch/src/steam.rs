@@ -255,9 +255,7 @@ impl SteamLocator {
         let installs = std::iter::once(self.steam_path.clone()).chain(self.installs()).collect();
         for install in dedup_existing(installs) {
             for (path, ids) in library_folders_with_apps(&install.join("steamapps").join("libraryfolders.vdf")) {
-                if !path.exists()
-                    && heronite_data::install_health::is_path_storage_unavailable(&path, None, mounts)
-                {
+                if !path.exists() && heronite_data::install_health::is_path_storage_unavailable(&path, None, mounts) {
                     match ids {
                         Some(set) => apps.extend(set),
                         None => unknown = true,

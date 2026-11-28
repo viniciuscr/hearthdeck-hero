@@ -389,7 +389,12 @@ pub fn gone_installs(paths: &DataPaths, lib: &Library, mounts: &Mounts) -> Vec<(
         // its essential marker is gone, confirm external uninstall.
         let dir = Path::new(current_path);
         let files_present = match store {
-            Store::Gog => dir.is_dir() && (dir.join(format!("goggame-{app}.info")).is_file() || dir.join("start.sh").is_file() || dir.join("gameinfo").is_file()),
+            Store::Gog => {
+                dir.is_dir()
+                    && (dir.join(format!("goggame-{app}.info")).is_file()
+                        || dir.join("start.sh").is_file()
+                        || dir.join("gameinfo").is_file())
+            }
             Store::Amazon => dir.is_dir() && dir.join("fuel.json").is_file(),
             Store::Epic => dir.is_dir() && std::fs::read_dir(dir).is_ok_and(|mut rd| rd.next().is_some()),
         };
@@ -710,7 +715,8 @@ mod tests {
         cache.observe("gog_99999", Path::new(offline_path), &mounts_online);
         cache.save(&paths);
 
-        let mounts_offline = Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() }]);
+        let mounts_offline =
+            Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() }]);
         let found_after = detect(&home, &paths).unwrap().unwrap();
         let lib_after = found_after.heroic.as_ref().unwrap();
         let gone = gone_installs(&paths, lib_after, &mounts_offline);

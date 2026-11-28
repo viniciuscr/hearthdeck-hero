@@ -91,11 +91,7 @@ fn next_install_state_with_mounts(
 
     if meta.launch_kind == "emulator" {
         let executable = emulator_executable(ctx, meta).unwrap_or_else(local_exe);
-        let roms_offline = game.is_installed
-            && meta
-                .roms
-                .as_ref()
-                .is_some_and(|roms| roms.iter().any(|r| offline(&r.path)));
+        let roms_offline = game.is_installed && meta.roms.as_ref().is_some_and(|roms| roms.iter().any(|r| offline(&r.path)));
         let roms_ok = emulator_rom_installed(meta, probe) || roms_offline;
         let exe_ok = if meta.emulator_id.as_deref().map(|s| !s.is_empty()).unwrap_or(false) && executable == "flatpak" {
             // Flatpak is Linux's; inside Heronite's own Flatpak sandbox `/var/lib/flatpak`
@@ -654,16 +650,21 @@ mod tests {
         let steam = home.join(".steam/steam");
         let steamapps = steam.join("steamapps");
         std::fs::create_dir_all(&steamapps).unwrap();
+        let (root_mount, offline_lib, empty_lib) = if cfg!(windows) {
+            (r"C:\", r"Z:\\SteamLibrary", r"Z:\\EmptySteamLib")
+        } else {
+            ("/", "/run/media/offline/SteamLibrary", "/run/media/offline/EmptySteamLib")
+        };
         // libraryfolders.vdf lists a secondary library on an unmounted path with app 400.
         std::fs::write(
             steamapps.join("libraryfolders.vdf"),
-            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/run/media/offline/SteamLibrary\"\n\t\t\"apps\"\n\t\t{\n\t\t\t\"400\"\t\t\"1000\"\n\t\t}\n\t}\n}\n",
+            format!("\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{offline_lib}\"\n\t\t\"apps\"\n\t\t{{\n\t\t\t\"400\"\t\t\"1000\"\n\t\t}}\n\t}}\n}}\n"),
         )
         .unwrap();
         let probe = FakeProbe::new(home.to_str().unwrap()).with_steam_roots(vec![steam]);
         let locator = SteamLocator::detect(&Default::default(), &probe);
         let mounts = Mounts::from_entries(vec![heronite_data::install_health::MountPoint {
-            point: std::path::PathBuf::from("/"),
+            point: std::path::PathBuf::from(root_mount),
             fs: "ext4".into(),
             source: "/dev/root".into(),
         }]);
@@ -692,7 +693,7 @@ mod tests {
         // detecting uninstalls on mounted libraries.
         std::fs::write(
             steamapps.join("libraryfolders.vdf"),
-            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/run/media/offline/EmptySteamLib\"\n\t\t\"apps\"\n\t\t{\n\t\t}\n\t}\n}\n",
+            format!("\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{empty_lib}\"\n\t\t\"apps\"\n\t\t{{\n\t\t}}\n\t}}\n}}\n"),
         )
         .unwrap();
         let (unknown_empty, apps_empty) = locator.unmounted_library_apps(&mounts);

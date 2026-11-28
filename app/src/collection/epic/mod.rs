@@ -240,10 +240,7 @@ pub(super) fn row_status(e: &CardEpic) -> Div {
                 HealthBadge::Missing | HealthBadge::Incomplete => {
                     let fg = theme::readable(theme::warning());
                     let label = if badge == HealthBadge::Missing { tr!("MISSING") } else { tr!("INCOMPLETE") };
-                    base.bg(Rgba { a: 0.16, ..theme::warning() })
-                        .text_color(fg)
-                        .child(icon(Icon::Warning, px(10.5), fg))
-                        .child(label)
+                    base.bg(Rgba { a: 0.16, ..theme::warning() }).text_color(fg).child(icon(Icon::Warning, px(10.5), fg)).child(label)
                 }
             };
         }
@@ -441,9 +438,7 @@ impl CollectionView {
             return Some(CardEpic { label: SharedString::default(), percent: None, update: false, health });
         }
         if let (Some(app), Some(svc)) = (store_app, svc) {
-            return svc
-                .has_update(app)
-                .then(|| CardEpic { label: SharedString::default(), percent: None, update: true, health: None });
+            return svc.has_update(app).then(|| CardEpic { label: SharedString::default(), percent: None, update: true, health: None });
         }
         None
     }
