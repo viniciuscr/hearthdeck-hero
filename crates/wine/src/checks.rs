@@ -24,7 +24,7 @@ use heronite_data::{json_store, DataPaths};
 use serde::{Deserialize, Serialize};
 
 use crate::github::{self, ApiError, ApiReply, Budget};
-use crate::repos::{self, Repository};
+use crate::repos::Source;
 use crate::store;
 use crate::types::WineVersionInfo;
 
@@ -60,19 +60,19 @@ pub enum CheckOutcome {
 
 /// What a check reaches over the network; tests use a fake.
 pub trait Remote: Send + Sync {
-    fn feed(&self, repo: Repository) -> Result<String>;
-    fn releases(&self, repo: Repository, count: usize, now: u64) -> ApiReply;
+    fn feed(&self, source: &Source) -> Result<String>;
+    fn releases(&self, source: &Source, count: usize, now: u64) -> ApiReply;
 }
 
 /// The real GitHub.
 pub struct GitHub;
 
 impl Remote for GitHub {
-    fn feed(&self, repo: Repository) -> Result<String> {
-        github::feed(repo)
+    fn feed(&self, source: &Source) -> Result<String> {
+        github::feed(source)
     }
-    fn releases(&self, repo: Repository, count: usize, now: u64) -> ApiReply {
-        github::api_releases(repo, count, now)
+    fn releases(&self, source: &Source, count: usize, now: u64) -> ApiReply {
+        github::api_releases(source, count, now)
     }
 }
 
@@ -163,30 +163,63 @@ fn failed(state: &mut CheckState, kind: &str, now: u64, message: String) -> Chec
     CheckOutcome::Failed(message)
 }
 
-/// Brings the cached releases of `repo` up to date if needed. Blocking
-/// (network). `now`: Unix seconds.
-pub fn check_source(data_paths: &DataPaths, remote: &dyn Remote, repo: Repository, mode: CheckMode, now: u64) -> CheckOutcome {
+/// Drops the saved check state of a removed custom source so re-adding the
+/// same name starts with a clean cooldown and feed fingerprint.
+pub(crate) fn forget_source(data_paths: &DataPaths, kind: &str) {
     let path = data_paths.wine_release_checks();
     let mut state = CheckState::load(&path);
-    let kind = repo.kind();
-    let source = state.sources.get(kind).cloned().unwrap_or_default();
+    if state.sources.remove(kind).is_some() {
+        state.save(&path);
+    }
+}
+
+/// Fetches releases for probing a candidate custom source while respecting and
+/// updating the shared GitHub API budget.
+pub(crate) fn fetch_releases_for_probe(
+    data_paths: &DataPaths,
+    remote: &dyn Remote,
+    source: &Source,
+    count: usize,
+    now: u64,
+) -> std::result::Result<String, ApiError> {
+    let path = data_paths.wine_release_checks();
+    let mut state = CheckState::load(&path);
+    if let Some(until) = state.api.wait_until(CheckMode::Manual, now) {
+        return Err(ApiError::RateLimited { until });
+    }
+    let reply = remote.releases(source, count, now);
+    state.api.record(reply.budget);
+    if let Err(ApiError::RateLimited { until }) = reply.result {
+        state.api.blocked_until = until;
+    }
+    state.save(&path);
+    reply.result
+}
+
+/// Brings the cached releases of `source` up to date if needed. Blocking
+/// (network). `now`: Unix seconds.
+pub fn check_source(data_paths: &DataPaths, remote: &dyn Remote, source: &Source, mode: CheckMode, now: u64) -> CheckOutcome {
+    let path = data_paths.wine_release_checks();
+    let mut state = CheckState::load(&path);
+    let kind = source.kind();
+    let src_state = state.sources.get(kind).cloned().unwrap_or_default();
     let cached = store::read_releases(data_paths).iter().any(|r| r.kind == kind && r.downloadable());
 
-    let since = now.saturating_sub(source.checked_at);
+    let since = now.saturating_sub(src_state.checked_at);
     let recent = since < MANUAL_COOLDOWN.as_secs() || (mode == CheckMode::Auto && cached && since < AUTO_EVERY.as_secs());
     if recent {
         return CheckOutcome::UpToDate;
     }
 
     // A feed that cannot be read only costs the API call it would have saved.
-    let fingerprint = match remote.feed(repo) {
+    let fingerprint = match remote.feed(source) {
         Ok(xml) => github::feed_fingerprint(&xml),
         Err(e) => {
             log::info!("wine manager: {kind} feed: {e:#}");
             None
         }
     };
-    if cached && fingerprint.is_some() && fingerprint == source.feed {
+    if cached && fingerprint.is_some() && fingerprint == src_state.feed {
         state.sources.insert(kind.to_owned(), SourceCheck { checked_at: now, feed: fingerprint });
         state.save(&path);
         return CheckOutcome::UpToDate;
@@ -195,20 +228,27 @@ pub fn check_source(data_paths: &DataPaths, remote: &dyn Remote, repo: Repositor
     if let Some(until) = state.api.wait_until(mode, now) {
         return CheckOutcome::RateLimited { until };
     }
-    let reply = remote.releases(repo, RELEASES_PER_FETCH, now);
+    let reply = remote.releases(source, RELEASES_PER_FETCH, now);
     state.api.record(reply.budget);
     let outcome = match reply.result {
-        Ok(body) => match repos::parse_releases(repo, &body).and_then(|fetched| {
-            let waiting = waiting_for_files(&fetched);
-            store::apply_fetched(data_paths, fetched).map(|_| waiting)
-        }) {
-            Ok(waiting) => {
-                let feed = if waiting { None } else { fingerprint };
-                state.sources.insert(kind.to_owned(), SourceCheck { checked_at: now, feed });
-                CheckOutcome::Updated
+        Ok(body) => {
+            if source.is_custom() && Source::from_kind(data_paths, kind).is_none() {
+                // Removed while the check was in flight; do not write stale rows back.
+                CheckOutcome::UpToDate
+            } else {
+                match source.parse_releases(&body).and_then(|fetched| {
+                    let waiting = waiting_for_files(&fetched);
+                    store::apply_fetched(data_paths, fetched).map(|_| waiting)
+                }) {
+                    Ok(waiting) => {
+                        let feed = if waiting { None } else { fingerprint };
+                        state.sources.insert(kind.to_owned(), SourceCheck { checked_at: now, feed });
+                        CheckOutcome::Updated
+                    }
+                    Err(e) => failed(&mut state, kind, now, format!("{e:#}")),
+                }
             }
-            Err(e) => failed(&mut state, kind, now, format!("{e:#}")),
-        },
+        }
         Err(ApiError::RateLimited { until }) => {
             state.api.blocked_until = until;
             CheckOutcome::RateLimited { until }
@@ -222,6 +262,7 @@ pub fn check_source(data_paths: &DataPaths, remote: &dyn Remote, repo: Repositor
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::repos::Repository;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
@@ -238,7 +279,7 @@ pub(crate) mod tests {
         feed_calls: AtomicUsize,
         api_calls: AtomicUsize,
         /// Sources whose releases were asked, in order.
-        pub(crate) asked: Mutex<Vec<Repository>>,
+        pub(crate) asked: Mutex<Vec<Source>>,
     }
 
     impl Fake {
@@ -263,13 +304,13 @@ pub(crate) mod tests {
     }
 
     impl Remote for Fake {
-        fn feed(&self, _repo: Repository) -> Result<String> {
+        fn feed(&self, _source: &Source) -> Result<String> {
             self.feed_calls.fetch_add(1, Ordering::SeqCst);
             self.feed.lock().unwrap().clone().map_err(|e| anyhow::anyhow!(e))
         }
-        fn releases(&self, repo: Repository, _count: usize, _now: u64) -> ApiReply {
+        fn releases(&self, source: &Source, _count: usize, _now: u64) -> ApiReply {
             self.api_calls.fetch_add(1, Ordering::SeqCst);
-            self.asked.lock().unwrap().push(repo);
+            self.asked.lock().unwrap().push(source.clone());
             let mut replies = self.reply.lock().unwrap();
             let (result, budget) = if replies.is_empty() { (Ok("[]".into()), None) } else { replies.remove(0) };
             ApiReply { result, budget }
@@ -282,99 +323,108 @@ pub(crate) mod tests {
         (dir, paths)
     }
 
-    const DW_SOURCE: Repository = Repository::DwProton;
+    fn dw_source() -> Source {
+        Source::Builtin(Repository::DwProton)
+    }
 
     #[test]
     fn an_unchanged_feed_costs_no_api_call() {
         let (_d, paths) = setup();
+        let dw = dw_source();
         let gh = Fake::new(&feed("dwproton-11.0-14"));
         gh.answer(Ok(DW.into()), 50);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Auto, 1000), CheckOutcome::Updated);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Auto, 1000), CheckOutcome::Updated);
         assert!(store::read_releases(&paths).iter().any(|r| r.version == "dwproton-11.0-14" && r.downloadable()));
         assert_eq!(gh.api_calls(), 1);
 
         // Shown again soon: not even the feed is read.
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Auto, 2000), CheckOutcome::UpToDate);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Auto, 2000), CheckOutcome::UpToDate);
         assert_eq!(gh.feed_calls(), 1);
         // Later, or asked for: the feed is read and is the same.
         let later = 1000 + AUTO_EVERY.as_secs() + 1;
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Auto, later), CheckOutcome::UpToDate);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, later + 120), CheckOutcome::UpToDate);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Auto, later), CheckOutcome::UpToDate);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, later + 120), CheckOutcome::UpToDate);
         assert_eq!((gh.feed_calls(), gh.api_calls()), (3, 1));
         // The refresh button right after a check does nothing.
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, later + 130), CheckOutcome::UpToDate);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, later + 130), CheckOutcome::UpToDate);
         assert_eq!(gh.feed_calls(), 3);
 
         // Something was published: the API is asked.
         *gh.feed.lock().unwrap() = Ok(feed("dwproton-11.0-15"));
         gh.answer(Ok(DW.into()), 49);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, later + 400), CheckOutcome::Updated);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, later + 400), CheckOutcome::Updated);
         assert_eq!(gh.api_calls(), 2);
     }
 
     #[test]
     fn a_feed_that_cannot_be_read_falls_back_to_the_api() {
         let (_d, paths) = setup();
+        let dw = dw_source();
         let gh = Fake::new("");
         *gh.feed.lock().unwrap() = Err("HTTP 429".into());
         gh.answer(Ok(DW.into()), 50);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Auto, 1000), CheckOutcome::Updated);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Auto, 1000), CheckOutcome::Updated);
         // Without a fingerprint the next check asks the API again.
         gh.answer(Ok(DW.into()), 49);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 1100), CheckOutcome::Updated);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, 1100), CheckOutcome::Updated);
         assert_eq!(gh.api_calls(), 2);
     }
 
     #[test]
     fn a_spent_budget_blocks_every_call_until_the_reset() {
         let (_d, paths) = setup();
+        let dw = dw_source();
         let gh = Fake::new(&feed("a"));
         gh.answer(Err(ApiError::RateLimited { until: 5000 }), 0);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 1000), CheckOutcome::RateLimited { until: 5000 });
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, 1000), CheckOutcome::RateLimited { until: 5000 });
         // Persisted: a restart does not ask again.
         let state = CheckState::load(&paths.wine_release_checks());
         assert_eq!(state.api.blocked_until, 5000);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 1100), CheckOutcome::RateLimited { until: 5000 });
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, 1100), CheckOutcome::RateLimited { until: 5000 });
         assert_eq!(gh.api_calls(), 1);
         // After the reset it goes again.
         gh.answer(Ok(DW.into()), 59);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 5001), CheckOutcome::Updated);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, 5001), CheckOutcome::Updated);
     }
 
     #[test]
     fn automatic_checks_leave_a_reserve() {
         let (_d, paths) = setup();
+        let dw = dw_source();
+        let ge = Source::Builtin(Repository::ProtonGe);
         let gh = Fake::new(&feed("a"));
         gh.answer(Ok(DW.into()), AUTO_RESERVE);
-        assert_eq!(check_source(&paths, &gh, Repository::ProtonGe, CheckMode::Auto, 1000), CheckOutcome::Updated);
+        assert_eq!(check_source(&paths, &gh, &ge, CheckMode::Auto, 1000), CheckOutcome::Updated);
         // Another source, nothing cached: an automatic check waits for the reset...
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Auto, 1001), CheckOutcome::RateLimited { until: 5000 });
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Auto, 1001), CheckOutcome::RateLimited { until: 5000 });
         assert_eq!(gh.api_calls(), 1);
         // ...the user may still spend what is left.
         gh.answer(Ok(DW.into()), AUTO_RESERVE - 1);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 1002), CheckOutcome::Updated);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, 1002), CheckOutcome::Updated);
     }
 
     #[test]
     fn a_release_without_files_is_checked_again() {
         let (_d, paths) = setup();
+        let dw = dw_source();
         let gh = Fake::new(&feed("new"));
         let no_files = r#"[{"tag_name":"dwproton-11.0-15","published_at":"2026-10-12T10:00:00Z","assets":[]}]"#;
         gh.answer(Ok(no_files.into()), 50);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 1000), CheckOutcome::Updated);
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, 1000), CheckOutcome::Updated);
         gh.answer(Ok(DW.into()), 49);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 1100), CheckOutcome::Updated, "same feed, files still missing");
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, 1100), CheckOutcome::Updated, "same feed, files still missing");
         assert_eq!(gh.api_calls(), 2);
     }
 
     #[test]
     fn failures_keep_the_cache_and_are_reported() {
         let (_d, paths) = setup();
+        let dw = dw_source();
         let gh = Fake::new(&feed("a"));
         gh.answer(Err(ApiError::Other("HTTP 500".into())), 40);
-        assert_eq!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 1000), CheckOutcome::Failed("HTTP 500".into()));
+        assert_eq!(check_source(&paths, &gh, &dw, CheckMode::Manual, 1000), CheckOutcome::Failed("HTTP 500".into()));
         gh.answer(Ok("{\"message\":\"x\"}".into()), 39);
-        assert!(matches!(check_source(&paths, &gh, DW_SOURCE, CheckMode::Manual, 1100), CheckOutcome::Failed(_)));
+        assert!(matches!(check_source(&paths, &gh, &dw, CheckMode::Manual, 1100), CheckOutcome::Failed(_)));
         assert!(store::read_releases(&paths).is_empty());
     }
 }

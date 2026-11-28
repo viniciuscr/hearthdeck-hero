@@ -229,6 +229,10 @@ impl DataPaths {
     pub fn wine_release_checks(&self) -> PathBuf {
         self.j("store/wine-release-checks.json")
     }
+    /// Custom GitHub Proton sources added in the Wine Manager.
+    pub fn wine_sources(&self) -> PathBuf {
+        self.j("store/wine-sources.json")
+    }
     /// `store_cache/<name>.json`.
     pub fn store_cache(&self, name: &str) -> PathBuf {
         self.j("store_cache").join(format!("{name}.json"))

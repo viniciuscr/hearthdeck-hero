@@ -5,7 +5,7 @@
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use heronite_i18n::tr;
-use heronite_wine::{CheckMode, JobKind, Repository, WineVersionInfo};
+use heronite_wine::{CheckMode, JobKind, WineVersionInfo};
 
 use super::render::size_text;
 use super::WineManagerPage;
@@ -18,7 +18,7 @@ use crate::icons::Icon;
 
 impl WineManagerPage {
     fn console_versions(&self) -> Vec<WineVersionInfo> {
-        let kind = self.repo.kind();
+        let kind = self.source.kind();
         let q = self.console_query.to_lowercase();
         self.releases
             .iter()
@@ -118,6 +118,45 @@ impl WineManagerPage {
         self.layer.open(&osk, sub);
     }
 
+    fn open_console_add_source(&mut self, cx: &mut Context<Self>) {
+        let osk = cx.new(|_| Osk::new(tr!("Add GitHub Proton source"), ""));
+        let sub = cx.subscribe(&osk, |this, _, ev: &OskEvent, cx| {
+            if let OskEvent::Done(text) = ev {
+                let input = text.trim().to_string();
+                if !input.is_empty() {
+                    this.add_custom_source_quick(input, cx);
+                }
+            }
+            this.layer.close();
+            cx.notify();
+        });
+        self.layer.open(&osk, sub);
+    }
+
+    fn open_console_remove_source(&mut self, cx: &mut Context<Self>) {
+        if !self.source.is_custom() {
+            return;
+        }
+        let kind = self.source.kind().to_owned();
+        let msg = tr!("Remove {name}? Builds already installed stay on disk.", name = kind);
+        let sheet = cx.new(|_| {
+            Sheet::new(
+                kind.clone(),
+                Some(msg),
+                vec![Row::action("keep", tr!("Keep it")), Row::action("rm-src-yes", tr!("Remove")).icon(Icon::FaTrash).danger()],
+            )
+        });
+        let sub = cx.subscribe(&sheet, move |this, _, ev: &SheetEvent, cx| {
+            let SheetEvent::Activate(id) = ev;
+            this.layer.close();
+            if id.as_ref() == "rm-src-yes" {
+                this.remove_custom_source(kind.clone(), cx);
+            }
+            cx.notify();
+        });
+        self.layer.open(&sheet, sub);
+    }
+
     fn console_rows(&self) -> Vec<Row> {
         if self.show_prefixes {
             return self.console_prefix_rows();
@@ -128,7 +167,11 @@ impl WineManagerPage {
             Row::action("refresh", if self.checking() { tr!("Fetching releases\u{2026}") } else { tr!("Refresh the release list") })
                 .icon(Icon::Refresh)
                 .enabled(!self.checking() && !self.offline),
+            Row::action("add-source", tr!("Add source")).icon(Icon::Add).enabled(!self.offline),
         ];
+        if self.source.is_custom() {
+            rows.push(Row::action("remove-source", tr!("Remove source")).icon(Icon::FaTrash).danger());
+        }
         if !self.console_query.is_empty() {
             rows.push(
                 Row::action("clear-search", tr!("Search: \u{201c}{query}\u{201d}", query = self.console_query))
@@ -136,7 +179,7 @@ impl WineManagerPage {
                     .icon(Icon::FaSearch),
             );
         }
-        rows.push(Row::header(self.repo.kind()));
+        rows.push(Row::header(self.source.kind().to_owned()));
         for r in self.console_versions() {
             let job = self.job(&r.version);
             let state = match &job {
@@ -216,14 +259,13 @@ impl WineManagerPage {
 
     pub(super) fn render_console(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
         let rows = self.console_rows();
-        let offered = Repository::offered();
-        let tab = if self.show_prefixes { offered.len() } else { offered.iter().position(|r| *r == self.repo).unwrap_or(0) };
-        let mut tabs: Vec<SharedString> = offered.iter().map(|r| SharedString::from(r.kind())).collect();
+        let tab = if self.show_prefixes { self.sources.len() } else { self.sources.iter().position(|s| s == &self.source).unwrap_or(0) };
+        let mut tabs: Vec<SharedString> = self.sources.iter().map(|s| SharedString::from(s.kind().to_owned())).collect();
         tabs.push(tr!("Prefixes").into());
-        let about = if self.show_prefixes {
-            tr!("Where your games keep their Windows files and saves. A opens what can be done with a prefix; choose a game's prefix in its Wine settings.")
+        let about: String = if self.show_prefixes {
+            tr!("Where your games keep their Windows files and saves. A opens what can be done with a prefix; choose a game's prefix in its Wine settings.").to_owned()
         } else {
-            self.repo.explanation()
+            self.source.explanation()
         };
         let list = self.console_list.render_cards("console-wine", &rows, !self.layer.is_open());
         div()
@@ -261,28 +303,35 @@ impl PadTarget for WineManagerPage {
             cx.notify();
             return true;
         }
-        let offered = Repository::offered();
         // The sources, then the Prefixes view.
-        let tab = if self.show_prefixes { offered.len() } else { offered.iter().position(|r| *r == self.repo).unwrap_or(0) };
-        let n = offered.len() + 1;
+        let tab = if self.show_prefixes { self.sources.len() } else { self.sources.iter().position(|s| s == &self.source).unwrap_or(0) };
+        let n = self.sources.len() + 1;
         match pad {
             Pad::LB | Pad::RB => {
                 let next = if pad == Pad::RB { (tab + 1) % n } else { (tab + n - 1) % n };
-                match offered.get(next) {
-                    Some(repo) => self.select_source(*repo),
+                match self.sources.get(next).cloned() {
+                    Some(src) => self.select_source(src),
                     None => self.select_prefixes(cx),
                 }
                 self.console_list.reset();
             }
             Pad::Y => self.open_console_search(cx),
             Pad::X if self.show_prefixes => self.load_prefixes(cx),
-            Pad::X if !self.checking() && !self.offline => self.check(self.repo, CheckMode::Manual),
+            Pad::X if !self.checking() && !self.offline => {
+                let active = self.source.clone();
+                self.check(&active, CheckMode::Manual);
+            }
             _ => {
                 let rows = self.console_rows();
                 match self.console_list.on_pad(pad, &rows) {
                     Outcome::Changed(id, Value::Toggle(on)) if id.as_ref() == "steam" => self.set_download_to_steam(on, cx),
                     Outcome::Activate(id) => match id.as_ref() {
-                        "refresh" => self.check(self.repo, CheckMode::Manual),
+                        "refresh" => {
+                            let active = self.source.clone();
+                            self.check(&active, CheckMode::Manual);
+                        }
+                        "add-source" => self.open_console_add_source(cx),
+                        "remove-source" => self.open_console_remove_source(cx),
                         "pfx-new" => self.open_new_prefix(cx),
                         v if v.starts_with("pfx:") => {
                             if let Ok(i) = v[4..].parse::<usize>() {

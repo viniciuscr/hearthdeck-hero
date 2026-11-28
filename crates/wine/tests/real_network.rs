@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use heronite_data::DataPaths;
 use heronite_wine::checks::{self, CheckMode, CheckOutcome};
-use heronite_wine::{store, JobEvent, JobPhase, Repository, WineManager};
+use heronite_wine::{store, JobEvent, JobPhase, Repository, Source, WineManager};
 
 fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
@@ -23,7 +23,8 @@ fn refresh_install_remove_against_fixture() {
     let data_paths = DataPaths::at(&dir);
 
     for repo in [Repository::ProtonGe, Repository::ProtonCachyos] {
-        let outcome = checks::check_source(&data_paths, &checks::GitHub, repo, CheckMode::Manual, now());
+        let source = Source::Builtin(repo);
+        let outcome = checks::check_source(&data_paths, &checks::GitHub, &source, CheckMode::Manual, now());
         eprintln!("{}: {outcome:?}", repo.kind());
         assert!(matches!(outcome, CheckOutcome::Updated | CheckOutcome::UpToDate), "{outcome:?}");
     }
@@ -83,7 +84,8 @@ fn every_source_lists_builds_and_a_second_check_is_free() {
     let dir = tempfile::tempdir().unwrap();
     let data_paths = DataPaths::at(dir.path());
     for &repo in Repository::offered() {
-        let outcome = checks::check_source(&data_paths, &checks::GitHub, repo, CheckMode::Manual, now());
+        let source = Source::Builtin(repo);
+        let outcome = checks::check_source(&data_paths, &checks::GitHub, &source, CheckMode::Manual, now());
         let releases: Vec<_> =
             store::read_releases(&data_paths).into_iter().filter(|r| r.kind == repo.kind() && r.downloadable()).collect();
         eprintln!("{}: {outcome:?}, {} builds, newest {:?}", repo.kind(), releases.len(), releases.get(1).map(|r| &r.version));
@@ -94,7 +96,8 @@ fn every_source_lists_builds_and_a_second_check_is_free() {
     // (a spent budget would show up as RateLimited instead).
     let later = now() + 120;
     for &repo in Repository::offered() {
-        let outcome = checks::check_source(&data_paths, &checks::GitHub, repo, CheckMode::Manual, later);
+        let source = Source::Builtin(repo);
+        let outcome = checks::check_source(&data_paths, &checks::GitHub, &source, CheckMode::Manual, later);
         eprintln!("{} again: {outcome:?}", repo.kind());
         assert_eq!(outcome, CheckOutcome::UpToDate, "{}", repo.kind());
     }

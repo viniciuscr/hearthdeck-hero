@@ -7,9 +7,12 @@
 //! a plain `.tar.*` archive per release only needs a new row.
 
 use anyhow::{Context, Result};
+use heronite_data::DataPaths;
 use heronite_i18n::tr;
 use serde::Deserialize;
 
+use crate::custom::{self, CustomSource};
+use crate::install::is_safe_name;
 use crate::types::WineVersionInfo;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -24,6 +27,83 @@ pub enum Repository {
     Proton,
     /// Lutris Wine builds (not offered in the UI on Linux).
     WineLutris,
+}
+
+/// A release source in the Wine Manager: a built-in [`Repository`] or a
+/// user-added GitHub repository ([`CustomSource`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Source {
+    Builtin(Repository),
+    Custom(CustomSource),
+}
+
+impl From<Repository> for Source {
+    fn from(repo: Repository) -> Self {
+        Self::Builtin(repo)
+    }
+}
+
+impl Source {
+    /// Every source offered in the Wine Manager on this machine: built-ins
+    /// first, followed by saved custom GitHub sources.
+    pub fn offered(data_paths: &DataPaths) -> Vec<Source> {
+        let mut out: Vec<Source> = Repository::offered().iter().copied().map(Source::Builtin).collect();
+        out.extend(custom::read_custom_sources(data_paths).into_iter().map(Source::Custom));
+        out
+    }
+
+    /// Resolves a stored `type` name to a built-in or saved custom source.
+    pub fn from_kind(data_paths: &DataPaths, kind: &str) -> Option<Source> {
+        if let Some(repo) = Repository::from_kind(kind) {
+            return Some(Source::Builtin(repo));
+        }
+        custom::read_custom_sources(data_paths).into_iter().find(|c| c.kind == kind).map(Source::Custom)
+    }
+
+    pub fn kind(&self) -> &str {
+        match self {
+            Source::Builtin(r) => r.kind(),
+            Source::Custom(c) => &c.kind,
+        }
+    }
+
+    pub fn github(&self) -> &str {
+        match self {
+            Source::Builtin(r) => r.github(),
+            Source::Custom(c) => &c.github,
+        }
+    }
+
+    pub fn api_url(&self) -> String {
+        format!("https://api.github.com/repos/{}/releases", self.github())
+    }
+
+    pub fn feed_url(&self) -> String {
+        format!("https://github.com/{}/releases.atom", self.github())
+    }
+
+    pub fn is_custom(&self) -> bool {
+        matches!(self, Source::Custom(_))
+    }
+
+    /// Short description shown under the source name in the Wine Manager.
+    pub fn explanation(&self) -> String {
+        match self {
+            Source::Builtin(r) => r.explanation().to_owned(),
+            Source::Custom(c) => match &c.asset_filter {
+                Some(filter) => {
+                    let variant = filter.trim_end_matches(".tar").trim_matches(['-', '_']);
+                    format!("github.com/{} \u{b7} {variant}", c.github)
+                }
+                None => format!("github.com/{}", c.github),
+            },
+        }
+    }
+
+    /// Parses the GitHub releases JSON for this source.
+    pub fn parse_releases(&self, json: &str) -> Result<Vec<WineVersionInfo>> {
+        parse_releases_for_source(self, json, ARM)
+    }
 }
 
 /// Which file of a release is the build for this machine.
@@ -144,6 +224,11 @@ impl Repository {
         SPECS.iter().find(|s| s.repo == self).expect("every repository has a spec")
     }
 
+    /// Every built-in repository known to Heronite (including hidden ones).
+    pub(crate) fn all_known() -> [Repository; 8] {
+        SPECS.map(|s| s.repo)
+    }
+
     /// The sources the Wine Manager offers on this machine, in order (only
     /// the ones with builds for its architecture).
     pub fn offered() -> &'static [Repository] {
@@ -191,31 +276,53 @@ impl Repository {
 }
 
 #[derive(Deserialize)]
-struct GhRelease {
-    tag_name: String,
+pub(crate) struct GhRelease {
+    pub(crate) tag_name: String,
     #[serde(default)]
-    published_at: String,
+    pub(crate) published_at: String,
     #[serde(default)]
-    html_url: String,
+    pub(crate) html_url: String,
     #[serde(default)]
-    prerelease: bool,
+    pub(crate) prerelease: bool,
     #[serde(default)]
-    assets: Vec<GhAsset>,
+    pub(crate) assets: Vec<GhAsset>,
 }
 
 #[derive(Deserialize)]
-struct GhAsset {
-    name: String,
-    browser_download_url: String,
+pub(crate) struct GhAsset {
+    pub(crate) name: String,
+    pub(crate) browser_download_url: String,
     #[serde(default)]
-    size: u64,
+    pub(crate) size: u64,
 }
 
 fn version_name(kind: &str, tag: &str) -> String {
-    if kind.contains("Wine") {
+    if kind.starts_with("Wine-") || kind == "Wine" {
         format!("Wine-{tag}")
     } else {
         tag.to_owned()
+    }
+}
+
+fn source_version_name(source: &Source, tag: &str) -> String {
+    match source {
+        Source::Builtin(_) => version_name(source.kind(), tag),
+        Source::Custom(c) => {
+            // Prefix custom tags that do not already start with the source name
+            // so forks reusing built-in or generic tags never collide in
+            // `tools/proton` or `wine-downloader-info.json`.
+            let mut version = if tag.to_ascii_lowercase().starts_with(&c.kind.to_ascii_lowercase()) {
+                tag.to_owned()
+            } else {
+                format!("{}-{tag}", c.kind)
+            };
+            // Reserve the `-latest` suffix for the synthetic rolling entry
+            // inserted at index 0 (matched by `ends_with("-latest")` in store/auto).
+            if version.to_ascii_lowercase().ends_with("-latest") {
+                version.push_str("-build");
+            }
+            version
+        }
     }
 }
 
@@ -248,8 +355,7 @@ fn pick_archive<'a>(spec: &Spec, assets: &'a [GhAsset], arm: bool) -> Option<&'a
 
 /// The checksum published next to `archive`: `<archive>.sha512sum` or the
 /// archive name without its extension, SHA-512 or SHA-256.
-fn pick_checksum<'a>(spec: &Spec, assets: &'a [GhAsset], archive: &str) -> Option<&'a GhAsset> {
-    let stem = spec.archives.iter().find_map(|e| archive.strip_suffix(e)).unwrap_or(archive);
+fn pick_checksum<'a>(assets: &'a [GhAsset], archive: &str, stem: &str) -> Option<&'a GhAsset> {
     let names: Vec<String> =
         [archive, stem].iter().flat_map(|base| ["sha512sum", "sha256sum"].map(|ext| format!("{base}.{ext}"))).collect();
     names.iter().find_map(|n| assets.iter().find(|a| &a.name == n))
@@ -259,26 +365,41 @@ fn pick_checksum<'a>(spec: &Spec, assets: &'a [GhAsset], archive: &str) -> Optio
 /// as GitHub lists them) with the synthetic `<type>-latest` entry first: the
 /// newest plain build that is not a pre-release.
 pub fn parse_releases(repo: Repository, json: &str) -> Result<Vec<WineVersionInfo>> {
-    parse_releases_for(repo, json, ARM)
+    parse_releases_for_source(&Source::Builtin(repo), json, ARM)
 }
 
-fn parse_releases_for(repo: Repository, json: &str, arm: bool) -> Result<Vec<WineVersionInfo>> {
+pub(crate) fn parse_releases_for_source(source: &Source, json: &str, arm: bool) -> Result<Vec<WineVersionInfo>> {
     let list: Vec<GhRelease> = serde_json::from_str(json).context("unexpected GitHub releases response")?;
-    let spec = repo.spec();
+    let kind = source.kind();
     let mut releases = Vec::with_capacity(list.len() + 1);
     let mut stable = Vec::with_capacity(list.len());
     for r in list {
+        let version = source_version_name(source, &r.tag_name);
+        if source.is_custom() && !is_safe_name(&version) {
+            continue;
+        }
         let mut info = WineVersionInfo {
-            version: version_name(spec.kind, &r.tag_name),
-            kind: spec.kind.to_owned(),
+            version,
+            kind: kind.to_owned(),
             date: r.published_at.split('T').next().unwrap_or_default().to_owned(),
             release_notes_link: r.html_url,
             ..Default::default()
         };
-        if let Some(archive) = pick_archive(spec, &r.assets, arm) {
+        let picked = match source {
+            Source::Builtin(repo) => {
+                let spec = repo.spec();
+                pick_archive(spec, &r.assets, arm).map(|a| {
+                    let stem = spec.archives.iter().find_map(|e| a.name.strip_suffix(e)).unwrap_or(&a.name);
+                    (a, stem)
+                })
+            }
+            Source::Custom(c) => custom::pick_custom_archive(&r.assets, c.asset_filter.as_deref(), arm)
+                .map(|a| (a, custom::strip_custom_archive_ext(&a.name))),
+        };
+        if let Some((archive, stem)) = picked {
             info.download = Some(archive.browser_download_url.clone());
             info.downsize = Some(archive.size);
-            info.checksum = pick_checksum(spec, &r.assets, &archive.name).map(|a| a.browser_download_url.clone());
+            info.checksum = pick_checksum(&r.assets, &archive.name, stem).map(|a| a.browser_download_url.clone());
         }
         stable.push(!r.prerelease && info.download.is_some());
         releases.push(info);
@@ -300,6 +421,11 @@ fn parse_releases_for(repo: Repository, json: &str, arm: bool) -> Result<Vec<Win
         releases.insert(0, entry);
     }
     Ok(releases)
+}
+
+#[cfg(test)]
+fn parse_releases_for(repo: Repository, json: &str, arm: bool) -> Result<Vec<WineVersionInfo>> {
+    parse_releases_for_source(&Source::Builtin(repo), json, arm)
 }
 
 #[cfg(test)]
@@ -419,5 +545,38 @@ mod tests {
     fn wine_types_get_prefix() {
         assert_eq!(version_name("Wine-Lutris", "lutris-8"), "Wine-lutris-8");
         assert_eq!(version_name("GE-Proton", "GE-Proton9-1"), "GE-Proton9-1");
+        assert_eq!(version_name("Proton-Wineland", "wineland-11.0"), "wineland-11.0");
+    }
+
+    #[test]
+    fn custom_source_prefixes_tags_without_source_prefix() {
+        let src = Source::Custom(CustomSource { kind: "MyProton".into(), github: "user/my-proton".into(), asset_filter: None });
+        assert_eq!(source_version_name(&src, "v1.2.3"), "MyProton-v1.2.3");
+        assert_eq!(source_version_name(&src, "GE-Proton11-7"), "MyProton-GE-Proton11-7");
+        assert_eq!(source_version_name(&src, "MyProton-11.0"), "MyProton-11.0");
+        assert_eq!(source_version_name(&src, "myproton-11.0"), "myproton-11.0");
+        assert_eq!(source_version_name(&src, "latest"), "MyProton-latest-build");
+        assert_eq!(source_version_name(&src, "MyProton-latest"), "MyProton-latest-build");
+    }
+
+    #[test]
+    fn custom_release_tagged_latest_does_not_collide_with_synthetic_latest() {
+        let src = Source::Custom(CustomSource { kind: "MyFork".into(), github: "user/myfork".into(), asset_filter: None });
+        let json = r#"[{"tag_name":"latest","published_at":"2026-11-20T00:00:00Z","assets":[{"name":"myfork-x86_64.tar.xz","browser_download_url":"https://x/v1.tar.xz","size":10}]}]"#;
+        let mut first = parse_releases_for_source(&src, json, false).unwrap();
+        assert_eq!(first.len(), 2);
+        assert_eq!(first[0].version, "MyFork-latest");
+        assert_eq!(first[1].version, "MyFork-latest-build");
+
+        // Installed synthetic `-latest` survives a subsequent merge.
+        first[0].is_installed = Some(true);
+        first[0].install_dir = Some("/t/MyFork-latest".into());
+        let json2 = r#"[{"tag_name":"latest","published_at":"2026-11-25T00:00:00Z","assets":[{"name":"myfork-x86_64.tar.xz","browser_download_url":"https://x/v2.tar.xz","size":12}]}]"#;
+        let second = parse_releases_for_source(&src, json2, false).unwrap();
+        let merged = crate::store::merge_releases(first, second, |p| p == "/t/MyFork-latest");
+        let latest = merged.iter().find(|r| r.version == "MyFork-latest").unwrap();
+        assert!(latest.installed());
+        assert_eq!(latest.has_update, Some(true));
+        assert_eq!(merged.iter().filter(|r| r.version == "MyFork-latest").count(), 1);
     }
 }

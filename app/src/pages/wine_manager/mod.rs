@@ -11,6 +11,7 @@
 //! progress, an open removal confirmation, opens the GE-Proton or another source (`DW-Proton`),
 //! or runs a real install of `<version>` (use a fixture dir!) for screenshots.
 
+mod add_source;
 mod console;
 mod palette;
 mod prefixes;
@@ -23,7 +24,9 @@ use std::time::Duration;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
-use heronite_wine::{CheckMode, CheckOutcome, Job, JobEvent, JobKind, JobPhase, Repository, WineConfig, WineManager, WineVersionInfo};
+use heronite_wine::{
+    CheckMode, CheckOutcome, Job, JobEvent, JobKind, JobPhase, Repository, Source, WineConfig, WineManager, WineVersionInfo,
+};
 
 use super::{content_width, page_close, sheet, PageCtx, PageEvent};
 use crate::ui::fields;
@@ -31,10 +34,13 @@ use crate::ui::fields;
 pub struct WineManagerPage {
     ctx: PageCtx,
     manager: WineManager,
-    repo: Repository,
-    /// The Prefixes view is shown instead of the builds of `repo`.
+    /// Built-in and user-added sources, in display order.
+    sources: Vec<Source>,
+    source: Source,
+    /// The Prefixes view is shown instead of the builds of `source`.
     show_prefixes: bool,
     prefixes: prefixes::PrefixesState,
+    add_source: add_source::AddSourceState,
     releases: Vec<WineVersionInfo>,
     loaded: bool,
     search: Entity<InputState>,
@@ -56,8 +62,8 @@ pub struct WineManagerPage {
     poll_task: Option<Task<()>>,
     offline: bool,
     /// GitHub refused to list the releases of these sources until then (Unix
-    /// seconds), shown while their list is empty.
-    limited: HashMap<Repository, u64>,
+    /// seconds), keyed by source `kind`, shown while their list is empty.
+    limited: HashMap<String, u64>,
     /// Screenshot helper: fake jobs shown instead of real ones.
     fake: HashMap<String, Job>,
     /// Console mode: focused row, open sheet / keyboard, search text.
@@ -92,16 +98,39 @@ impl WineManagerPage {
 
         let debug = crate::env::value("HERONITE_DEBUG_WINE").unwrap_or_default();
         let debug_has = |k: &str| debug.split(',').any(|t| t == k);
+        let debug_source = debug.split(',').find_map(|t| t.strip_prefix("source=")).map(str::to_owned);
+        let sources: Vec<Source> = Repository::offered().iter().copied().map(Source::Builtin).collect();
+        let initial_repo = debug_source
+            .as_deref()
+            .and_then(Repository::from_kind)
+            .or(debug_has("ge").then_some(Repository::ProtonGe))
+            .unwrap_or(Repository::offered()[0]);
+        let mut add_source = add_source::AddSourceState::new(window, cx);
+        if debug_has("add-source") {
+            add_source.open = true;
+        }
+        let url_input = add_source.url.clone();
+        cx.subscribe_in(&url_input, window, |this, _, ev: &InputEvent, window, cx| match ev {
+            InputEvent::Change => {
+                if this.add_source.probing || this.add_source.probe.is_some() || this.add_source.error.is_some() {
+                    this.add_source.invalidate_probe();
+                    this.add_source.name.update(cx, |s, cx| s.set_value("", window, cx));
+                    cx.notify();
+                }
+            }
+            InputEvent::PressEnter { .. } => this.probe_custom_source(cx),
+            _ => {}
+        })
+        .detach();
+
         let mut this = Self {
             ctx,
             manager,
-            repo: debug
-                .split(',')
-                .find_map(|t| t.strip_prefix("source=").and_then(Repository::from_kind))
-                .or(debug_has("ge").then_some(Repository::ProtonGe))
-                .unwrap_or(Repository::offered()[0]),
+            sources,
+            source: Source::Builtin(initial_repo),
             show_prefixes: debug_has("prefixes"),
             prefixes: prefixes::PrefixesState::new(window, cx),
+            add_source,
             releases: Vec::new(),
             loaded: false,
             search,
@@ -123,7 +152,7 @@ impl WineManagerPage {
             palette_pending: None,
         };
         let auto_install = debug.split(',').find_map(|t| t.strip_prefix("install=")).map(str::to_owned);
-        this.init(debug_has("progress"), debug_has("confirm"), auto_install, cx);
+        this.init(debug_has("progress"), debug_has("confirm"), debug_source, auto_install, cx);
         if this.show_prefixes {
             this.load_prefixes(cx);
         }
@@ -165,13 +194,29 @@ impl WineManagerPage {
         }));
     }
 
-    /// Reads the cache off the UI thread, then checks the source on screen.
-    fn init(&mut self, fake_progress: bool, fake_confirm: bool, auto_install: Option<String>, cx: &mut Context<Self>) {
+    /// Reads the cache and saved custom sources off the UI thread, then checks the source on screen.
+    fn init(
+        &mut self,
+        fake_progress: bool,
+        fake_confirm: bool,
+        debug_source: Option<String>,
+        auto_install: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let data_paths = self.ctx.data_paths.clone();
         cx.spawn(async move |this, cx| {
-            let (releases, cfg) =
-                cx.background_spawn(async move { (heronite_wine::store::read_releases(&data_paths), WineConfig::load(&data_paths)) }).await;
+            let (sources, releases, cfg) = cx
+                .background_spawn(async move {
+                    (Source::offered(&data_paths), heronite_wine::store::read_releases(&data_paths), WineConfig::load(&data_paths))
+                })
+                .await;
             this.update(cx, |this, cx| {
+                this.sources = sources;
+                if let Some(wanted) = &debug_source {
+                    if let Some(found) = this.sources.iter().find(|s| s.kind() == wanted).cloned() {
+                        this.source = found;
+                    }
+                }
                 this.releases = releases;
                 this.loaded = true;
                 this.download_to_steam = cfg.download_proton_to_steam;
@@ -184,7 +229,8 @@ impl WineManagerPage {
                         this.manager.start_install(r.clone());
                     }
                 }
-                this.check(this.repo, CheckMode::Auto);
+                let active = this.source.clone();
+                this.check(&active, CheckMode::Auto);
                 this.run_palette_pending(cx);
                 cx.notify();
             })
@@ -193,39 +239,41 @@ impl WineManagerPage {
         .detach();
     }
 
-    /// Shows `repo` and checks it for new releases.
-    fn select_source(&mut self, repo: Repository) {
-        self.repo = repo;
+    /// Shows `source` and checks it for new releases.
+    fn select_source(&mut self, source: Source) {
+        self.source = source.clone();
         self.show_prefixes = false;
         self.confirm_remove = None;
-        self.check(repo, CheckMode::Auto);
+        self.add_source.confirm_remove = None;
+        self.check(&source, CheckMode::Auto);
     }
 
     /// Shows the prefixes, read again from disk.
     fn select_prefixes(&mut self, cx: &mut Context<Self>) {
         self.show_prefixes = true;
         self.confirm_remove = None;
+        self.add_source.open = false;
         self.load_prefixes(cx);
     }
 
-    /// Asks the manager to check `repo` (never when offline).
-    fn check(&mut self, repo: Repository, mode: CheckMode) {
+    /// Asks the manager to check `source` (never when offline).
+    fn check(&mut self, source: &Source, mode: CheckMode) {
         if !self.offline {
-            self.manager.start_check(repo, mode);
+            self.manager.start_check(source.clone(), mode);
         }
     }
 
     fn checking(&self) -> bool {
-        self.manager.checking(self.repo)
+        self.manager.checking(&self.source)
     }
 
     /// Why the list of the source on screen may stay empty.
     fn limited_until(&self) -> Option<u64> {
-        self.limited.get(&self.repo).copied()
+        self.limited.get(self.source.kind()).copied()
     }
 
     fn install_fakes(&mut self, confirm: bool) {
-        let kind = self.repo.kind();
+        let kind = self.source.kind();
         let mut candidates = self.releases.iter().filter(|r| r.kind == kind && r.downloadable() && !r.installed());
         if let Some(r) = candidates.next() {
             let total = r.downsize.unwrap_or(500_000_000);
@@ -288,18 +336,18 @@ impl WineManagerPage {
                     self.toast(format!("{version}: {first}"), true, cx);
                     reload = true;
                 }
-                JobEvent::Checked { repo, mode, outcome } => {
-                    let kind = repo.kind();
+                JobEvent::Checked { source, mode, outcome } => {
+                    let kind = source.kind();
                     let manual = mode == CheckMode::Manual;
                     if !matches!(outcome, CheckOutcome::RateLimited { .. }) {
-                        self.limited.remove(&repo);
+                        self.limited.remove(kind);
                     }
                     match outcome {
                         CheckOutcome::Updated => reload = true,
                         CheckOutcome::UpToDate if manual => self.toast(tr!("{kind} is up to date", kind), false, cx),
                         CheckOutcome::UpToDate => {}
                         CheckOutcome::RateLimited { until } => {
-                            self.limited.insert(repo, until);
+                            self.limited.insert(kind.to_owned(), until);
                             if manual {
                                 let time = local_time(until);
                                 self.toast(
@@ -362,7 +410,7 @@ impl WineManagerPage {
     }
 
     fn visible(&self) -> Vec<WineVersionInfo> {
-        let kind = self.repo.kind();
+        let kind = self.source.kind();
         self.releases
             .iter()
             .filter(|r| r.kind == kind && r.downloadable())
@@ -422,13 +470,15 @@ impl Render for WineManagerPage {
         let toolbar = self.render_toolbar(cx);
         let steam = self.render_steam_row(cx);
         let list = if self.show_prefixes { self.render_prefixes(cx) } else { self.render_list(cx) };
+        let add_panel = self.add_source.open.then(|| self.render_add_source(window, cx));
+        let content = div().flex().flex_col().gap(px(14.)).w_full().children(add_panel).child(list);
         // Wide: search, sources and the Steam switch in a side column, the
         // versions beside it. Narrow: all stacked, sources as tabs.
         let wide = content_width(window) >= 1100.;
         let column = if wide {
             let side =
                 div().flex().flex_col().flex_none().w(px(340.)).gap(px(14.)).child(toolbar).child(self.render_sources(cx)).child(steam);
-            div().flex().items_start().gap(px(24.)).w_full().child(side).child(div().flex_1().min_w_0().child(list))
+            div().flex().items_start().gap(px(24.)).w_full().child(side).child(div().flex_1().min_w_0().child(content))
         } else {
             div()
                 .flex()
@@ -436,9 +486,9 @@ impl Render for WineManagerPage {
                 .w_full()
                 .gap(px(14.))
                 .child(toolbar)
-                .child(div().flex().flex_col().child(self.render_tabs(cx)).when(!self.show_prefixes, |d| d.child(self.render_info())))
+                .child(div().flex().flex_col().child(self.render_tabs(cx)).when(!self.show_prefixes, |d| d.child(self.render_info(cx))))
                 .child(steam)
-                .child(list)
+                .child(content)
         };
         let close = page_close(cx);
         sheet(

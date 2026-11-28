@@ -4,7 +4,7 @@
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use heronite_i18n::tr;
-use heronite_wine::{CheckMode, Job, JobKind, JobPhase, Repository, WineVersionInfo};
+use heronite_wine::{CheckMode, Job, JobKind, JobPhase, WineVersionInfo};
 
 use super::WineManagerPage;
 use crate::icons::Icon;
@@ -96,7 +96,8 @@ impl WineManagerPage {
                     if this.show_prefixes {
                         this.load_prefixes(cx);
                     } else {
-                        this.check(this.repo, CheckMode::Manual);
+                        let active = this.source.clone();
+                        this.check(&active, CheckMode::Manual);
                     }
                     cx.notify();
                 }))
@@ -114,60 +115,134 @@ impl WineManagerPage {
 
     pub(super) fn render_tabs(&self, cx: &mut Context<Self>) -> Div {
         let this = cx.entity();
-        let mut items: Vec<(Option<Repository>, &'static str)> = Repository::offered().iter().map(|r| (Some(*r), r.kind())).collect();
-        items.push((None, tr!("Prefixes")));
-        let active = (!self.show_prefixes).then_some(self.repo);
-        tabs("wine-tab", &items, active, move |repo, _, cx| {
+        let mut items: Vec<(Option<usize>, SharedString)> =
+            self.sources.iter().enumerate().map(|(i, s)| (Some(i), SharedString::from(s.kind().to_owned()))).collect();
+        items.push((None, SharedString::from(tr!("Prefixes"))));
+        let active = if self.show_prefixes { None } else { self.sources.iter().position(|s| s == &self.source) };
+        let tab_bar = tabs("wine-tab", &items, active, move |pick, _, cx| {
             this.update(cx, |this, cx| {
-                match repo {
-                    Some(repo) => this.select_source(repo),
+                match pick {
+                    Some(i) => {
+                        if let Some(src) = this.sources.get(i).cloned() {
+                            this.select_source(src);
+                        }
+                    }
                     None => this.select_prefixes(cx),
                 }
                 cx.notify();
             });
-        })
+        });
+        div().flex().flex_wrap().items_center().gap(px(10.)).child(tab_bar).child(
+            button_sm("wine-add-source-narrow", ButtonKind::Glass, tr!("Add source")).on_click(cx.listener(|this, _, window, cx| {
+                this.open_add_source(window, cx);
+            })),
+        )
     }
 
     /// The repositories as a list (wide layout): name, what it offers and how
     /// many of its builds are installed; the selected one is tinted.
     pub(super) fn render_sources(&self, cx: &mut Context<Self>) -> Div {
         let mut list = card_box().py(px(8.)).px(px(8.)).gap(px(2.));
-        for (i, repo) in Repository::offered().iter().copied().enumerate() {
-            let active = !self.show_prefixes && repo == self.repo;
-            let installed: Vec<&WineVersionInfo> = self.releases.iter().filter(|r| r.kind == repo.kind() && r.installed()).collect();
+        for (i, src) in self.sources.iter().enumerate() {
+            let active = !self.show_prefixes && src == &self.source;
+            let kind = src.kind().to_owned();
+            let installed: Vec<&WineVersionInfo> = self.releases.iter().filter(|r| r.kind == kind && r.installed()).collect();
             let summary = match installed.len() {
                 0 => tr!("Nothing installed").to_string(),
                 n => tr!("{count} installed \u{b7} {size}", count = n, size = fmt_size(installed.iter().map(|r| r.disksize).sum())),
             };
-            list = list.child(
-                div()
-                    .id(SharedString::from(format!("wine-source-{i}")))
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.))
-                    .px(px(12.))
-                    .py(px(10.))
-                    .rounded(px(12.))
-                    .cursor_pointer()
-                    .when(active, |d| d.bg(theme::accent_tint()))
-                    .when(!active, |d| d.hover(|s| s.bg(theme::ink_a(0.05))))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_source(repo);
+            let confirming = self.add_source.confirm_remove.as_deref() == Some(kind.as_str());
+            let mut right = div().flex().items_center().gap(px(4.));
+            if active {
+                right = right.child(icon(Icon::Check, px(16.), theme::accent()));
+            }
+            if src.is_custom() && !confirming {
+                let k = kind.clone();
+                right = right.child(icon_action(SharedString::from(format!("wine-source-rm-{i}")), Icon::FaTrash, true).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.add_source.confirm_remove = Some(k.clone());
                         cx.notify();
-                    }))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(8.))
-                            .child(div().text_size(px(14.)).font_weight(theme::W_BOLD).text_color(theme::text_primary()).child(repo.kind()))
-                            .when(active, |d| d.child(icon(Icon::Check, px(16.), theme::accent()))),
-                    )
-                    .child(div().text_size(px(12.)).line_height(px(16.)).text_color(theme::text_dim()).child(repo.explanation()))
-                    .child(div().text_size(px(12.)).text_color(theme::text_muted()).child(summary)),
-            );
+                    }),
+                ));
+            }
+            let click_src = src.clone();
+            let row = div()
+                .id(SharedString::from(format!("wine-source-{i}")))
+                .flex()
+                .flex_col()
+                .gap(px(3.))
+                .px(px(12.))
+                .py(px(10.))
+                .rounded(px(12.))
+                .cursor_pointer()
+                .when(active, |d| d.bg(theme::accent_tint()))
+                .when(!active, |d| d.hover(|s| s.bg(theme::ink_a(0.05))))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.select_source(click_src.clone());
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(8.))
+                        .child(div().text_size(px(14.)).font_weight(theme::W_BOLD).text_color(theme::text_primary()).child(kind.clone()))
+                        .child(right),
+                )
+                .child(div().text_size(px(12.)).line_height(px(16.)).text_color(theme::text_dim()).child(src.explanation()))
+                .child(div().text_size(px(12.)).text_color(theme::text_muted()).child(summary));
+
+            let mut item = div().flex().flex_col().child(row);
+            if confirming {
+                let k = kind.clone();
+                item = item.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .px(px(12.))
+                        .pb(px(8.))
+                        .child(div().flex_1().text_size(px(12.)).text_color(theme::danger_text()).child(tr!("Remove source?")))
+                        .child(
+                            button_sm(SharedString::from(format!("wine-source-rm-yes-{i}")), ButtonKind::Danger, tr!("Remove")).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.remove_custom_source(k.clone(), cx);
+                                }),
+                            ),
+                        )
+                        .child(button_sm(SharedString::from(format!("wine-source-rm-no-{i}")), ButtonKind::Ghost, tr!("No")).on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.add_source.confirm_remove = None;
+                                cx.notify();
+                            }),
+                        )),
+                );
+            }
+            list = list.child(item);
         }
+
+        // "Add source" row at the bottom of the sources list.
+        list = list.child(
+            div()
+                .id("wine-source-add")
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .px(px(12.))
+                .py(px(9.))
+                .rounded(px(12.))
+                .cursor_pointer()
+                .when(self.add_source.open, |d| d.bg(theme::accent_tint()))
+                .when(!self.add_source.open, |d| d.hover(|s| s.bg(theme::ink_a(0.05))))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_add_source(window, cx);
+                }))
+                .child(icon(Icon::Add, px(16.), theme::accent()))
+                .child(div().text_size(px(13.)).font_weight(theme::W_BOLD).text_color(theme::accent()).child(tr!("Add source"))),
+        );
+
         let count = self.prefixes.list.as_ref().map(Vec::len);
         let summary = match count {
             Some(n) => tr!("{count} found", count = n),
@@ -231,9 +306,11 @@ impl WineManagerPage {
         .into_any_element()])
     }
 
-    /// What the selected repository offers.
-    pub(super) fn render_info(&self) -> Div {
-        div()
+    /// What the selected repository offers (narrow layout).
+    pub(super) fn render_info(&self, cx: &mut Context<Self>) -> Div {
+        let kind = self.source.kind().to_owned();
+        let confirming = self.add_source.confirm_remove.as_deref() == Some(kind.as_str());
+        let mut row = div()
             .flex()
             .items_center()
             .gap(px(10.))
@@ -242,7 +319,31 @@ impl WineManagerPage {
             .text_size(px(13.))
             .text_color(theme::text_muted())
             .child(icon(Icon::Check, px(16.), theme::success()))
-            .child(div().flex_1().min_w_0().child(self.repo.explanation()))
+            .child(div().flex_1().min_w_0().child(self.source.explanation()));
+        if self.source.is_custom() {
+            if confirming {
+                let k = kind.clone();
+                row = row
+                    .child(button_sm("wine-narrow-rm-yes", ButtonKind::Danger, tr!("Remove")).on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.remove_custom_source(k.clone(), cx);
+                        },
+                    )))
+                    .child(button_sm("wine-narrow-rm-no", ButtonKind::Ghost, tr!("No")).on_click(cx.listener(|this, _, _, cx| {
+                        this.add_source.confirm_remove = None;
+                        cx.notify();
+                    })));
+            } else {
+                let k = kind.clone();
+                row = row.child(button_sm("wine-narrow-rm", ButtonKind::Ghost, tr!("Remove")).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.add_source.confirm_remove = Some(k.clone());
+                        cx.notify();
+                    },
+                )));
+            }
+        }
+        row
     }
 
     pub(super) fn render_list(&self, cx: &mut Context<Self>) -> Div {

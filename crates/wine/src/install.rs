@@ -49,10 +49,10 @@ impl From<anyhow::Error> for InstallError {
 /// `downloadProtonToSteam` is on and the Steam path is valid.
 pub fn install_dir_for(data_paths: &DataPaths, cfg: &WineConfig, info: &WineVersionInfo) -> PathBuf {
     let tools = data_paths.tools_dir();
-    if info.kind.contains("Wine") {
+    if info.kind.starts_with("Wine-") || info.kind == "Wine" {
         return tools.join("wine");
     }
-    if info.kind.contains("Toolkit") {
+    if info.kind == "Toolkit" || info.kind.starts_with("Game-Porting-Toolkit") {
         return tools.join("game-porting-toolkit");
     }
     if cfg.download_proton_to_steam && !cfg.default_steam_path.is_empty() {
@@ -179,6 +179,10 @@ pub fn install_into(
             InstallError::Failed(m) => InstallError::Failed(tr!("Unzip of {file_name} failed with:\n {error}", file_name, error = m)),
         });
     }
+    if !tmp_dir.join("proton").exists() && !tmp_dir.join("bin/wine").exists() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return Err(InstallError::Failed(tr!("Archive {file_name} does not contain a Proton or Wine build", file_name)));
+    }
 
     // Swap in (old build moved to `_backup` first when updating).
     let backup = PathBuf::from(format!("{}_backup", install_sub_dir.display()));
@@ -216,7 +220,7 @@ pub fn install_into(
 }
 
 /// Versions become folder names: no separators or traversal.
-fn is_safe_name(name: &str) -> bool {
+pub(crate) fn is_safe_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains('/') && !name.contains('\0')
 }
 
@@ -603,13 +607,42 @@ mod tests {
         let mut cfg = WineConfig { default_steam_path: steam.to_string_lossy().into_owned(), ..Default::default() };
         let ge = WineVersionInfo { version: "GE-Proton9-1".into(), kind: "GE-Proton".into(), ..Default::default() };
         let lutris = WineVersionInfo { kind: "Wine-Lutris".into(), ..ge.clone() };
+        let wineland = WineVersionInfo { version: "wineland-11.0".into(), kind: "Proton-Wineland".into(), ..ge.clone() };
         assert_eq!(install_dir_for(&data_paths, &cfg, &ge), data_paths.tools_dir().join("proton"));
+        assert_eq!(install_dir_for(&data_paths, &cfg, &wineland), data_paths.tools_dir().join("proton"));
         assert_eq!(install_dir_for(&data_paths, &cfg, &lutris), data_paths.tools_dir().join("wine"));
         cfg.download_proton_to_steam = true;
         // invalid steam path (no steam.sh) falls back to the tools folder
         assert_eq!(install_dir_for(&data_paths, &cfg, &ge), data_paths.tools_dir().join("proton"));
         fs::write(steam.join("steam.sh"), "").unwrap();
         assert_eq!(install_dir_for(&data_paths, &cfg, &ge), steam.join("compatibilitytools.d"));
+        assert_eq!(install_dir_for(&data_paths, &cfg, &wineland), steam.join("compatibilitytools.d"));
+    }
+
+    #[test]
+    fn archive_without_proton_or_wine_binary_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src/not-a-proton");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("README.md"), "source code only").unwrap();
+        let out = tmp.path().join("src.tar.gz");
+        assert!(Command::new("tar")
+            .arg("-czf")
+            .arg(&out)
+            .arg("-C")
+            .arg(tmp.path().join("src"))
+            .arg("not-a-proton")
+            .status()
+            .unwrap()
+            .success());
+        let data = fs::read(out).unwrap();
+        let sum = sha512_hex(&data);
+        let base = serve(vec![("/src.tar.gz".into(), data.clone()), ("/src.tar.gz.sha512sum".into(), sum.into_bytes())], 0);
+        let info = info_for(&base, "src.tar.gz", &data);
+        let dest = tmp.path().join("tools/proton");
+        let err = install_into(&info, &dest, false, &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+        assert!(err.to_string().contains("does not contain a Proton or Wine build"), "{err}");
+        assert_eq!(fs::read_dir(&dest).unwrap().count(), 0);
     }
 
     /// A build whose folder cannot be emptied is reported and stays listed as installed.

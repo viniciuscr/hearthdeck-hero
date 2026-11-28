@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 
 use crate::checks::{self, CheckMode, CheckOutcome};
 use crate::install::{self, InstallError};
-use crate::repos::Repository;
+use crate::repos::Source;
 use crate::types::{Progress, WineConfig, WineVersionInfo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,9 +60,9 @@ pub enum JobEvent {
         version: String,
         message: String,
     },
-    /// The releases of `repo` were checked (see [`checks`]).
+    /// The releases of `source` were checked (see [`checks`]).
     Checked {
-        repo: Repository,
+        source: Source,
         mode: CheckMode,
         outcome: CheckOutcome,
     },
@@ -79,7 +79,7 @@ struct State {
     events: Vec<JobEvent>,
     /// Sources waiting to be checked, in order; the first one is being checked
     /// while `checking` is set.
-    checks: Vec<(Repository, CheckMode)>,
+    checks: Vec<(Source, CheckMode)>,
     checking: bool,
 }
 
@@ -128,9 +128,9 @@ impl WineManager {
         !s.jobs.is_empty() || s.checking
     }
 
-    /// `repo` is being checked or waits for its turn.
-    pub fn checking(&self, repo: Repository) -> bool {
-        self.inner.state.lock().checks.iter().any(|(r, _)| *r == repo)
+    /// `source` is being checked or waits for its turn.
+    pub fn checking(&self, source: &Source) -> bool {
+        self.inner.state.lock().checks.iter().any(|(r, _)| r == source)
     }
 
     /// Events since the last call.
@@ -233,19 +233,19 @@ impl WineManager {
             .is_ok()
     }
 
-    /// Checks the releases of `repo` in the background (one at a time, in
+    /// Checks the releases of `source` in the background (one at a time, in
     /// the order asked). Asking for a source already waiting does nothing,
     /// except that a manual request replaces an automatic one.
-    pub fn start_check(&self, repo: Repository, mode: CheckMode) {
+    pub fn start_check(&self, source: Source, mode: CheckMode) {
         let mut s = self.inner.state.lock();
-        if let Some(i) = s.checks.iter().position(|(r, _)| *r == repo) {
+        if let Some(i) = s.checks.iter().position(|(r, _)| r == &source) {
             // The first one is already running as it is.
             if i > 0 && mode == CheckMode::Manual {
                 s.checks[i].1 = mode;
             }
             return;
         }
-        s.checks.push((repo, mode));
+        s.checks.push((source, mode));
         if s.checking {
             return;
         }
@@ -254,11 +254,11 @@ impl WineManager {
         self.bump();
         let this = self.clone();
         let spawned = std::thread::Builder::new().name("wine-check".into()).spawn(move || loop {
-            let Some((repo, mode)) = this.inner.state.lock().checks.first().copied() else { break };
-            let outcome = checks::check_source(&this.inner.data_paths, &*this.inner.remote, repo, mode, now_secs());
+            let Some((source, mode)) = this.inner.state.lock().checks.first().cloned() else { break };
+            let outcome = checks::check_source(&this.inner.data_paths, &*this.inner.remote, &source, mode, now_secs());
             let mut s = this.inner.state.lock();
             s.checks.remove(0);
-            s.events.push(JobEvent::Checked { repo, mode, outcome });
+            s.events.push(JobEvent::Checked { source, mode, outcome });
             if s.checks.is_empty() {
                 s.checking = false;
                 drop(s);
@@ -285,6 +285,7 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
     use crate::checks::tests::Fake;
+    use crate::repos::Repository;
     use std::time::{Duration, Instant};
 
     fn wait_events(m: &WineManager, n: usize) -> Vec<JobEvent> {
@@ -304,22 +305,25 @@ mod tests {
         // Holds the first check until every request is queued.
         let gate = fake.feed.lock().unwrap();
         let m = WineManager::with_remote(DataPaths::at(dir.path()), fake.clone());
-        m.start_check(Repository::DwProton, CheckMode::Auto);
-        m.start_check(Repository::ProtonEm, CheckMode::Auto);
-        m.start_check(Repository::DwProton, CheckMode::Auto);
-        m.start_check(Repository::ProtonEm, CheckMode::Manual);
-        assert!(m.checking(Repository::ProtonEm) && !m.checking(Repository::ProtonGe));
+        let dw = Source::Builtin(Repository::DwProton);
+        let em = Source::Builtin(Repository::ProtonEm);
+        let ge = Source::Builtin(Repository::ProtonGe);
+        m.start_check(dw.clone(), CheckMode::Auto);
+        m.start_check(em.clone(), CheckMode::Auto);
+        m.start_check(dw.clone(), CheckMode::Auto);
+        m.start_check(em.clone(), CheckMode::Manual);
+        assert!(m.checking(&em) && !m.checking(&ge));
         drop(gate);
         let events = wait_events(&m, 2);
-        let done: Vec<(Repository, CheckMode)> = events
+        let done: Vec<(Source, CheckMode)> = events
             .iter()
             .filter_map(|e| match e {
-                JobEvent::Checked { repo, mode, .. } => Some((*repo, *mode)),
+                JobEvent::Checked { source, mode, .. } => Some((source.clone(), *mode)),
                 _ => None,
             })
             .collect();
-        assert_eq!(done, [(Repository::DwProton, CheckMode::Auto), (Repository::ProtonEm, CheckMode::Manual)]);
-        assert_eq!(*fake.asked.lock().unwrap(), [Repository::DwProton, Repository::ProtonEm]);
+        assert_eq!(done, [(dw.clone(), CheckMode::Auto), (em.clone(), CheckMode::Manual)]);
+        assert_eq!(*fake.asked.lock().unwrap(), [dw, em]);
         assert!(!m.has_active_jobs());
     }
 }

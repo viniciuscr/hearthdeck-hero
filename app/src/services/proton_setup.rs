@@ -114,17 +114,17 @@ async fn update_latest(entity: &Entity<ProtonSetup>, cx: &mut AsyncApp) -> Durat
     let p = paths.clone();
     let (on, sources) = cx
         .background_spawn(async move {
-            (WineConfig::load(&p).auto_update_latest, heronite_wine::auto::latest_sources(&heronite_wine::store::read_releases(&p)))
+            (WineConfig::load(&p).auto_update_latest, heronite_wine::auto::latest_sources(&p, &heronite_wine::store::read_releases(&p)))
         })
         .await;
     if !on || sources.is_empty() {
         return UPDATE_EVERY;
     }
     // Through the manager, in line with the Wine Manager's own checks.
-    for repo in &sources {
-        manager.start_check(*repo, CheckMode::Auto);
+    for source in &sources {
+        manager.start_check(source.clone(), CheckMode::Auto);
     }
-    while sources.iter().any(|r| manager.checking(*r)) {
+    while sources.iter().any(|s| manager.checking(s)) {
         cx.background_executor().timer(POLL).await;
     }
     let p = paths.clone();

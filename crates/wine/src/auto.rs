@@ -11,7 +11,7 @@
 use heronite_data::DataPaths;
 
 use crate::checks::{self, CheckMode, CheckOutcome, GitHub};
-use crate::repos::Repository;
+use crate::repos::{Repository, Source};
 use crate::store;
 use crate::types::WineVersionInfo;
 
@@ -29,7 +29,7 @@ pub fn newest_ge(releases: &[WineVersionInfo]) -> Option<&WineVersionInfo> {
 /// Blocking (network).
 pub fn latest_ge(data_paths: &DataPaths) -> Result<WineVersionInfo, String> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let outcome = checks::check_source(data_paths, &GitHub, Repository::ProtonGe, CheckMode::Auto, now);
+    let outcome = checks::check_source(data_paths, &GitHub, &Source::Builtin(Repository::ProtonGe), CheckMode::Auto, now);
     let releases = store::read_releases(data_paths);
     match (newest_ge(&releases), outcome) {
         (Some(info), _) => Ok(info.clone()),
@@ -45,15 +45,15 @@ fn installed_latest(r: &WineVersionInfo) -> bool {
 }
 
 /// The sources with an installed `-latest` build: the only ones the
-/// automatic update checks.
-pub fn latest_sources(releases: &[WineVersionInfo]) -> Vec<Repository> {
-    let mut repos = Vec::new();
-    for repo in releases.iter().filter(|r| installed_latest(r)).filter_map(|r| Repository::from_kind(&r.kind)) {
-        if !repos.contains(&repo) {
-            repos.push(repo);
+/// automatic update checks (including custom GitHub sources).
+pub fn latest_sources(data_paths: &DataPaths, releases: &[WineVersionInfo]) -> Vec<Source> {
+    let mut sources = Vec::new();
+    for source in releases.iter().filter(|r| installed_latest(r)).filter_map(|r| Source::from_kind(data_paths, &r.kind)) {
+        if !sources.contains(&source) {
+            sources.push(source);
         }
     }
-    repos
+    sources
 }
 
 /// The installed `-latest` builds with a new release to download.
@@ -104,14 +104,36 @@ mod tests {
         };
         let mut cachy = installed(rel("Proton-CachyOS-latest", "2026-10-20"), false);
         cachy.kind = "Proton-CachyOS".into();
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::at(dir.path());
+        crate::custom::add_custom_source(
+            &paths,
+            crate::custom::CustomSource { kind: "Proton-Wineland".into(), github: "nanomatters/proton-salkim".into(), asset_filter: None },
+            None,
+        )
+        .unwrap();
+        let mut custom = installed(rel("Proton-Wineland-latest", "2026-11-24"), false);
+        custom.kind = "Proton-Wineland".into();
         let list = [
             installed(rel("GE-Proton-latest", "2026-10-19"), true),
             cachy,
+            custom,
             // A numbered build never updates; a -latest one not installed is not followed.
             installed(rel("GE-Proton11-11", "2026-10-19"), true),
             rel("DW-Proton-latest", "2026-10-01"),
         ];
-        assert_eq!(latest_sources(&list), [Repository::ProtonGe, Repository::ProtonCachyos]);
+        assert_eq!(
+            latest_sources(&paths, &list),
+            [
+                Source::Builtin(Repository::ProtonGe),
+                Source::Builtin(Repository::ProtonCachyos),
+                Source::Custom(crate::custom::CustomSource {
+                    kind: "Proton-Wineland".into(),
+                    github: "nanomatters/proton-salkim".into(),
+                    asset_filter: None,
+                }),
+            ]
+        );
         let updates: Vec<_> = latest_updates(&list).into_iter().map(|r| r.version).collect();
         assert_eq!(updates, ["GE-Proton-latest"]);
     }
