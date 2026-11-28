@@ -298,6 +298,8 @@ pub struct CollectionView {
     /// Language the precomputed view models and the search placeholder were
     /// built in.
     lang: heronite_i18n::Lang,
+    /// Re-checks install presence (with a cooldown) when the window regains focus.
+    _health_activation: Subscription,
 }
 
 impl CollectionView {
@@ -399,6 +401,14 @@ impl CollectionView {
         if let Some(updater) = crate::services::update::get(cx) {
             cx.observe(&updater, |_, _, cx| cx.notify()).detach();
         }
+        // Background install-folder health checks (missing / incomplete / offline drive).
+        let health = crate::services::install_health(cx);
+        cx.subscribe(&health, |_, _, _: &crate::services::install_health::InstallHealthEvent, cx| cx.notify()).detach();
+        let health_activation = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() && this.playing.is_empty() && !crate::env::flag("HERONITE_DISABLE_IDLE_JOBS") {
+                this.scan_install_health(true, cx);
+            }
+        });
 
         let search_input = Self::new_search_input(window, cx);
         let view_menu = view_menu::ViewMenu::new(window, cx);
@@ -497,6 +507,7 @@ impl CollectionView {
             console: Default::default(),
             desktop_pad: Default::default(),
             lang: heronite_i18n::current(),
+            _health_activation: health_activation,
         };
         this.apply_start_view();
         window.focus(&this.focus_handle, cx);

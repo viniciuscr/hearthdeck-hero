@@ -61,6 +61,7 @@ impl CollectionView {
             .gap(px(10.))
             .min_w_0()
             .child(self.play_area(vm, epic, cx))
+            .children(self.install_health_card(&vm.key, cx))
             .child(self.focus_status_row(vm, vh, cx))
             .children(self.left_off_card(&vm.key, cx))
             .child(self.rating_row(&vm.key, cx))
@@ -169,6 +170,176 @@ impl CollectionView {
             (play, _) => play.map(IntoElement::into_any_element),
         };
         div().flex().flex_col().gap(px(8.)).children(play).children(epic_el).into_any_element()
+    }
+
+    /// Notice card shown below Play when the acting copy's install folder is
+    /// missing, incomplete, or sitting on a disconnected drive.
+    pub(super) fn install_health_card(&self, key: &SharedString, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use heronite_data::install_health::{InstallPresence, MissingReason};
+
+        let game = self.acting_copy(key)?;
+        if !game.installed {
+            return None;
+        }
+        let is_store = super::epic::is_store_runner(&game.runner) && game.store_installed();
+        let downloads = is_store.then(|| crate::services::try_downloads(cx)).flatten();
+        if let Some(svc) = downloads.as_ref().map(|s| s.read(cx)) {
+            if svc.busy_of(&game.app_name).is_some() || svc.queued(&game.app_name).is_some() {
+                return None;
+            }
+        }
+        let presence = crate::services::launch_blocker::game_presence(cx, &game);
+        if presence.is_present() {
+            return None;
+        }
+        let target_key = game.key.clone();
+        let third_party = downloads.as_ref().is_some_and(|s| s.read(cx).game_flags(&game.app_name).third_party);
+        let editable_sideload = game.runner == "sideload"
+            && !matches!(
+                game.launch_kind.as_deref(),
+                Some(
+                    "steam-uri"
+                        | "emulator"
+                        | heronite_data::launchers::LAUNCH_KIND
+                        | heronite_data::clients::LAUNCH_KIND
+                        | heronite_data::xbox::LAUNCH_KIND
+                )
+            );
+
+        let (ic, ic_color, title, body, border_tint): (Icon, Hsla, &'static str, String, Hsla) = match &presence {
+            InstallPresence::StorageUnavailable { mount_hint } => {
+                let body = match mount_hint {
+                    Some(p) => tr!("Reconnect {path} to play this game.", path = p.display().to_string()),
+                    None => tr!("Reconnect the drive where this game is installed.").to_string(),
+                };
+                (Icon::FaHardDrive, theme::accent().into(), tr!("Drive unavailable"), body, theme::accent_alpha(0.32).into())
+            }
+            InstallPresence::Missing(MissingReason::FolderGone) if is_store => (
+                Icon::Warning,
+                theme::readable(theme::warning()),
+                tr!("Folder not found"),
+                tr!("Locate the moved folder or remove it from installed games.").to_string(),
+                Rgba { a: 0.36, ..theme::warning() }.into(),
+            ),
+            InstallPresence::Missing(MissingReason::Incomplete) if is_store => (
+                Icon::Warning,
+                theme::readable(theme::warning()),
+                tr!("Game files missing"),
+                tr!("The folder exists, but the game's files were not found.").to_string(),
+                Rgba { a: 0.36, ..theme::warning() }.into(),
+            ),
+            InstallPresence::Missing(reason) => {
+                let (t, b) = match reason {
+                    MissingReason::RomGone => (tr!("ROM file not found"), tr!("The ROM file for this game could not be found.")),
+                    MissingReason::ExecutableGone => (tr!("Executable not found"), tr!("The game files could not be found on disk.")),
+                    _ => (tr!("Folder not found"), tr!("The game files could not be found on disk.")),
+                };
+                (Icon::Warning, theme::readable(theme::warning()), t, b.to_string(), Rgba { a: 0.36, ..theme::warning() }.into())
+            }
+            InstallPresence::Present => return None,
+        };
+
+        let pill = |id: &'static str, label: &'static str, accent: bool| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .h(px(26.))
+                .px(px(10.))
+                .rounded_full()
+                .cursor_pointer()
+                .text_size(px(12.))
+                .font_weight(theme::W_500)
+                .when(accent, |d| {
+                    d.bg(theme::accent_tint())
+                        .border_1()
+                        .border_color(theme::accent_tint_border())
+                        .text_color(theme::readable(theme::accent()))
+                        .hover(|s| s.bg(theme::accent_alpha(0.24)))
+                })
+                .when(!accent, |d| {
+                    d.bg(theme::ink_a(0.08))
+                        .text_color(theme::ink_a(0.86))
+                        .hover(|s| s.bg(theme::ink_a(0.15)).text_color(theme::text_bright()))
+                })
+                .child(label)
+        };
+
+        let mut actions = div().flex().flex_wrap().items_center().gap(px(6.)).mt(px(4.));
+        match presence {
+            InstallPresence::StorageUnavailable { .. } => {
+                actions = actions.child(pill("health-recheck", tr!("Check again"), true).on_click(cx.listener(|this, _, _, cx| {
+                    this.refresh_all(cx);
+                })));
+            }
+            InstallPresence::Missing(MissingReason::FolderGone) if is_store => {
+                let k1 = target_key.clone();
+                let k2 = target_key.clone();
+                actions = actions
+                    .child(pill("health-locate", tr!("Locate\u{2026}"), true).on_click(cx.listener(move |this, _, _, cx| {
+                        this.epic.pending = Some(super::epic::Request::FolderMissing(k1.clone()));
+                        cx.notify();
+                    })))
+                    .child(pill("health-forget", tr!("Remove"), false).on_click(cx.listener(move |this, _, _, cx| {
+                        this.epic.pending = Some(super::epic::Request::Forget(k2.clone()));
+                        cx.notify();
+                    })));
+            }
+            InstallPresence::Missing(MissingReason::Incomplete) if is_store => {
+                if !third_party {
+                    let kv = target_key.clone();
+                    actions = actions.child(pill("health-verify", tr!("Verify"), true).on_click(cx.listener(move |this, _, _, cx| {
+                        this.epic.pending = Some(super::epic::Request::Verify(kv.clone()));
+                        cx.notify();
+                    })));
+                }
+                let k1 = target_key.clone();
+                let k2 = target_key.clone();
+                actions = actions
+                    .child(pill("health-locate", tr!("Locate\u{2026}"), third_party).on_click(cx.listener(move |this, _, _, cx| {
+                        this.epic.pending = Some(super::epic::Request::Relocate(k1.clone()));
+                        cx.notify();
+                    })))
+                    .child(pill("health-forget", tr!("Remove"), false).on_click(cx.listener(move |this, _, _, cx| {
+                        this.epic.pending = Some(super::epic::Request::Forget(k2.clone()));
+                        cx.notify();
+                    })));
+            }
+            InstallPresence::Missing(_) => {
+                actions = actions.child(pill("health-recheck", tr!("Check again"), true).on_click(cx.listener(|this, _, _, cx| {
+                    this.refresh_all(cx);
+                })));
+                if editable_sideload {
+                    let ke = target_key.clone();
+                    actions =
+                        actions.child(pill("health-edit", tr!("Edit game"), false).on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_edit_game(&ke, window, cx);
+                        })));
+                }
+            }
+            InstallPresence::Present => return None,
+        }
+
+        Some(
+            panel(true)
+                .border_1()
+                .border_color(border_tint)
+                .gap(px(5.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(7.))
+                        .text_size(px(13.))
+                        .font_weight(theme::W_BOLD)
+                        .text_color(theme::text_bright())
+                        .child(icon(ic, px(14.), ic_color))
+                        .child(div().flex_1().min_w_0().truncate().child(title)),
+                )
+                .child(div().text_size(px(12.)).line_height(px(17.)).text_color(theme::ink_a(0.74)).child(body))
+                .child(actions)
+                .into_any_element(),
+        )
     }
 
     /// Status selector, favourite and game settings.

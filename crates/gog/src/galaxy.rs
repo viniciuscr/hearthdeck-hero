@@ -146,6 +146,13 @@ pub fn import_from(paths: &DataPaths, entries: &[Entry]) -> Result<Report> {
             continue;
         }
         installed::upsert(paths, &entry)?;
+        let _ = heronite_data::install_origins::record(
+            paths,
+            "gog",
+            &game.id,
+            heronite_data::install_origins::Origin::GogGalaxy,
+            &entry.install_path,
+        );
         library::sync_install_state(paths, &game.id, Path::new(&entry.install_path).file_name().and_then(|n| n.to_str()));
         // Galaxy ran the game's installers when it installed it.
         if let Err(e) = heronite_launch::native_setup::record(paths, "gog", &game.id, &entry.install_path) {
@@ -157,8 +164,20 @@ pub fn import_from(paths: &DataPaths, entries: &[Entry]) -> Result<Report> {
         }
     }
 
+    let mounts = heronite_data::install_health::Mounts::current();
+    let cache = heronite_data::install_health::MountCache::load(paths);
     for gone in current.iter().filter(|i| i.from_galaxy() && !games.iter().any(|g| g.id == i.app_name)) {
+        // Keep the entry when Galaxy still lists the game and its volume is simply unmounted.
+        let still_in_registry = entries.iter().any(|e| e.id == gone.app_name && !e.get("path").is_empty());
+        let key = format!("gog_{}", gone.app_name);
+        if still_in_registry
+            && !gone.install_path.is_empty()
+            && heronite_data::install_health::is_path_storage_unavailable(Path::new(&gone.install_path), cache.get(&key), &mounts)
+        {
+            continue;
+        }
         installed::remove(paths, &gone.app_name)?;
+        heronite_data::install_origins::forget(paths, "gog", &gone.app_name);
         crate::updates::forget(paths, &gone.app_name);
         heronite_launch::native_setup::forget(paths, "gog", &gone.app_name);
         library::sync_install_state(paths, &gone.app_name, None);

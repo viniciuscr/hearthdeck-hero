@@ -306,6 +306,11 @@ impl CollectionView {
         if self.epic_primary(game, cx) {
             return;
         }
+        if game.installed && matches!(launch_blocker(cx, game), Some(Blocker::StorageUnavailable(_))) {
+            self.epic.pending = Some(super::epic::Request::StorageUnavailable(game.key.clone()));
+            cx.notify();
+            return;
+        }
         if game.installed && self.start_emulated(game, cx) {
             return;
         }

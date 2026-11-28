@@ -247,6 +247,9 @@ impl CollectionView {
                 self.reveal_selected();
             }
         }
+        if !crate::env::flag("HERONITE_DISABLE_IDLE_JOBS") {
+            self.scan_install_health(false, cx);
+        }
         if first {
             log::info!("library on screen after {:?}", self.started.elapsed());
             self.apply_debug_env(cx);

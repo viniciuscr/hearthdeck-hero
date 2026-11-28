@@ -45,6 +45,7 @@ impl CollectionView {
         // The store's progress and Update of the copy Play acts on (`vm.installed` is its).
         let epic = self.epic_focus(&self.acting_key(&vm.key), vm.installed, cx);
         let play = self.play_area(&vm, epic, cx);
+        let health = self.install_health_card(&vm.key, cx);
         let status = self.focus_status_row(&vm, vh, cx);
         let left_off = self.left_off_card(&vm.key, cx);
         let numbers = self.drawer_numbers(&vm);
@@ -112,6 +113,7 @@ impl CollectionView {
                             .flex_col()
                             .gap(px(12.))
                             .child(play)
+                            .children(health)
                             .child(status)
                             .children(left_off)
                             .child(numbers)

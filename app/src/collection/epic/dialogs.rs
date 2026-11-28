@@ -286,6 +286,98 @@ impl CollectionView {
         self.open_dialog(view, cx);
     }
 
+    /// Play was pressed while the game's storage drive/mount is disconnected.
+    pub(super) fn epic_open_storage_unavailable(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(game) = self.epic_game(key) else { return };
+        let mount = match crate::services::launch_blocker::game_presence(cx, &game) {
+            heronite_data::install_health::InstallPresence::StorageUnavailable { mount_hint } => {
+                mount_hint.map(|p| p.display().to_string())
+            }
+            _ => None,
+        }
+        .or_else(|| game.game.install.install_path.clone().filter(|p| !p.is_empty()));
+        let message = match mount {
+            Some(path) => tr!(
+                "{title} is installed on a drive that is not currently connected ({path}).\nReconnect the drive and check again to play.",
+                title = game.title,
+                path = path
+            ),
+            None => tr!(
+                "{title} is installed on a drive that is not currently connected.\nReconnect the drive and check again to play.",
+                title = game.title
+            ),
+        };
+        let mut spec = Confirm::new("install-storage-unavailable", tr!("Drive unavailable"), message);
+        spec.confirm = Some(tr!("Check again").into());
+        let weak = cx.entity().downgrade();
+        let view = cx.new(|cx| {
+            EpicConfirmDialog::new(
+                spec,
+                move |_, cx| {
+                    weak.update(cx, |this, cx| this.refresh_all(cx)).ok();
+                },
+                window,
+                cx,
+            )
+        });
+        self.open_dialog(view, cx);
+    }
+
+    /// Play was pressed when a store game's folder still exists on disk
+    /// (e.g. leftover mods or logs) but the game's own files are gone.
+    pub(super) fn epic_open_incomplete(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(game) = self.epic_game(key) else { return };
+        if self.epic_busy_guard(cx, tr!("Verifying a game is not possible while an Epic game is being installed.")) {
+            return;
+        }
+        let current = game.game.install.install_path.clone().unwrap_or_default();
+        let third_party = self.epic_service(cx).read(cx).game_flags(&game.app_name).third_party;
+        let message = tr!(
+            "The install folder for {title} still exists at {path}, but the game's files were not found.\nIt may have been uninstalled outside Heronite with leftover files, or moved elsewhere.",
+            title = game.title,
+            path = current
+        );
+        let mut spec = Confirm::new("epic-files-incomplete", tr!("Game files missing"), message);
+        let (runner, app) = (game.runner.clone(), game.app_name.clone());
+        let (forget_runner, forget_app) = (runner.clone(), app.clone());
+        spec.secondary = Some((
+            tr!("Remove from installed games").into(),
+            Rc::new(move |cx: &mut App| {
+                let svc = crate::services::downloads(cx);
+                svc.update(cx, |s, cx| s.forget_install(&forget_runner, &forget_app, cx));
+            }),
+        ));
+        let store = Store::from_runner(&game.runner);
+        let weak = cx.entity().downgrade();
+        let key_owned = key.to_string();
+        spec.confirm = Some(if third_party { tr!("Locate folder\u{2026}") } else { tr!("Verify and repair") }.into());
+        let view = cx.new(|cx| {
+            EpicConfirmDialog::new(
+                spec,
+                move |_, cx| {
+                    if third_party {
+                        let k = key_owned.clone();
+                        weak.update(cx, |this, cx| {
+                            this.epic.pending = Some(Request::Relocate(k));
+                            cx.notify();
+                        })
+                        .ok();
+                        return;
+                    }
+                    let svc = crate::services::downloads(cx);
+                    let app = app.clone();
+                    svc.update(cx, |s, cx| match store {
+                        Some(store) => s.store_verify(store, &app, cx),
+                        None => s.verify(&app, cx),
+                    });
+                },
+                window,
+                cx,
+            )
+        });
+        self.open_dialog(view, cx);
+    }
+
     pub(super) fn epic_open_verify(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(game) = self.epic_game(key) else { return };
         if self.epic_busy_guard(cx, tr!("Verifying a game is not possible while an Epic game is being installed.")) {

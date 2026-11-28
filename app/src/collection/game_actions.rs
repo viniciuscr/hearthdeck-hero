@@ -213,8 +213,13 @@ impl CollectionView {
             )
         });
         if game.installed {
-            // A folder that is gone cannot be opened (the store actions offer to find it).
-            if !game.install_folder_missing() {
+            // A folder that is gone (or on a disconnected drive) cannot be opened.
+            let presence = crate::services::launch_blocker::game_presence(cx, game);
+            if !matches!(
+                presence,
+                heronite_data::install_health::InstallPresence::StorageUnavailable { .. }
+                    | heronite_data::install_health::InstallPresence::Missing(heronite_data::install_health::MissingReason::FolderGone)
+            ) {
                 v.push(item(
                     A::OpenFolder,
                     "folder",

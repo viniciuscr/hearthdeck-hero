@@ -1,0 +1,22 @@
+{
+  "Drive unavailable": "Unidade indisponível",
+  "Game files missing": "Arquivos do jogo ausentes",
+  "INCOMPLETE": "INCOMPLETO",
+  "Locate folder…": "Localizar pasta…",
+  "Locate the moved folder or remove it from installed games.": "Localize a pasta movida ou remova dos jogos instalados.",
+  "Locate…": "Localizar…",
+  "MISSING": "AUSENTE",
+  "OFFLINE": "OFFLINE",
+  "ROM file not found": "Arquivo ROM não encontrado",
+  "Reconnect the drive where this game is installed.": "Reconecte a unidade onde este jogo está instalado.",
+  "Reconnect {path} to play this game.": "Reconecte {path} para jogar este jogo.",
+  "The ROM file for this game could not be found.": "O arquivo ROM deste jogo não foi encontrado.",
+  "The drive holding {title} is not connected": "A unidade com {title} não está conectada",
+  "The folder exists, but the game's files were not found.": "A pasta existe, mas os arquivos do jogo não foram encontrados.",
+  "The game files could not be found on disk.": "Os arquivos do jogo não foram encontrados no disco.",
+  "The game files of {title} are missing": "Os arquivos de {title} estão ausentes",
+  "The game's files were not found": "Os arquivos do jogo não foram encontrados",
+  "The install folder for {title} still exists at {path}, but the game's files were not found.\nIt may have been uninstalled outside Heronite with leftover files, or moved elsewhere.": "A pasta de instalação de {title} ainda existe em {path}, mas os arquivos do jogo não foram encontrados.\nEle pode ter sido desinstalado fora do Heronite deixando arquivos residuais, ou movido para outro lugar.",
+  "{title} is installed on a drive that is not currently connected ({path}).\nReconnect the drive and check again to play.": "{title} está instalado em uma unidade que não está conectada no momento ({path}).\nReconecte a unidade e verifique novamente para jogar.",
+  "{title} is installed on a drive that is not currently connected.\nReconnect the drive and check again to play.": "{title} está instalado em uma unidade que não está conectada no momento.\nReconecte a unidade e verifique novamente para jogar."
+}

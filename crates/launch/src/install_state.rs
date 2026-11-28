@@ -3,7 +3,9 @@
 //! `sideload_apps/library.json` (and to the cached Steam library).
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
+use heronite_data::install_health::{is_path_storage_unavailable, MountCache, Mounts};
 use heronite_data::models::{CompletionStatus, GameInfo, InstallInfo, LocalGameMeta, LocalMetaFile};
 use heronite_data::steam_owned::SteamOwnedFile;
 use heronite_data::{json_store, DataPaths};
@@ -40,10 +42,35 @@ pub fn next_install_state(
     installed_steam: &HashSet<String>,
     steam_bin: Option<&str>,
 ) -> InstallState {
+    next_install_state_with_mounts(ctx, probe, game, meta, installed_steam, &HashSet::new(), false, steam_bin, None, None)
+}
+
+fn next_install_state_with_mounts(
+    ctx: &PlanContext,
+    probe: &dyn Probe,
+    game: &GameInfo,
+    meta: &LocalGameMeta,
+    installed_steam: &HashSet<String>,
+    unmounted_steam_apps: &HashSet<String>,
+    has_unmounted_steam_lib: bool,
+    steam_bin: Option<&str>,
+    mounts: Option<&Mounts>,
+    mount_cache: Option<&MountCache>,
+) -> InstallState {
     let local_exe = || first_existing(probe, &[meta.remapped_executable.as_deref(), game.install.executable.as_deref()]);
+    let key = format!("{}_{}", game.runner, game.app_name);
+    let offline = |raw: &str| {
+        mounts.is_some_and(|m| {
+            let p = Path::new(raw);
+            p.is_absolute() && is_path_storage_unavailable(p, mount_cache.and_then(|c| c.get(&key)), m)
+        })
+    };
 
     if meta.launch_kind == "steam-uri" {
-        let installed = meta.steam_app_id.as_deref().map(|id| installed_steam.contains(id)).unwrap_or(false);
+        let app_id = meta.steam_app_id.as_deref().unwrap_or("");
+        let in_manifests = !app_id.is_empty() && installed_steam.contains(app_id);
+        let on_offline_drive = game.is_installed && !in_manifests && (unmounted_steam_apps.contains(app_id) || has_unmounted_steam_lib);
+        let installed = in_manifests || on_offline_drive;
         return InstallState {
             is_installed: installed,
             executable: if installed { steam_bin.unwrap_or("steam").to_string() } else { String::new() },
@@ -51,33 +78,57 @@ pub fn next_install_state(
     }
 
     // Installed in the launcher, store client or Xbox app it came from (their
-    // sync says so; there is no executable), while its folder is there.
+    // sync says so; there is no executable), while its folder is there or on
+    // a temporarily unmounted volume.
     if matches!(
         meta.launch_kind.as_str(),
         heronite_data::launchers::LAUNCH_KIND | heronite_data::clients::LAUNCH_KIND | heronite_data::xbox::LAUNCH_KIND
     ) {
         let folder = game.install.install_path.as_deref().filter(|f| !f.is_empty());
-        return InstallState { is_installed: game.is_installed && folder.is_none_or(|f| probe.exists(f)), executable: String::new() };
+        let ok = folder.is_none_or(|f| probe.exists(f) || offline(f));
+        return InstallState { is_installed: game.is_installed && ok, executable: String::new() };
     }
 
     if meta.launch_kind == "emulator" {
         let executable = emulator_executable(ctx, meta).unwrap_or_else(local_exe);
-        let roms_ok = emulator_rom_installed(meta, probe);
+        let roms_offline = game.is_installed
+            && meta
+                .roms
+                .as_ref()
+                .is_some_and(|roms| roms.iter().any(|r| offline(&r.path)));
+        let roms_ok = emulator_rom_installed(meta, probe) || roms_offline;
         let exe_ok = if meta.emulator_id.as_deref().map(|s| !s.is_empty()).unwrap_or(false) && executable == "flatpak" {
-            // Flatpak is Linux's.
+            // Flatpak is Linux's; inside Heronite's own Flatpak sandbox `/var/lib/flatpak`
+            // is invisible, so never stat it directly here.
             !cfg!(windows)
         } else {
-            !executable.is_empty() && probe.exists(&executable)
+            !executable.is_empty() && (probe.exists(&executable) || (game.is_installed && offline(&executable)))
         };
         return InstallState { is_installed: exe_ok && roms_ok, executable: if exe_ok { executable } else { String::new() } };
     }
 
-    // Started by a command: installed while its folder is there.
+    // Started by a command: installed while its folder is there (or on an offline drive).
     if let Some((_, folder)) = heronite_data::sideload::command_of(game) {
-        return InstallState { is_installed: probe.exists(folder), executable: game.install.executable.clone().unwrap_or_default() };
+        let ok = probe.exists(folder) || (game.is_installed && offline(folder));
+        return InstallState { is_installed: ok, executable: game.install.executable.clone().unwrap_or_default() };
     }
     let executable = local_exe();
     if meta.launch_kind == "executable" || !executable.is_empty() {
+        if executable.is_empty() && game.is_installed {
+            let stored = meta.remapped_executable.as_deref().or(game.install.executable.as_deref()).unwrap_or("");
+            if !stored.is_empty() && offline(stored) {
+                return InstallState { is_installed: true, executable: stored.to_string() };
+            }
+            // Keep the stored executable path if there is no backup in
+            // `remapped_executable`, so reconnecting a drive or restoring the
+            // file can recover it.
+            let kept = if meta.remapped_executable.as_deref().is_some_and(|s| !s.is_empty()) {
+                String::new()
+            } else {
+                game.install.executable.clone().unwrap_or_default()
+            };
+            return InstallState { is_installed: false, executable: kept };
+        }
         return InstallState { is_installed: !executable.is_empty(), executable };
     }
     InstallState { is_installed: false, executable: String::new() }
@@ -150,15 +201,24 @@ fn new_steam_entries(
 
 /// Brings `installed` of the cached Steam library in line with the
 /// manifests (a game installed or uninstalled since the client was read),
-/// the games the Steam Family shares included. Whether the file changed.
-fn refresh_owned_installs(paths: &DataPaths, installed_steam: &HashSet<String>) -> anyhow::Result<bool> {
+/// the games the Steam Family shares included. Games belonging to an
+/// unmounted Steam library keep their installed flag. Whether the file changed.
+fn refresh_owned_installs(
+    paths: &DataPaths,
+    installed_steam: &HashSet<String>,
+    unmounted_apps: &HashSet<String>,
+    has_unmounted_lib: bool,
+) -> anyhow::Result<bool> {
     let file = SteamOwnedFile::read(paths);
-    if !file.games.iter().chain(&file.family).any(|g| g.installed != installed_steam.contains(&g.app_id)) {
+    let next_of = |g: &heronite_data::steam_owned::SteamOwnedGame| {
+        installed_steam.contains(&g.app_id) || (g.installed && (unmounted_apps.contains(&g.app_id) || has_unmounted_lib))
+    };
+    if !file.games.iter().chain(&file.family).any(|g| g.installed != next_of(g)) {
         return Ok(false);
     }
     json_store::update::<SteamOwnedFile, _>(&paths.steam_owned(), |f| {
         for g in f.games.iter_mut().chain(f.family.iter_mut()) {
-            g.installed = installed_steam.contains(&g.app_id);
+            g.installed = next_of(g);
         }
         Ok(())
     })?;
@@ -198,8 +258,11 @@ fn launch_kind_for_local_exe(existing: &str) -> &'static str {
 /// Blocking file I/O.
 pub fn refresh_local_install_states(paths: &DataPaths, probe: &dyn Probe) -> anyhow::Result<RefreshReport> {
     let ctx = PlanContext::load(paths);
+    let mounts = Mounts::current();
+    let mount_cache = MountCache::load(paths);
     let locator = SteamLocator::detect(&ctx.global, probe);
     let installed_steam = installed_app_ids(&locator);
+    let (has_unmounted_steam, unmounted_steam_apps) = locator.unmounted_library_apps(&mounts);
     let steam_bin = find_steam_binary(probe);
     let metas: LocalMetaFile = json_store::read(&paths.local_meta())?;
     let doc = json_store::read_value(&paths.sideload_library())?;
@@ -213,16 +276,36 @@ pub fn refresh_local_install_states(paths: &DataPaths, probe: &dyn Probe) -> any
     // `syncMetaExecutable`: the executable that was found goes to the meta.
     let mut meta_exes: HashMap<String, String> = HashMap::new();
     for game in &entries {
-        let Some(meta) = metas.games.get(&game.app_name) else { continue };
-        let next = next_install_state(&ctx, probe, game, meta, &installed_steam, steam_bin.as_deref());
-        if !next.executable.is_empty()
-            && Some(next.executable.as_str()) != meta.remapped_executable.as_deref()
-            && meta.launch_kind != "steam-uri"
-        {
-            meta_exes.insert(game.app_name.clone(), next.executable.clone());
-        }
-        if next.is_installed != game.is_installed || next.executable != game.install.executable.as_deref().unwrap_or("") {
-            states.insert(game.app_name.clone(), next);
+        if let Some(meta) = metas.games.get(&game.app_name) {
+            let next = next_install_state_with_mounts(
+                &ctx,
+                probe,
+                game,
+                meta,
+                &installed_steam,
+                &unmounted_steam_apps,
+                has_unmounted_steam,
+                steam_bin.as_deref(),
+                Some(&mounts),
+                Some(&mount_cache),
+            );
+            if !next.executable.is_empty()
+                && Some(next.executable.as_str()) != meta.remapped_executable.as_deref()
+                && meta.launch_kind != "steam-uri"
+            {
+                meta_exes.insert(game.app_name.clone(), next.executable.clone());
+            }
+            if next.is_installed != game.is_installed || next.executable != game.install.executable.as_deref().unwrap_or("") {
+                states.insert(game.app_name.clone(), next);
+            }
+        } else if game.is_installed && !game.install.platform.as_deref().is_some_and(|p| p.eq_ignore_ascii_case("browser")) {
+            // Sideload entry without Collection metadata: only flip true -> false when its absolute exe is gone.
+            if let Some(exe) = game.install.executable.as_deref().map(str::trim).filter(|e| !e.is_empty() && Path::new(e).is_absolute()) {
+                let key = format!("{}_{}", game.runner, game.app_name);
+                if !probe.exists(exe) && !is_path_storage_unavailable(Path::new(exe), mount_cache.get(&key), &mounts) {
+                    states.insert(game.app_name.clone(), InstallState { is_installed: false, executable: exe.to_string() });
+                }
+            }
         }
     }
 
@@ -234,7 +317,7 @@ pub fn refresh_local_install_states(paths: &DataPaths, probe: &dyn Probe) -> any
     }
     // The cache keeps mirroring the manifests (the entries that stay need it);
     // only adding games is turned off with Stores → Steam's switch.
-    let owned_changed = refresh_owned_installs(paths, &installed_steam)?;
+    let owned_changed = refresh_owned_installs(paths, &installed_steam, &unmounted_steam_apps, has_unmounted_steam)?;
     let mut new_steam = Vec::new();
     let mut installed_games = if heronite_data::settings::read_steam_library(paths) { list_installed_games(&locator) } else { Vec::new() };
     // Once the client was read, its list says what is a game: tools stay
@@ -562,5 +645,89 @@ mod tests {
         // On again: the installed game comes in.
         heronite_data::settings::save_read_steam_library(&paths, true).unwrap();
         assert_eq!(refresh_local_install_states(&paths, &probe).unwrap().added, 1);
+    }
+
+    #[test]
+    fn steam_game_on_unmounted_library_stays_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let steam = home.join(".steam/steam");
+        let steamapps = steam.join("steamapps");
+        std::fs::create_dir_all(&steamapps).unwrap();
+        // libraryfolders.vdf lists a secondary library on an unmounted path with app 400.
+        std::fs::write(
+            steamapps.join("libraryfolders.vdf"),
+            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/run/media/offline/SteamLibrary\"\n\t\t\"apps\"\n\t\t{\n\t\t\t\"400\"\t\t\"1000\"\n\t\t}\n\t}\n}\n",
+        )
+        .unwrap();
+        let probe = FakeProbe::new(home.to_str().unwrap()).with_steam_roots(vec![steam]);
+        let locator = SteamLocator::detect(&Default::default(), &probe);
+        let mounts = Mounts::from_entries(vec![heronite_data::install_health::MountPoint {
+            point: std::path::PathBuf::from("/"),
+            fs: "ext4".into(),
+            source: "/dev/root".into(),
+        }]);
+        let (unknown, apps) = locator.unmounted_library_apps(&mounts);
+        assert!(!unknown, "modern VDF with apps table does not trigger blanket fallback");
+        assert!(apps.contains("400"));
+
+        let mut g = game("/usr/bin/steam");
+        g.is_installed = true;
+        let m = LocalGameMeta { launch_kind: "steam-uri".into(), steam_app_id: Some("400".into()), ..Default::default() };
+        let next = next_install_state_with_mounts(
+            &ctx(),
+            &probe,
+            &g,
+            &m,
+            &HashSet::new(),
+            &apps,
+            unknown,
+            Some("/usr/bin/steam"),
+            Some(&mounts),
+            None,
+        );
+        assert!(next.is_installed, "unmounted Steam library must not flip the game to uninstalled");
+
+        // An unmounted library with an empty `apps {}` table must NOT prevent
+        // detecting uninstalls on mounted libraries.
+        std::fs::write(
+            steamapps.join("libraryfolders.vdf"),
+            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/run/media/offline/EmptySteamLib\"\n\t\t\"apps\"\n\t\t{\n\t\t}\n\t}\n}\n",
+        )
+        .unwrap();
+        let (unknown_empty, apps_empty) = locator.unmounted_library_apps(&mounts);
+        assert!(!unknown_empty);
+        assert!(apps_empty.is_empty());
+        let uninstalled = next_install_state_with_mounts(
+            &ctx(),
+            &probe,
+            &g,
+            &m,
+            &HashSet::new(),
+            &apps_empty,
+            unknown_empty,
+            Some("/usr/bin/steam"),
+            Some(&mounts),
+            None,
+        );
+        assert!(!uninstalled.is_installed, "empty unmounted apps table must not mask mounted uninstalls");
+    }
+
+    #[test]
+    fn executable_without_remapped_meta_uses_install_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("game.sh");
+        let exe_s = exe.to_string_lossy().into_owned();
+        let mut g = game(&exe_s);
+        g.is_installed = true;
+        let m = LocalGameMeta { launch_kind: "executable".into(), ..Default::default() };
+        let probe_present = FakeProbe::new(dir.path().to_str().unwrap()).with_path(&exe_s);
+        let state = next_install_state(&ctx(), &probe_present, &g, &m, &HashSet::new(), None);
+        assert!(state.is_installed);
+        assert_eq!(state.executable, exe_s);
+
+        let probe_gone = FakeProbe::new(dir.path().to_str().unwrap());
+        let after = next_install_state(&ctx(), &probe_gone, &g, &m, &HashSet::new(), None);
+        assert!(!after.is_installed);
     }
 }

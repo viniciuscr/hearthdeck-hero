@@ -1,0 +1,22 @@
+{
+  "Drive unavailable": "Lecteur indisponible",
+  "Game files missing": "Fichiers du jeu manquants",
+  "INCOMPLETE": "INCOMPLET",
+  "Locate folder…": "Localiser le dossier…",
+  "Locate the moved folder or remove it from installed games.": "Localisez le dossier déplacé ou retirez-le des jeux installés.",
+  "Locate…": "Localiser…",
+  "MISSING": "MANQUANT",
+  "OFFLINE": "HORS LIGNE",
+  "ROM file not found": "Fichier ROM introuvable",
+  "Reconnect the drive where this game is installed.": "Reconnectez le lecteur où ce jeu est installé.",
+  "Reconnect {path} to play this game.": "Reconnectez {path} pour jouer à ce jeu.",
+  "The ROM file for this game could not be found.": "Le fichier ROM de ce jeu est introuvable.",
+  "The drive holding {title} is not connected": "Le lecteur contenant {title} n'est pas connecté",
+  "The folder exists, but the game's files were not found.": "Le dossier existe, mais les fichiers du jeu sont introuvables.",
+  "The game files could not be found on disk.": "Les fichiers du jeu sont introuvables sur le disque.",
+  "The game files of {title} are missing": "Les fichiers de {title} sont manquants",
+  "The game's files were not found": "Les fichiers du jeu sont introuvables",
+  "The install folder for {title} still exists at {path}, but the game's files were not found.\nIt may have been uninstalled outside Heronite with leftover files, or moved elsewhere.": "Le dossier d'installation de {title} existe toujours dans {path}, mais les fichiers du jeu sont introuvables.\nIl a peut-être été désinstallé en dehors d'Heronite en laissant des fichiers résiduels, ou déplacé ailleurs.",
+  "{title} is installed on a drive that is not currently connected ({path}).\nReconnect the drive and check again to play.": "{title} est installé sur un lecteur qui n'est pas connecté actuellement ({path}).\nReconnectez le lecteur et vérifiez à nouveau pour jouer.",
+  "{title} is installed on a drive that is not currently connected.\nReconnect the drive and check again to play.": "{title} est installé sur un lecteur qui n'est pas connecté actuellement.\nReconnectez le lecteur et vérifiez à nouveau pour jouer."
+}

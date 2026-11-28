@@ -149,6 +149,7 @@ impl GogJob {
         entry.version_etag = details.version_etag.clone();
         entry.build_id = details.build_id.clone();
         installed::upsert(&self.paths, &entry)?;
+        heronite_data::install_origins::forget(&self.paths, "gog", &p.app_name);
         updates::forget(&self.paths, &p.app_name);
         library::sync_install_state(&self.paths, &p.app_name, Some(folder));
         Ok(true)
@@ -281,6 +282,7 @@ pub fn forget(paths: &DataPaths, app_name: &str) -> Result<()> {
     let _ = std::fs::remove_file(manifest_file(&config_dir, app_name));
     let _ = remove_tree(&support_dir(&config_dir, app_name));
     installed::remove(paths, app_name)?;
+    heronite_data::install_origins::forget(paths, "gog", app_name);
     updates::forget(paths, app_name);
     library::sync_install_state(paths, app_name, None);
     // Installed again, it is set up again at its first launch.

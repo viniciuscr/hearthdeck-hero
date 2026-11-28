@@ -378,6 +378,15 @@ impl LauncherImports {
         let paths = self.paths.clone();
         let removed = self.prefs.removed.get(&launcher).cloned().unwrap_or_default();
         let start_here = self.prefs.start_here.contains(&launcher);
+        // Skip games currently installing, updating, moving, verifying or running.
+        let active_apps: BTreeSet<String> = super::downloads_started(cx)
+            .map(|d| {
+                let d = d.read(cx);
+                let mut set: BTreeSet<String> = d.active_app_names();
+                set.extend(d.playing_app_names());
+                set
+            })
+            .unwrap_or_default();
         cx.spawn(async move |this, cx| {
             let res = cx
                 .background_spawn(async move {
@@ -386,19 +395,62 @@ impl LauncherImports {
                     if found.in_use {
                         return Err(heronite_i18n::tr!("Close {launcher} to bring its games in.", launcher = launcher.name()));
                     }
-                    let report = heronite_import::sync(&paths, &home(), &found, &removed, start_here).map_err(|e| format!("{e:#}"))?;
-                    Ok((report, found.count(), heronite_import::collection::counts(&paths)[&launcher]))
+                    let mut report = heronite_import::sync(&paths, &home(), &found, &removed, start_here).map_err(|e| format!("{e:#}"))?;
+                    // Reconcile Heroic store games that were uninstalled in Heroic.
+                    let mut store_reconciled = false;
+                    if let Some(heroic_lib) = &found.heroic {
+                        let mounts = heronite_data::install_health::Mounts::current();
+                        for (store, app) in heronite_import::heroic::gone_installs(&paths, heroic_lib, &mounts) {
+                            if active_apps.contains(&app) {
+                                continue;
+                            }
+                            let ok = match store {
+                                heronite_import::heroic::Store::Gog => match heronite_gog::ops::forget(&paths, &app) {
+                                    Ok(()) => true,
+                                    Err(err) => {
+                                        log::warn!("forgetting Heroic GOG game {app}: {err:#}");
+                                        false
+                                    }
+                                },
+                                heronite_import::heroic::Store::Amazon => match heronite_amazon::ops::forget(&paths, &app) {
+                                    Ok(()) => true,
+                                    Err(err) => {
+                                        log::warn!("forgetting Heroic Amazon game {app}: {err:#}");
+                                        false
+                                    }
+                                },
+                                heronite_import::heroic::Store::Epic => {
+                                    let r = heronite_epic::ops::forget(&paths, &app);
+                                    if !r.ok {
+                                        log::warn!("forgetting Heroic Epic game {app}: {}", r.message);
+                                    }
+                                    r.ok
+                                }
+                            };
+                            if ok {
+                                log::info!("Heroic uninstalled {} ({app}): marked as not installed", store.runner());
+                                report.updated += 1;
+                                store_reconciled = true;
+                            }
+                        }
+                    }
+                    Ok((report, found.count(), heronite_import::collection::counts(&paths)[&launcher], store_reconciled))
                 })
                 .await;
             this.update(cx, |this, cx| {
                 this.busy.remove(&launcher);
                 match res {
-                    Ok((report, games, in_collection)) => {
+                    Ok((report, games, in_collection, store_reconciled)) => {
                         this.errors.remove(&launcher);
                         let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                         this.prefs.last.insert(launcher, LastImport { at, games });
                         this.in_collection.insert(launcher, in_collection);
                         this.save(cx);
+                        if store_reconciled {
+                            if let Some(dl) = super::downloads_started(cx) {
+                                dl.update(cx, |d, cx| d.reload_local(cx));
+                            }
+                        }
                         if report.added > 0 || report.updated > 0 {
                             cx.emit(LauncherImportsEvent::Imported(launcher, report));
                         }

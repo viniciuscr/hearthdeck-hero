@@ -122,15 +122,15 @@ pub struct GameInfo {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallInfo {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "super::lenient::opt_string")]
     pub executable: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "super::lenient::opt_string")]
     pub platform: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "super::lenient::opt_bool")]
     pub is_dlc: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "super::lenient::opt_string")]
     pub install_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "super::lenient::opt_string")]
     pub install_size: Option<String>,
     #[serde(flatten)]
     pub rest: Extra,
@@ -176,7 +176,7 @@ pub struct InstalledGamesFile {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledGame {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "super::lenient::string")]
     pub app_name: String,
     #[serde(flatten)]
     pub info: InstallInfo,

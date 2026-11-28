@@ -3,7 +3,6 @@
 //! or deleted here; each store checks that the new folder holds the game.
 
 use gpui_kit::*;
-use heronite_amazon::cmd::Nile;
 use heronite_epic::cmd::Legendary;
 use heronite_epic::ops as epic_ops;
 use heronite_i18n::tr;
@@ -47,15 +46,18 @@ impl Downloads {
             tr!("Removing from the installed games"),
             false,
             cx,
-            move |paths, _, _| match runner.as_str() {
-                "gog" => heronite_gog::ops::forget(paths, &app).map_or_else(failed, |_| done(tr!("Removed from the installed games"))),
-                "nile" => Nile::locate(paths)
-                    .and_then(|n| heronite_amazon::ops::forget(paths, &n, &app))
-                    .map_or_else(failed, |_| done(tr!("Removed from the installed games"))),
-                _ => match Legendary::locate(paths) {
-                    Ok(lg) => epic_ops::force_uninstall(paths, &lg, &app),
-                    Err(err) => failed(err),
-                },
+            move |paths, _, _| {
+                let res = match runner.as_str() {
+                    "gog" => heronite_gog::ops::forget(paths, &app).map_or_else(failed, |_| done(tr!("Removed from the installed games"))),
+                    "nile" => {
+                        heronite_amazon::ops::forget(paths, &app).map_or_else(failed, |_| done(tr!("Removed from the installed games")))
+                    }
+                    _ => epic_ops::forget(paths, &app),
+                };
+                if res.ok {
+                    heronite_data::install_origins::forget(paths, &runner, &app);
+                }
+                res
             },
             |_, _, _| {},
         );

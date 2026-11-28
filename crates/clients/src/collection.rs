@@ -228,6 +228,50 @@ pub fn sync(paths: &DataPaths, client: Client, games: &[ClientGame]) -> Result<R
     Ok(report)
 }
 
+/// Marks a removed client's games in the Collection as not installed while
+/// leaving `ClientPrefs::removed` untouched and skipping any game whose
+/// install folder sits on a currently unmounted volume.
+pub fn mark_all_uninstalled(
+    paths: &DataPaths,
+    client: Client,
+    mounts: &heronite_data::install_health::Mounts,
+    mount_cache: &heronite_data::install_health::MountCache,
+) -> Result<Report> {
+    let metas: LocalMetaFile = json_store::read(&paths.local_meta())?;
+    let ours: HashSet<String> = metas.games.values().filter(|m| m.source == client.id()).map(|m| m.app_name.clone()).collect();
+    if ours.is_empty() {
+        return Ok(Report::default());
+    }
+    let mut updated = 0usize;
+    json_store::update_value_if_changed(&paths.sideload_library(), |doc| {
+        let Some(list) = doc.get_mut("games").and_then(Value::as_array_mut) else { return Ok(()) };
+        for item in list.iter_mut() {
+            let Some(obj) = item.as_object_mut() else { continue };
+            let Some(app) = obj.get("app_name").and_then(Value::as_str).map(str::to_owned) else { continue };
+            if !ours.contains(&app) || obj.get("is_installed") == Some(&json!(false)) {
+                continue;
+            }
+            let folder = obj.get("install").and_then(|i| i.get("install_path")).and_then(Value::as_str).filter(|s| !s.is_empty());
+            if let Some(folder) = folder {
+                let key = format!("sideload_{app}");
+                if heronite_data::install_health::is_path_storage_unavailable(std::path::Path::new(folder), mount_cache.get(&key), mounts) {
+                    continue;
+                }
+            }
+            obj.insert("is_installed".into(), json!(false));
+            updated += 1;
+        }
+        Ok(())
+    })?;
+    if updated > 0 {
+        json_store::update_if_changed::<ClientPrefs, _>(&paths.clients(), |prefs| {
+            prefs.last.insert(client, LastSync { at: now(), games: 0 });
+            Ok(())
+        })?;
+    }
+    Ok(Report { added: 0, updated })
+}
+
 /// RFC 3339, to the second.
 fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
@@ -447,5 +491,34 @@ mod tests {
         mark_removed(&paths, Client::Rockstar, "rockstar_gta5", &[]).unwrap();
         assert_eq!(json_store::mtime(&paths.clients()), before);
         assert!(ClientPrefs::load(&paths).removed[&Client::Rockstar].contains("rockstar_gta5"));
+    }
+
+    #[test]
+    fn mark_all_uninstalled_preserves_removed_and_skips_offline_drive() {
+        use heronite_data::install_health::{MountCache, MountPoint, Mounts};
+        use std::path::PathBuf;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::at(dir.path());
+        let local_game = ClientGame { id: "1".into(), title: "Local".into(), folder: Some(dir.path().join("local")), launch: "x".into() };
+        let offline_game =
+            ClientGame { id: "2".into(), title: "Offline".into(), folder: Some(PathBuf::from("/run/media/offline/Game")), launch: "y".into() };
+        sync(&paths, Client::Ea, &[local_game, offline_game]).unwrap();
+        mark_removed(&paths, Client::Ea, "ea_3", &[]).unwrap();
+
+        let mounts_online = Mounts::from_entries(vec![
+            MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() },
+            MountPoint { point: PathBuf::from("/run/media/offline"), fs: "ext4".into(), source: "/dev/sdb1".into() },
+        ]);
+        let mut cache = MountCache::default();
+        cache.observe("sideload_ea_2", std::path::Path::new("/run/media/offline/Game"), &mounts_online);
+        let mounts_offline = Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() }]);
+
+        let rep = mark_all_uninstalled(&paths, Client::Ea, &mounts_offline, &cache).unwrap();
+        assert_eq!(rep, Report { added: 0, updated: 1 });
+        let lib = Library::load(&paths).unwrap();
+        assert!(!lib.get("sideload_ea_1").unwrap().installed);
+        assert!(lib.get("sideload_ea_2").unwrap().installed, "offline drive game stays installed");
+        assert!(ClientPrefs::load(&paths).removed[&Client::Ea].contains("ea_3"), "removed list preserved");
     }
 }

@@ -185,6 +185,13 @@ pub fn import_all(paths: &DataPaths, nile: &Nile, db: &Path, cancel: &dyn Fn() -
 }
 
 fn remember(paths: &DataPaths, app_name: &str, folder: &str) -> Result<()> {
+    let _ = heronite_data::install_origins::record(
+        paths,
+        "nile",
+        app_name,
+        heronite_data::install_origins::Origin::AmazonApp,
+        folder,
+    );
     json_store::update_value(&paths.nile_store(STORE), |doc| {
         let obj = doc.as_object_mut().expect("object");
         let imported = obj.entry("imported").or_insert_with(|| json!({}));
@@ -216,6 +223,7 @@ pub fn is_from_app(paths: &DataPaths, app_name: &str) -> bool {
 /// Forgets that the game came from the app (it is no longer installed with
 /// nile).
 pub(crate) fn forget(paths: &DataPaths, app_name: &str) {
+    heronite_data::install_origins::forget(paths, "nile", app_name);
     if imported_folder(paths, app_name).is_none() {
         return;
     }
@@ -228,6 +236,61 @@ pub(crate) fn forget(paths: &DataPaths, app_name: &str) {
     if let Err(err) = res {
         log::warn!("{}: {err:#}", paths.nile_store(STORE).display());
     }
+}
+
+/// All `(app_name, folder)` entries remembered in `amazon_app.json`.
+fn remembered_all(paths: &DataPaths) -> Vec<(String, String)> {
+    let file = paths.nile_store(STORE);
+    let Ok(doc) = json_store::read_value(&file) else { return Vec::new() };
+    doc.get("imported")
+        .and_then(Value::as_object)
+        .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
+        .unwrap_or_default()
+}
+
+/// Forgets Amazon Games app-imported installs that the app no longer marks as
+/// installed and whose files are gone on a mounted volume. Returns how many
+/// were removed.
+pub fn reconcile_uninstalled(paths: &DataPaths) -> usize {
+    let Some(db) = database() else { return 0 };
+    reconcile_uninstalled_from(paths, &db, &heronite_data::install_health::Mounts::current())
+}
+
+pub fn reconcile_uninstalled_from(paths: &DataPaths, db: &Path, mounts: &heronite_data::install_health::Mounts) -> usize {
+    use heronite_data::install_health::{is_path_storage_unavailable, MountCache};
+
+    let Ok(present) = read_installs(db) else { return 0 };
+    let present_ids: std::collections::HashSet<&str> = present.iter().map(|g| g.id.as_str()).collect();
+    let cache = MountCache::load(paths);
+    let mut removed = 0;
+    for (id, folder) in remembered_all(paths) {
+        let Some(inst) = installed::get(paths, &id) else {
+            forget(paths, &id);
+            continue;
+        };
+        if !same_folder(&inst.path, &folder) {
+            forget(paths, &id);
+            continue;
+        }
+        if present_ids.contains(id.as_str()) {
+            continue;
+        }
+        let key = format!("nile_{id}");
+        if is_path_storage_unavailable(Path::new(&inst.path), cache.get(&key), mounts) {
+            continue;
+        }
+        if !Path::new(&inst.path).join("fuel.json").is_file() {
+            if let Err(err) = ops::forget(paths, &id) {
+                log::warn!("forgetting uninstalled Amazon app game {id}: {err:#}");
+            } else {
+                removed += 1;
+            }
+        }
+    }
+    if removed > 0 {
+        log::info!("Amazon Games app: {removed} uninstalled game(s) taken off the list");
+    }
+    removed
 }
 
 /// What the user is told after an uninstall that left the app's files alone.
@@ -384,5 +447,44 @@ mod tests {
         let err = ops::move_install(&env.paths, "amzn1.adg.product.AAA", &to, &crate::cmd::Cancel::new(), &mut |_| {}).unwrap_err();
         assert!(err.to_string().contains("Amazon Games app"), "{err}");
         assert!(Path::new(&cool).join("Game.exe").is_file());
+    }
+
+    #[test]
+    fn reconcile_uninstalled_forgets_removed_amazon_app_game_and_protects_offline() {
+        use heronite_data::install_health::{MountCache, MountPoint, Mounts};
+
+        let env = Env::new();
+        env.write_nile_file("library.json", LIBRARY);
+        let kept = game_folder(&env, "Cool Game");
+        let gone = env.root().join("games/Gone").to_string_lossy().into_owned();
+        let offline = "/run/media/offline/Third".to_string();
+        env.write_nile_file(
+            "installed.json",
+            &json!([
+                {"id": "amzn1.adg.product.AAA", "version": "1", "path": kept},
+                {"id": "amzn1.adg.product.BBB", "version": "1", "path": gone},
+                {"id": "amzn1.adg.product.CCC", "version": "1", "path": offline}
+            ])
+            .to_string(),
+        );
+        remember(&env.paths, "amzn1.adg.product.AAA", &kept).unwrap();
+        remember(&env.paths, "amzn1.adg.product.BBB", &gone).unwrap();
+        remember(&env.paths, "amzn1.adg.product.CCC", &offline).unwrap();
+        let mounts_online = Mounts::from_entries(vec![
+            MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() },
+            MountPoint { point: PathBuf::from("/run/media/offline"), fs: "ext4".into(), source: "/dev/sdb1".into() },
+        ]);
+        let mut cache = MountCache::default();
+        cache.observe("nile_amzn1.adg.product.CCC", Path::new(&offline), &mounts_online);
+        cache.save(&env.paths);
+
+        // App database marks AAA installed and BBB uninstalled (0).
+        let db = app_database(&env, &[("amzn1.adg.product.AAA", &kept, "Cool Game", 1), ("amzn1.adg.product.BBB", &gone, "Other Game", 0)]);
+        let mounts = Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() }]);
+
+        assert_eq!(reconcile_uninstalled_from(&env.paths, &db, &mounts), 1);
+        assert!(installed::get(&env.paths, "amzn1.adg.product.AAA").is_some());
+        assert!(installed::get(&env.paths, "amzn1.adg.product.BBB").is_none());
+        assert!(installed::get(&env.paths, "amzn1.adg.product.CCC").is_some());
     }
 }

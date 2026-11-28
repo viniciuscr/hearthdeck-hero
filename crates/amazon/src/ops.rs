@@ -196,7 +196,7 @@ pub fn uninstall(paths: &DataPaths, nile: &Nile, app_name: &str) -> Result<Optio
     let folder = installed::get(paths, app_name).map(|g| g.path).unwrap_or_default();
     // The Amazon Games app's files are its own to delete.
     if amazon_app::is_from_app(paths, app_name) {
-        forget(paths, nile, app_name)?;
+        forget(paths, app_name)?;
         return Ok(Some(amazon_app::kept_files_note(&folder)));
     }
     let out = nile.run(&["uninstall", app_name])?;
@@ -205,7 +205,7 @@ pub fn uninstall(paths: &DataPaths, nile: &Nile, app_name: &str) -> Result<Optio
         let why = error_text(&out);
         log::warn!("nile could not uninstall {app_name} ({why}): removing its entry");
         installed::remove(paths, app_name)?;
-        remove_manifest(nile, app_name);
+        remove_manifest(paths, app_name);
         let why = match why.lines().rev().find(|l| !l.trim().is_empty()) {
             Some(last) => last.trim().to_string(),
             None if !out.success() => exit_message(&out),
@@ -234,10 +234,11 @@ fn forget_setup(paths: &DataPaths, app_name: &str) {
 }
 
 /// Takes the game off the installed list (and drops nile's manifest of it)
-/// without touching any folder: for a folder deleted or moved by hand.
-pub fn forget(paths: &DataPaths, nile: &Nile, app_name: &str) -> Result<()> {
+/// without touching any folder or needing the `nile` binary: for a folder
+/// deleted or moved by hand, or a game uninstalled in another launcher.
+pub fn forget(paths: &DataPaths, app_name: &str) -> Result<()> {
     installed::remove(paths, app_name)?;
-    remove_manifest(nile, app_name);
+    remove_manifest(paths, app_name);
     if let Err(err) = library::write_library(paths) {
         log::warn!("rebuilding the Amazon library: {err:#}");
     }
@@ -247,9 +248,10 @@ pub fn forget(paths: &DataPaths, nile: &Nile, app_name: &str) -> Result<()> {
 }
 
 /// nile's copy of the installed manifest.
-fn remove_manifest(nile: &Nile, app_name: &str) {
+fn remove_manifest(paths: &DataPaths, app_name: &str) {
+    let data_dir = paths.nile_config_dir().join("nile");
     for ext in ["raw", "json"] {
-        let file = nile.data_dir().join("manifests").join(format!("{app_name}.{ext}"));
+        let file = data_dir.join("manifests").join(format!("{app_name}.{ext}"));
         if file.is_file() {
             if let Err(err) = std::fs::remove_file(&file) {
                 log::warn!("removing {}: {err}", file.display());

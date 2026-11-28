@@ -329,9 +329,15 @@ impl CollectionView {
             w if w.starts_with("version:") => {
                 self.ask_which_version(&w["version:".len()..], cx);
             }
-            // What Play shows for a store game whose folder is gone.
+            // What Play shows for a store game whose folder is gone, incomplete, or offline.
             w if w.starts_with("folder-missing:") => {
                 self.epic.pending = Some(super::epic::Request::FolderMissing(w["folder-missing:".len()..].to_string()));
+            }
+            w if w.starts_with("drive-offline:") => {
+                self.epic.pending = Some(super::epic::Request::StorageUnavailable(w["drive-offline:".len()..].to_string()));
+            }
+            w if w.starts_with("files-incomplete:") => {
+                self.epic.pending = Some(super::epic::Request::FilesIncomplete(w["files-incomplete:".len()..].to_string()));
             }
             w if w == "onboarding" || w.starts_with("onboarding:") => {
                 let step = w.strip_prefix("onboarding:").and_then(crate::dialogs::onboarding::Step::parse);

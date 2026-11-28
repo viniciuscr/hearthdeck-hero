@@ -1,0 +1,22 @@
+{
+  "Drive unavailable": "Unidad no disponible",
+  "Game files missing": "Faltan archivos del juego",
+  "INCOMPLETE": "INCOMPLETO",
+  "Locate folder…": "Ubicar carpeta…",
+  "Locate the moved folder or remove it from installed games.": "Ubica la carpeta movida o quítalo de los juegos instalados.",
+  "Locate…": "Ubicar…",
+  "MISSING": "FALTANTE",
+  "OFFLINE": "SIN CONEXIÓN",
+  "ROM file not found": "Archivo ROM no encontrado",
+  "Reconnect the drive where this game is installed.": "Vuelve a conectar la unidad donde está instalado este juego.",
+  "Reconnect {path} to play this game.": "Vuelve a conectar {path} para jugar a este juego.",
+  "The ROM file for this game could not be found.": "No se encontró el archivo ROM de este juego.",
+  "The drive holding {title} is not connected": "La unidad con {title} no está conectada",
+  "The folder exists, but the game's files were not found.": "La carpeta existe, pero no se encontraron los archivos del juego.",
+  "The game files could not be found on disk.": "No se encontraron los archivos del juego en el disco.",
+  "The game files of {title} are missing": "Faltan los archivos de {title}",
+  "The game's files were not found": "No se encontraron los archivos del juego",
+  "The install folder for {title} still exists at {path}, but the game's files were not found.\nIt may have been uninstalled outside Heronite with leftover files, or moved elsewhere.": "La carpeta de instalación de {title} todavía existe en {path}, pero no se encontraron los archivos del juego.\nPuede que se haya desinstalado fuera de Heronite dejando archivos residuales, o que se haya movido a otro lugar.",
+  "{title} is installed on a drive that is not currently connected ({path}).\nReconnect the drive and check again to play.": "{title} está instalado en una unidad que no está conectada en este momento ({path}).\nVuelve a conectar la unidad y comprueba de nuevo para jugar.",
+  "{title} is installed on a drive that is not currently connected.\nReconnect the drive and check again to play.": "{title} está instalado en una unidad que no está conectada en este momento.\nVuelve a conectar la unidad y comprueba de nuevo para jugar."
+}
