@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 
-use crate::repos::Repository;
+use crate::repos::Source;
 
 fn agent() -> &'static ureq::Agent {
     use std::sync::OnceLock;
@@ -104,18 +104,18 @@ fn api_outcome(status: u16, header: &dyn Fn(&str) -> Option<String>, body: Resul
     ApiReply { result, budget }
 }
 
-/// The newest `count` releases of `repo` (one API call).
-pub fn api_releases(repo: Repository, count: usize, now: u64) -> ApiReply {
-    let url = format!("{}?per_page={count}", repo.api_url());
+/// The newest `count` releases of `source` (one API call).
+pub fn api_releases(source: &Source, count: usize, now: u64) -> ApiReply {
+    let url = format!("{}?per_page={count}", source.api_url());
     match get(&url, "application/vnd.github+json", 4 * 1024 * 1024) {
         Ok(r) => api_outcome(r.status, &*r.header, r.body, now),
         Err(e) => ApiReply { result: Err(ApiError::Other(e.to_string())), budget: None },
     }
 }
 
-/// The release feed of `repo`.
-pub fn feed(repo: Repository) -> Result<String> {
-    let r = get(&repo.feed_url(), "application/atom+xml", 2 * 1024 * 1024)?;
+/// The release feed of `source`.
+pub fn feed(source: &Source) -> Result<String> {
+    let r = get(&source.feed_url(), "application/atom+xml", 2 * 1024 * 1024)?;
     match r.status {
         200..=299 => r.body,
         s => Err(anyhow!("HTTP {s}")),

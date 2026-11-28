@@ -79,7 +79,10 @@ pub fn merge_releases(
                         r.install_dir = old.install_dir.clone();
                         r.is_installed = old.is_installed;
                         r.disksize = old.disksize;
-                        if r.checksum != old.checksum || old.has_update == Some(true) {
+                        if r.checksum != old.checksum
+                            || (r.download.is_some() && r.download != old.download)
+                            || old.has_update == Some(true)
+                        {
                             r.has_update = Some(true);
                         }
                     }
@@ -127,6 +130,21 @@ pub fn mark_removed(data_paths: &DataPaths, version: &str) -> Result<()> {
     r.disksize = 0;
     r.has_update = Some(false);
     write_releases(data_paths, &list)
+}
+
+/// Drops non-installed cached releases of `kind` (used when removing a custom
+/// source; builds already installed on disk stay tracked).
+pub fn remove_uninstalled_kind(data_paths: &DataPaths, kind: &str) -> Result<()> {
+    if !has_key(data_paths) {
+        return Ok(());
+    }
+    let mut list = read_releases(data_paths);
+    let before = list.len();
+    list.retain(|r| r.kind != kind || r.installed());
+    if list.len() != before {
+        write_releases(data_paths, &list)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -187,6 +205,24 @@ mod tests {
         assert_eq!(latest.has_update, None);
         // Installed entry that GitHub no longer lists survives.
         assert!(merged.iter().any(|r| r.version == "GE-Proton11-4" && r.installed()));
+    }
+
+    #[test]
+    fn merge_flags_update_when_download_url_changes_without_checksums() {
+        let mut old_latest = installed(rel("MyFork-latest", "2026-10-01", ""), "/t/MyFork-latest");
+        old_latest.kind = "MyFork".into();
+        old_latest.checksum = None;
+        old_latest.download = Some("https://x/v1.tar.xz".into());
+
+        let mut new_latest = rel("MyFork-latest", "2026-11-01", "");
+        new_latest.kind = "MyFork".into();
+        new_latest.checksum = None;
+        new_latest.download = Some("https://x/v2.tar.xz".into());
+
+        let merged = merge_releases(vec![old_latest], vec![new_latest], |p| p == "/t/MyFork-latest");
+        let latest = merged.iter().find(|r| r.version == "MyFork-latest").unwrap();
+        assert_eq!(latest.has_update, Some(true));
+        assert_eq!(latest.download.as_deref(), Some("https://x/v2.tar.xz"));
     }
 
     #[test]

@@ -3,6 +3,7 @@
 
 pub mod auto;
 pub mod checks;
+pub mod custom;
 pub mod default;
 mod detect;
 pub mod github;
@@ -16,7 +17,8 @@ mod types;
 mod vdf;
 
 pub use checks::{CheckMode, CheckOutcome};
+pub use custom::{CustomSource, ProbeResult, ProbeVariant};
 pub use detect::{list_installations, list_installations_with, steam_libraries, DetectEnv};
 pub use manager::{Job, JobEvent, JobKind, JobPhase, WineManager};
-pub use repos::Repository;
+pub use repos::{Repository, Source};
 pub use types::{Progress, WineConfig, WineInstallation, WineVersionInfo};

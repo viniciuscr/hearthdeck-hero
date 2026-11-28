@@ -3,22 +3,26 @@
 
 use gpui_kit::*;
 use heronite_i18n::tr;
-use heronite_wine::{CheckMode, Repository, WineVersionInfo};
+use heronite_wine::{CheckMode, Repository, Source, WineVersionInfo};
 
 use super::WineManagerPage;
 use crate::icons::Icon;
 use crate::pages::commands::{CommandCtx, PageCommand, PaletteCommands};
 
 impl WineManagerPage {
-    /// The newest installable build of `repo`.
-    fn latest(&self, repo: Repository) -> Option<&WineVersionInfo> {
-        self.releases.iter().filter(|r| r.kind == repo.kind() && r.downloadable()).max_by(|a, b| a.date.cmp(&b.date))
+    /// The newest installable build of `source`.
+    fn latest(&self, source: &Source) -> Option<&WineVersionInfo> {
+        self.releases.iter().filter(|r| r.kind == source.kind() && r.downloadable()).max_by(|a, b| a.date.cmp(&b.date))
+    }
+
+    fn install_target(&self, id: &str) -> Option<Source> {
+        id.strip_prefix("install:").and_then(|k| self.sources.iter().find(|s| s.kind() == k).cloned())
     }
 
     /// Runs the command kept while the cache was read or its source checked.
     pub(super) fn run_palette_pending(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.palette_pending.clone() else { return };
-        if !self.loaded || install_target(&id).is_some_and(|repo| self.manager.checking(repo)) {
+        if !self.loaded || self.install_target(&id).is_some_and(|src| self.manager.checking(&src)) {
             return;
         }
         self.palette_pending = None;
@@ -28,24 +32,25 @@ impl WineManagerPage {
     /// `first`: not a retry after the source was checked.
     fn run_command(&mut self, id: &str, first: bool, cx: &mut Context<Self>) {
         if id == "refresh" {
-            self.check(self.repo, CheckMode::Manual);
-        } else if let Some(repo) = install_target(id) {
+            let active = self.source.clone();
+            self.check(&active, CheckMode::Manual);
+        } else if let Some(src) = self.install_target(id) {
             if !self.loaded {
                 self.palette_pending = Some(id.to_string());
                 return;
             }
-            if self.repo != repo {
-                self.select_source(repo);
+            if self.source != src {
+                self.select_source(src.clone());
             } else {
-                self.check(repo, CheckMode::Auto);
+                self.check(&src, CheckMode::Auto);
             }
-            match self.latest(repo).cloned() {
+            match self.latest(&src).cloned() {
                 Some(r) if r.installed() => self.toast(tr!("{version} is installed already", version = r.version), false, cx),
                 Some(r) => {
                     self.manager.start_install(r);
                 }
-                None if first && self.manager.checking(repo) => self.palette_pending = Some(id.to_string()),
-                None => self.toast(tr!("No {kind} release found: refresh the list", kind = repo.kind()), true, cx),
+                None if first && self.manager.checking(&src) => self.palette_pending = Some(id.to_string()),
+                None => self.toast(tr!("No {kind} release found: refresh the list", kind = src.kind()), true, cx),
             }
         }
         cx.notify();
@@ -63,8 +68,10 @@ impl PaletteCommands for WineManagerPage {
         )
         .keywords(tr!("proton wine runner update list"))
         .disabled(busy.then_some(tr!("Fetching releases already")))];
-        for &repo in Repository::offered() {
-            let kind = repo.kind();
+        let fallback: Vec<Source> = Repository::offered().iter().copied().map(Source::Builtin).collect();
+        let sources: &[Source] = page.map(|p| p.sources.as_slice()).unwrap_or(&fallback);
+        for src in sources {
+            let kind = src.kind();
             let mut c = PageCommand::new(
                 format!("install:{kind}"),
                 tr!("Install the latest {kind}", kind),
@@ -73,7 +80,7 @@ impl PaletteCommands for WineManagerPage {
             )
             .keywords(tr!("proton wine runner download compatibility"));
             if let Some(p) = page.filter(|p| p.loaded) {
-                match p.latest(repo) {
+                match p.latest(src) {
                     Some(r) if r.installed() => c = c.disabled(Some(tr!("{version} is installed", version = r.version))),
                     Some(r) if p.job(&r.version).is_some() => c = c.disabled(Some(tr!("Installing {version}", version = r.version))),
                     Some(r) => c.subtitle = format!("{} \u{b7} {}", r.version, r.date),
@@ -90,13 +97,8 @@ impl PaletteCommands for WineManagerPage {
     }
 
     fn close_modal(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let closed = self.confirm_remove.take().is_some() || self.prefixes.close_question();
+        let closed = self.confirm_remove.take().is_some() || self.add_source.close_modal() || self.prefixes.close_question();
         cx.notify();
         closed
     }
-}
-
-/// The source of an `install:<type>` command.
-fn install_target(id: &str) -> Option<Repository> {
-    id.strip_prefix("install:").and_then(|k| Repository::offered().iter().copied().find(|r| r.kind() == k))
 }
