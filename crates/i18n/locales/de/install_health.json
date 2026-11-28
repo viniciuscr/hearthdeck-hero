@@ -1,0 +1,22 @@
+{
+  "Drive unavailable": "Laufwerk nicht verfügbar",
+  "Game files missing": "Spieldateien fehlen",
+  "INCOMPLETE": "UNVOLLSTÄNDIG",
+  "Locate folder…": "Ordner suchen…",
+  "Locate the moved folder or remove it from installed games.": "Verschobenen Ordner suchen oder aus installierten Spielen entfernen.",
+  "Locate…": "Suchen…",
+  "MISSING": "FEHLT",
+  "OFFLINE": "OFFLINE",
+  "ROM file not found": "ROM-Datei nicht gefunden",
+  "Reconnect the drive where this game is installed.": "Schließe das Laufwerk wieder an, auf dem dieses Spiel installiert ist.",
+  "Reconnect {path} to play this game.": "Schließe {path} wieder an, um dieses Spiel zu spielen.",
+  "The ROM file for this game could not be found.": "Die ROM-Datei für dieses Spiel wurde nicht gefunden.",
+  "The drive holding {title} is not connected": "Das Laufwerk mit {title} ist nicht verbunden",
+  "The folder exists, but the game's files were not found.": "Der Ordner existiert, aber die Spieldateien wurden nicht gefunden.",
+  "The game files could not be found on disk.": "Die Spieldateien wurden auf dem Datenträger nicht gefunden.",
+  "The game files of {title} are missing": "Die Spieldateien von {title} fehlen",
+  "The game's files were not found": "Die Spieldateien wurden nicht gefunden",
+  "The install folder for {title} still exists at {path}, but the game's files were not found.\nIt may have been uninstalled outside Heronite with leftover files, or moved elsewhere.": "Der Installationsordner für {title} existiert noch unter {path}, aber die Spieldateien wurden nicht gefunden.\nEs wurde möglicherweise außerhalb von Heronite mit Restdateien deinstalliert oder an einen anderen Ort verschoben.",
+  "{title} is installed on a drive that is not currently connected ({path}).\nReconnect the drive and check again to play.": "{title} ist auf einem Laufwerk installiert, das derzeit nicht verbunden ist ({path}).\nSchließe das Laufwerk wieder an und prüfe erneut, um zu spielen.",
+  "{title} is installed on a drive that is not currently connected.\nReconnect the drive and check again to play.": "{title} ist auf einem Laufwerk installiert, das derzeit nicht verbunden ist.\nSchließe das Laufwerk wieder an und prüfe erneut, um zu spielen."
+}

@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use heronite_data::json_store;
+use heronite_data::models::lenient;
 use heronite_data::DataPaths;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -14,31 +15,31 @@ pub const GALAXY_KEY: &str = "galaxy";
 /// `extra` with whatever else the file holds.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Installed {
-    #[serde(rename = "appName", default)]
+    #[serde(rename = "appName", default, deserialize_with = "lenient::string")]
     pub app_name: String,
     /// `windows`, `linux` or `osx`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient::string")]
     pub platform: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient::string")]
     pub install_path: String,
     /// Text such as `1.5 GiB`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient::string")]
     pub install_size: String,
     /// gogdl's `versionName`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient::string")]
     pub version: String,
     /// Language code, e.g. `en-US`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient::string")]
     pub language: String,
-    #[serde(rename = "installedDLCs", default)]
+    #[serde(rename = "installedDLCs", default, deserialize_with = "lenient::vec_string")]
     pub installed_dlcs: Vec<String>,
     /// `ETag` of the build's manifest; compared by the update check.
-    #[serde(rename = "versionEtag", default)]
+    #[serde(rename = "versionEtag", default, deserialize_with = "lenient::string")]
     pub version_etag: String,
-    #[serde(rename = "buildId", default)]
+    #[serde(rename = "buildId", default, deserialize_with = "lenient::string")]
     pub build_id: String,
     /// Games pinned to a version are never offered updates.
-    #[serde(rename = "pinnedVersion", default)]
+    #[serde(rename = "pinnedVersion", default, deserialize_with = "lenient::bool_default")]
     pub pinned_version: bool,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -72,22 +73,34 @@ impl Installed {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct File {
-    #[serde(default)]
-    installed: Vec<Installed>,
-    #[serde(flatten)]
-    extra: Map<String, Value>,
+fn entry_app_name(v: &Value) -> Option<String> {
+    match v.get("appName")? {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
 }
 
 pub fn load(paths: &DataPaths) -> Vec<Installed> {
-    match json_store::read::<File>(&paths.gog_installed()) {
-        Ok(f) => f.installed,
+    let doc = match json_store::read_value(&paths.gog_installed()) {
+        Ok(v) => v,
         Err(err) => {
             log::warn!("reading installed GOG games: {err:#}");
-            Vec::new()
+            return Vec::new();
+        }
+    };
+    let Some(list) = doc.get("installed").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(list.len());
+    for item in list {
+        match serde_json::from_value::<Installed>(item.clone()) {
+            Ok(i) if !i.app_name.is_empty() => out.push(i),
+            Ok(_) => {}
+            Err(err) => log::warn!("skipping malformed GOG install entry: {err:#}"),
         }
     }
+    out
 }
 
 pub fn get(paths: &DataPaths, app_name: &str) -> Option<Installed> {
@@ -95,18 +108,29 @@ pub fn get(paths: &DataPaths, app_name: &str) -> Option<Installed> {
 }
 
 /// Adds the entry or replaces the one with the same app name (its unknown
-/// keys carry over unless the new entry sets them).
+/// keys carry over unless the new entry sets them). Operates on the raw JSON
+/// array so one malformed neighbor entry never blocks updating another game.
 pub fn upsert(paths: &DataPaths, entry: &Installed) -> Result<()> {
-    json_store::update::<File, _>(&paths.gog_installed(), |file| {
-        match file.installed.iter_mut().find(|i| i.app_name == entry.app_name) {
-            Some(old) => {
+    json_store::update_value(&paths.gog_installed(), |doc| {
+        if !doc.is_object() {
+            *doc = json!({});
+        }
+        let list = doc.as_object_mut().expect("object").entry("installed").or_insert_with(|| json!([]));
+        if !list.is_array() {
+            *list = json!([]);
+        }
+        let items = list.as_array_mut().expect("array");
+        match items.iter_mut().find(|i| entry_app_name(i).as_deref() == Some(entry.app_name.as_str())) {
+            Some(old_val) => {
                 let mut merged = entry.clone();
-                for (k, v) in std::mem::take(&mut old.extra) {
-                    merged.extra.entry(k).or_insert(v);
+                if let Ok(mut old) = serde_json::from_value::<Installed>(old_val.clone()) {
+                    for (k, v) in std::mem::take(&mut old.extra) {
+                        merged.extra.entry(k).or_insert(v);
+                    }
                 }
-                *old = merged;
+                *old_val = serde_json::to_value(&merged)?;
             }
-            None => file.installed.push(entry.clone()),
+            None => items.push(serde_json::to_value(entry)?),
         }
         Ok(())
     })
@@ -116,8 +140,10 @@ pub fn remove(paths: &DataPaths, app_name: &str) -> Result<()> {
     if !paths.gog_installed().exists() {
         return Ok(());
     }
-    json_store::update::<File, _>(&paths.gog_installed(), |file| {
-        file.installed.retain(|i| i.app_name != app_name);
+    json_store::update_value(&paths.gog_installed(), |doc| {
+        if let Some(items) = doc.get_mut("installed").and_then(Value::as_array_mut) {
+            items.retain(|i| entry_app_name(i).as_deref() != Some(app_name));
+        }
         Ok(())
     })
 }
@@ -168,5 +194,33 @@ mod tests {
         assert!(load(&paths).is_empty());
         remove(&paths, "x").unwrap();
         assert!(!paths.gog_installed().exists());
+    }
+
+    #[test]
+    fn heroic_numeric_and_null_fields_decode_and_remove_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::at(dir.path());
+        std::fs::create_dir_all(dir.path().join("gog_store")).unwrap();
+        std::fs::write(
+            paths.gog_installed(),
+            r#"{"installed":[
+                {"appName":"1207658924","platform":"windows","install_path":"/games/Witcher3","install_size":45000000,"version":404,"language":null,"installedDLCs":[123,{"id":456}],"versionEtag":null,"buildId":44535815,"pinnedVersion":null},
+                {"appName":999,"platform":"linux","install_path":"/games/Other","buildId":77}
+            ]}"#,
+        )
+        .unwrap();
+        let all = load(&paths);
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].build_id, "44535815");
+        assert_eq!(all[0].version, "404");
+        assert_eq!(all[0].install_size, "45000000");
+        assert_eq!(all[0].installed_dlcs, ["123", "456"]);
+        assert_eq!(all[1].app_name, "999");
+
+        remove(&paths, "1207658924").unwrap();
+        assert!(get(&paths, "1207658924").is_none());
+        assert_eq!(load(&paths).len(), 1);
+        remove(&paths, "999").unwrap();
+        assert!(load(&paths).is_empty());
     }
 }

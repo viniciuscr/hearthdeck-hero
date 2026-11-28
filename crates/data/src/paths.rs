@@ -76,6 +76,14 @@ impl DataPaths {
     pub fn launcher_imports(&self) -> PathBuf {
         self.j("local_library/launcher-imports.json")
     }
+    /// External origins of imported store installs (`install_origins`).
+    pub fn install_origins(&self) -> PathBuf {
+        self.j("local_library/install-origins.json")
+    }
+    /// Last seen mount points of installed games (`install_health::MountCache`).
+    pub fn install_mounts(&self) -> PathBuf {
+        self.j("local_library/install-mounts.json")
+    }
     /// The store clients' games synced into the Collection (`clients::ClientPrefs`).
     pub fn clients(&self) -> PathBuf {
         self.j("local_library/clients.json")

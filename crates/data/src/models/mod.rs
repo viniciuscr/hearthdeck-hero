@@ -10,6 +10,7 @@
 //!   does not model survive a read-modify-write.
 //! - Numbers use [`JsNum`] so integers are written without `.0`.
 
+pub mod lenient;
 mod overlay;
 mod settings;
 mod stores;

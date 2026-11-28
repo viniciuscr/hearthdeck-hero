@@ -202,13 +202,50 @@ struct Read {
 /// the Collection. Blocking: files only.
 fn read(paths: &DataPaths, clients: &[Client], sync: bool) -> Vec<(Client, Read)> {
     let statuses: Vec<(Client, Status)> = clients.iter().map(|&c| (c, heronite_clients::status(paths, c, &home()))).collect();
-    // Nothing is set up: no other file is read.
-    let any = statuses.iter().any(|(_, s)| s.installed());
-    let (prefs, counts) = if any { (ClientPrefs::load(paths), collection::counts(paths)) } else { Default::default() };
-    statuses
+    let prefs_initial = ClientPrefs::load(paths);
+    let any = statuses.iter().any(|(c, s)| s.installed() || prefs_initial.last.contains_key(c));
+    let (prefs, counts) = if any { (prefs_initial, collection::counts(paths)) } else { Default::default() };
+    let mounts = sync.then(heronite_data::install_health::Mounts::current);
+    let mut mount_cache = sync.then(|| heronite_data::install_health::MountCache::load(paths));
+    let out: Vec<(Client, Read)> = statuses
         .into_iter()
         .map(|(client, status)| {
-            let synced = (sync && status.installed()).then(|| collection::sync(paths, client, &status.games).map_err(|e| format!("{e:#}")));
+            let client_key = format!("client_{}", client.id());
+            if let (Some(m), Some(cache)) = (mounts.as_ref(), mount_cache.as_mut()) {
+                if status.installed() {
+                    if let Some(p) = status.prefix.as_deref().or(status.exe.as_deref()) {
+                        cache.observe(&client_key, p, m);
+                    }
+                }
+            }
+            let storage_offline = if let (Some(m), Some(cache)) = (mounts.as_ref(), mount_cache.as_ref()) {
+                let remembered = cache.get(&client_key);
+                let remembered_offline = remembered.is_some_and(|r| {
+                    let p = Path::new(&r.mount_point);
+                    p != Path::new("/") && !m.is_mounted(p)
+                });
+                remembered_offline
+                    || status
+                        .prefix
+                        .as_deref()
+                        .is_some_and(|p| heronite_data::install_health::is_path_storage_unavailable(p, remembered, m))
+            } else {
+                false
+            };
+            let client_removed = !status.installed()
+                && !storage_offline
+                && prefs.last.contains_key(&client)
+                && counts.get(&client).copied().unwrap_or(0) > 0;
+            let synced = if sync && status.installed() {
+                Some(collection::sync(paths, client, &status.games).map_err(|e| format!("{e:#}")))
+            } else if sync && client_removed {
+                match (mounts.as_ref(), mount_cache.as_ref()) {
+                    (Some(m), Some(cache)) => Some(collection::mark_all_uninstalled(paths, client, m, cache).map_err(|e| format!("{e:#}"))),
+                    _ => None,
+                }
+            } else {
+                None
+            };
             // Read after the sync, which records when it ran.
             let prefs = if matches!(synced, Some(Ok(_))) { ClientPrefs::load(paths) } else { prefs.clone() };
             // Only the clients under Wine get shortcuts from Heronite; one
@@ -224,7 +261,11 @@ fn read(paths: &DataPaths, clients: &[Client], sync: bool) -> Vec<(Client, Read)
             };
             (client, read)
         })
-        .collect()
+        .collect();
+    if let Some(cache) = mount_cache.as_mut() {
+        cache.save(paths);
+    }
+    out
 }
 
 impl Clients {
@@ -293,6 +334,12 @@ impl Clients {
         }
         self.state_mut(client).notice = None;
         self.refresh(&[client], true, cx);
+    }
+
+    /// Syncs every installed (or previously synced) client quietly, used by
+    /// the Collection's Refresh button.
+    pub fn sync_all(&mut self, cx: &mut Context<Self>) {
+        self.refresh(&Client::ALL, true, cx);
     }
 
     /// A client page came on screen or went away: the client is asked

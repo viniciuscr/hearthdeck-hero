@@ -44,6 +44,9 @@ pub fn refresh(paths: &DataPaths, nile: &Nile) -> Result<usize> {
         }
         bail!(tr!("Failed to sync the Amazon Games library: {error}", error = why));
     }
+    if cfg!(windows) {
+        crate::amazon_app::reconcile_uninstalled(paths);
+    }
     write_library(paths)
 }
 

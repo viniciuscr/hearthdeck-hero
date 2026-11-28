@@ -269,12 +269,37 @@ impl Downloads {
                         autoupdate::Gates::default()
                     };
                     let plan = autoupdate::plan(&gates, &candidates);
-                    // An operation that just ended may have uninstalled the game.
+                    // An operation that just ended may have uninstalled the game,
+                    // or the game's folder/drive may be missing or offline.
+                    let mounts = heronite_data::install_health::Mounts::current();
+                    let mount_cache = heronite_data::install_health::MountCache::load(&data_paths);
                     let entries: Vec<Value> = plan
                         .queue
                         .iter()
                         .filter_map(|app| any_library_entry(&data_paths, app))
                         .filter(|e| e.get("is_installed").and_then(Value::as_bool) != Some(false))
+                        .filter(|e| {
+                            let Some(path) = e.pointer("/install/install_path").and_then(Value::as_str).filter(|p| !p.trim().is_empty())
+                            else {
+                                return true;
+                            };
+                            let runner = e.get("runner").and_then(Value::as_str).unwrap_or("");
+                            let app = e.get("app_name").and_then(Value::as_str).unwrap_or("");
+                            let key = format!("{runner}_{app}");
+                            let p = std::path::Path::new(path);
+                            if !heronite_data::install_health::check_path(
+                                p,
+                                mount_cache.get(&key),
+                                &mounts,
+                                heronite_data::install_health::MissingReason::FolderGone,
+                            )
+                            .is_present()
+                            {
+                                log::info!("epic: skipping auto-update of {app} (folder missing or drive offline)");
+                                return false;
+                            }
+                            true
+                        })
                         .collect();
                     (plan, entries)
                 })

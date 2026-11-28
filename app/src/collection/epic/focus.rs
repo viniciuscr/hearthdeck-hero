@@ -38,7 +38,8 @@ impl CollectionView {
         let active = s.busy_of(&app).cloned();
         let queue = s.queue_state(&app);
         let progress = s.progress_of(&app).cloned();
-        let update = installed && s.has_update(&app);
+        let healthy = crate::services::install_health_started(cx).is_none_or(|h| h.read(cx).presence(key).is_present());
+        let update = installed && healthy && s.has_update(&app);
         let kind = s.queued(&app).map(|(_, e)| e.kind);
         let running = s.is_running();
         let first = s.queued(&app).is_some_and(|(i, _)| i == 0);
@@ -185,23 +186,54 @@ impl CollectionView {
         if busy || queued {
             return v;
         }
-        // The folder is gone: only telling where it went, or forgetting it, can work.
-        if game.install_folder_missing() {
-            v.push(item(
-                EpicAction::Relocate,
-                "relocate",
-                Icon::FolderOpen,
-                tr!("Change install location\u{2026}"),
-                "locate path moved renamed folder missing localizar caminho movido renomeado pasta sumiu",
-            ));
-            v.push(item(
-                EpicAction::Forget,
-                "forget",
-                Icon::DeleteOutline,
-                tr!("Remove from installed games\u{2026}"),
-                "missing deleted folder forget uninstall pasta apagada sumiu esquecer desinstalar",
-            ));
-            return v;
+        match crate::services::launch_blocker::game_presence(cx, game) {
+            heronite_data::install_health::InstallPresence::StorageUnavailable { .. }
+            | heronite_data::install_health::InstallPresence::Missing(heronite_data::install_health::MissingReason::FolderGone) => {
+                // The folder is gone or its drive is offline: offer non-destructive
+                // Relocate / Forget (keep files) while hiding Verify, Move, and Uninstall.
+                v.push(item(
+                    EpicAction::Relocate,
+                    "relocate",
+                    Icon::FolderOpen,
+                    tr!("Change install location\u{2026}"),
+                    "locate path moved renamed folder missing localizar caminho movido renomeado pasta sumiu",
+                ));
+                v.push(item(
+                    EpicAction::Forget,
+                    "forget",
+                    Icon::DeleteOutline,
+                    tr!("Remove from installed games\u{2026}"),
+                    "missing deleted folder forget uninstall pasta apagada sumiu esquecer desinstalar",
+                ));
+                return v;
+            }
+            heronite_data::install_health::InstallPresence::Missing(heronite_data::install_health::MissingReason::Incomplete) => {
+                if !third_party && !playing {
+                    v.push(item(
+                        EpicAction::Verify,
+                        "verify",
+                        Icon::Build,
+                        tr!("Verify and repair"),
+                        "check fix integrity verificar reparar integridade",
+                    ));
+                }
+                v.push(item(
+                    EpicAction::Relocate,
+                    "relocate",
+                    Icon::FolderOpen,
+                    tr!("Change install location\u{2026}"),
+                    "locate path moved renamed folder missing localizar caminho movido renomeado pasta sumiu",
+                ));
+                v.push(item(
+                    EpicAction::Forget,
+                    "forget",
+                    Icon::DeleteOutline,
+                    tr!("Remove from installed games\u{2026}"),
+                    "missing deleted folder forget uninstall pasta apagada sumiu esquecer desinstalar",
+                ));
+                return v;
+            }
+            _ => {}
         }
         if !third_party {
             if update {

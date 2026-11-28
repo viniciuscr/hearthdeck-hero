@@ -287,15 +287,62 @@ fn install_folder_missing(data_paths: &DataPaths, app_name: &str) -> bool {
     !path.is_empty() && !Path::new(path).exists()
 }
 
+/// Drops `app_name` directly from legendary's `installed.json` (and
+/// `third-party-installed.json`) without running the `legendary` binary,
+/// then rebuilds the library cache. Used when `legendary` is unavailable or
+/// fails to forget an entry whose files are already gone.
+pub fn remove_installed_record(data_paths: &DataPaths, app_name: &str) -> Result<()> {
+    let installed_file = data_paths.legendary_config_dir().join("installed.json");
+    if installed_file.exists() {
+        heronite_data::json_store::update_value(&installed_file, |doc| {
+            if let Some(map) = doc.as_object_mut() {
+                map.shift_remove(app_name);
+            }
+            Ok(())
+        })?;
+    }
+    if third_party::is_installed(data_paths, app_name) {
+        let _ = third_party::remove_installed(data_paths, app_name);
+    }
+    let _ = library::write_library(data_paths);
+    heronite_data::install_origins::forget(data_paths, "legendary", app_name);
+    heronite_launch::native_setup::forget(data_paths, "legendary", app_name);
+    Ok(())
+}
+
 /// `forceUninstall`: forget the install in `installed.json` but keep the files.
+/// Falls back to removing the record directly if `legendary` fails.
 pub fn force_uninstall(data_paths: &DataPaths, legendary: &Legendary, app_name: &str) -> OpResult {
     match legendary.run(&["uninstall", app_name, "-y", "--keep-files"], &[]) {
-        Err(err) => OpResult::err(format!("{err:#}")),
         Ok(out) if out.success() => {
             let _ = library::write_library(data_paths);
+            heronite_launch::native_setup::forget(data_paths, "legendary", app_name);
             OpResult::ok(tr!("Removed from the installed games"))
         }
-        Ok(out) => OpResult::err(out.error_lines()),
+        other => {
+            let why = match other {
+                Ok(out) => out.error_lines(),
+                Err(err) => format!("{err:#}"),
+            };
+            log::warn!("legendary could not forget {app_name} ({why}): removing record directly");
+            match remove_installed_record(data_paths, app_name) {
+                Ok(()) => OpResult::ok(tr!("Removed from the installed games")),
+                Err(err) => OpResult::err(format!("{err:#}")),
+            }
+        }
+    }
+}
+
+/// Forgets an installed Epic game without requiring `legendary` to be installed
+/// (tries `legendary uninstall --keep-files` when available, else edits
+/// `installed.json` directly).
+pub fn forget(data_paths: &DataPaths, app_name: &str) -> OpResult {
+    match Legendary::locate(data_paths) {
+        Ok(lg) => force_uninstall(data_paths, &lg, app_name),
+        Err(_) => match remove_installed_record(data_paths, app_name) {
+            Ok(()) => OpResult::ok(tr!("Removed from the installed games")),
+            Err(err) => OpResult::err(format!("{err:#}")),
+        },
     }
 }
 

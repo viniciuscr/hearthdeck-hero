@@ -212,6 +212,13 @@ fn import_games(data_paths: &DataPaths, legendary: &Legendary, games: &[Launcher
         let why = match legendary.run(&import_args(game), &[]) {
             // legendary may exit with 0 after an error: its record tells.
             Ok(_) if library::installed_games(data_paths).contains_key(&game.app_name) => {
+                let _ = heronite_data::install_origins::record(
+                    data_paths,
+                    "legendary",
+                    &game.app_name,
+                    heronite_data::install_origins::Origin::EpicLauncher,
+                    &game.install_location,
+                );
                 added += 1;
                 continue;
             }
@@ -244,6 +251,56 @@ fn import_games(data_paths: &DataPaths, legendary: &Legendary, games: &[Launcher
         }
     };
     (added, r)
+}
+
+/// Forgets Epic Games Launcher-imported games that the launcher no longer
+/// lists and whose install folder is gone on a mounted volume. Returns how
+/// many were removed.
+pub fn reconcile_uninstalled(data_paths: &DataPaths) -> usize {
+    let Some(dir) = manifests_dir() else { return 0 };
+    reconcile_uninstalled_from(data_paths, &dir, &heronite_data::install_health::Mounts::current())
+}
+
+pub fn reconcile_uninstalled_from(data_paths: &DataPaths, dir: &Path, mounts: &heronite_data::install_health::Mounts) -> usize {
+    use heronite_data::install_health::{is_path_storage_unavailable, MountCache};
+    use heronite_data::install_origins::{self, same_install_path, Origin};
+
+    let present: std::collections::HashSet<String> = launcher_games(dir).into_iter().map(|g| g.app_name).collect();
+    let installed = library::installed_games(data_paths);
+    let cache = MountCache::load(data_paths);
+    let mut removed = 0;
+    for (runner, app, origin_path) in install_origins::by_origin(data_paths, Origin::EpicLauncher) {
+        if runner != "legendary" {
+            continue;
+        }
+        let Some(entry) = installed.get(&app) else {
+            install_origins::forget(data_paths, "legendary", &app);
+            continue;
+        };
+        let current_path = text(entry, "install_path");
+        if !same_install_path(&current_path, &origin_path) {
+            install_origins::forget(data_paths, "legendary", &app);
+            continue;
+        }
+        if present.contains(&app) {
+            continue;
+        }
+        let key = format!("legendary_{app}");
+        if is_path_storage_unavailable(Path::new(&current_path), cache.get(&key), mounts) {
+            continue;
+        }
+        if !Path::new(&current_path).is_dir() || std::fs::read_dir(&current_path).is_ok_and(|mut rd| rd.next().is_none()) {
+            let res = crate::ops::forget(data_paths, &app);
+            if res.ok {
+                install_origins::forget(data_paths, "legendary", &app);
+                removed += 1;
+            }
+        }
+    }
+    if removed > 0 {
+        log::info!("Epic Games Launcher: {removed} uninstalled game(s) taken off the list");
+    }
+    removed
 }
 
 /// After a refresh: takes the launcher's new games in, when it has any.
@@ -444,6 +501,52 @@ mod tests {
         assert_eq!(retake(&data_paths, &lg, &[game("Calluna", r"D:\Control")]), 0);
         assert_eq!(tool.calls().len(), 1, "{:?}", tool.calls());
         assert!(library::installed_games(&data_paths).contains_key("Calluna"), "the old record stays");
+    }
+
+    #[test]
+    fn reconcile_uninstalled_forgets_removed_egl_game_and_protects_offline_drive() {
+        use heronite_data::install_health::{MountCache, MountPoint, Mounts};
+        use heronite_data::install_origins::{self, Origin};
+
+        let dir = tempfile::tempdir().unwrap();
+        let data_paths = DataPaths::at(dir.path().join("h"));
+        let manifests = dir.path().join("manifests");
+        std::fs::create_dir_all(&manifests).unwrap();
+        let (root_mount, offline_mount, offline_path) =
+            if cfg!(windows) { (r"C:\", r"Z:\", r"Z:\OfflineGame") } else { ("/", "/run/media/offline", "/run/media/offline/OfflineGame") };
+        let gone_dir = dir.path().join("Games/GoneGame");
+        let kept_dir = dir.path().join("KeptGame");
+        let offline_dir = Path::new(offline_path);
+
+        // KeptGame is still in EGL manifests; GoneGame and OfflineGame are not.
+        launcher_install(dir.path(), &manifests, "KeptGame", "Kept Game", json!({}));
+        legendary_has(
+            &data_paths,
+            json!({
+                "GoneGame": record(&gone_dir, "1"),
+                "KeptGame": record(&kept_dir, "1"),
+                "OfflineGame": record(offline_dir, "1")
+            }),
+            &[],
+        );
+        install_origins::record(&data_paths, "legendary", "GoneGame", Origin::EpicLauncher, &gone_dir.to_string_lossy()).unwrap();
+        install_origins::record(&data_paths, "legendary", "KeptGame", Origin::EpicLauncher, &kept_dir.to_string_lossy()).unwrap();
+        install_origins::record(&data_paths, "legendary", "OfflineGame", Origin::EpicLauncher, &offline_dir.to_string_lossy()).unwrap();
+        let mounts_online = Mounts::from_entries(vec![
+            MountPoint { point: PathBuf::from(root_mount), fs: "ext4".into(), source: "/dev/root".into() },
+            MountPoint { point: PathBuf::from(offline_mount), fs: "ext4".into(), source: "/dev/sdb1".into() },
+        ]);
+        let mut cache = MountCache::default();
+        cache.observe("legendary_OfflineGame", offline_dir, &mounts_online);
+        cache.save(&data_paths);
+
+        let mounts =
+            Mounts::from_entries(vec![MountPoint { point: PathBuf::from(root_mount), fs: "ext4".into(), source: "/dev/root".into() }]);
+        assert_eq!(reconcile_uninstalled_from(&data_paths, &manifests, &mounts), 1);
+        let remaining = library::installed_games(&data_paths);
+        assert!(!remaining.contains_key("GoneGame"));
+        assert!(remaining.contains_key("KeptGame"));
+        assert!(remaining.contains_key("OfflineGame"));
     }
 
     /// Read-only look at this PC's launcher, if it has one:

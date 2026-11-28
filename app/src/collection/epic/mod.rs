@@ -11,17 +11,20 @@ use std::sync::Arc;
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use heronite_data::install_health::{InstallPresence, MissingReason};
 use heronite_data::CollectionGame;
 use heronite_epic::queue::ElementKind;
 use serde_json::Value;
 
 use super::CollectionView;
 use crate::dialogs::epic_confirm::{Confirm, EpicConfirmDialog};
+use crate::icons::Icon;
 use crate::pages::Page;
 use crate::services::downloads::{Downloads, DownloadsEvent, QueueState};
 use crate::services::launch_blocker::{launch_blocker, Blocker};
 use crate::services::widgets::{fmt_percent, progress_bar};
 use crate::theme;
+use crate::ui::icon;
 use heronite_i18n::tr;
 
 /// Something a click asked for that needs a `Window` (handled from `render`).
@@ -51,6 +54,10 @@ pub enum Request {
     Forget(String),
     /// Play was pressed but the game's folder is gone.
     FolderMissing(String),
+    /// Play was pressed while the game's storage drive/mount is disconnected.
+    StorageUnavailable(String),
+    /// Play was pressed when the folder exists but the game's files are missing.
+    FilesIncomplete(String),
     /// Play needs the Epic sign-in, which is gone (or a start just failed
     /// for it): log in, or play offline.
     SignedOut(String),
@@ -85,13 +92,22 @@ pub(super) struct EpicState {
     pub(super) pending: Option<Request>,
 }
 
+/// Non-healthy install state shown as a pill on a card or row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HealthBadge {
+    Offline,
+    Missing,
+    Incomplete,
+}
+
 /// What a card shows on top of its cover.
 pub(super) struct CardEpic {
     /// `Installing 37%`, `Queued`, `Verifying 12%`; empty when only the
-    /// update hint is shown.
+    /// update or health hint is shown.
     pub label: SharedString,
     pub percent: Option<f32>,
     pub update: bool,
+    pub health: Option<HealthBadge>,
 }
 
 /// Extra footer content of the focus panel.
@@ -122,7 +138,42 @@ pub(super) fn is_store_runner(runner: &str) -> bool {
     matches!(runner, "legendary" | "gog" | "nile")
 }
 
-/// Card overlay: bottom strip with label + bar, "Update" pill at the top.
+/// Top-right cover pill for an unhealthy or offline install.
+fn cover_health_pill(badge: HealthBadge) -> Div {
+    let base = div()
+        .absolute()
+        .top(px(6.))
+        .right(px(6.))
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .px(px(6.))
+        .py(px(1.5))
+        .rounded_full()
+        .text_size(px(10.))
+        .font_weight(theme::W_BOLD);
+    match badge {
+        HealthBadge::Offline => base
+            .bg(theme::black_a(0.76))
+            .border_1()
+            .border_color(theme::white_a(0.22))
+            .text_color(white())
+            .child(icon(Icon::FaHardDrive, px(10.), white()))
+            .child(tr!("OFFLINE")),
+        HealthBadge::Missing => base
+            .bg(theme::brand_gold())
+            .text_color(theme::brand_gold_text())
+            .child(icon(Icon::Warning, px(10.5), theme::brand_gold_text()))
+            .child(tr!("MISSING")),
+        HealthBadge::Incomplete => base
+            .bg(theme::brand_gold())
+            .text_color(theme::brand_gold_text())
+            .child(icon(Icon::Warning, px(10.5), theme::brand_gold_text()))
+            .child(tr!("INCOMPLETE")),
+    }
+}
+
+/// Card overlay: bottom strip with label + bar, "Update" or health pill at top.
 /// `radius`: the cover's.
 pub(super) fn card_overlay(e: &CardEpic, radius: f32) -> Div {
     let mut layer = div().absolute().inset_0().rounded(px(radius)).overflow_hidden();
@@ -144,7 +195,9 @@ pub(super) fn card_overlay(e: &CardEpic, radius: f32) -> Div {
                 .child(progress_bar(e.percent, 3., theme::accent())),
         );
     }
-    if e.update {
+    if let Some(badge) = e.health {
+        layer = layer.child(cover_health_pill(badge));
+    } else if e.update {
         layer = layer.child(
             div()
                 .absolute()
@@ -163,10 +216,34 @@ pub(super) fn card_overlay(e: &CardEpic, radius: f32) -> Div {
     layer
 }
 
-/// The end of a Focus list row: the label over its bar, else the "Update"
-/// pill.
+/// The end of a Focus list row: the label over its bar, a health pill, or
+/// the "Update" pill.
 pub(super) fn row_status(e: &CardEpic) -> Div {
     if e.label.is_empty() {
+        if let Some(badge) = e.health {
+            let base = div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .px(px(6.))
+                .py(px(1.5))
+                .rounded_full()
+                .text_size(px(10.))
+                .font_weight(theme::W_BOLD);
+            return match badge {
+                HealthBadge::Offline => base
+                    .bg(theme::ink_a(0.12))
+                    .text_color(theme::text_primary())
+                    .child(icon(Icon::FaHardDrive, px(10.), theme::text_muted()))
+                    .child(tr!("OFFLINE")),
+                HealthBadge::Missing | HealthBadge::Incomplete => {
+                    let fg = theme::readable(theme::warning());
+                    let label = if badge == HealthBadge::Missing { tr!("MISSING") } else { tr!("INCOMPLETE") };
+                    base.bg(Rgba { a: 0.16, ..theme::warning() }).text_color(fg).child(icon(Icon::Warning, px(10.5), fg)).child(label)
+                }
+            };
+        }
         return div()
             .flex_none()
             .px(px(6.))
@@ -256,6 +333,8 @@ impl CollectionView {
             Request::Modify(key) => self.epic_open_modify(&key, cx),
             Request::Relocate(key) => self.epic_open_relocate(&key, false, window, cx),
             Request::FolderMissing(key) => self.epic_open_relocate(&key, true, window, cx),
+            Request::StorageUnavailable(key) => self.epic_open_storage_unavailable(&key, window, cx),
+            Request::FilesIncomplete(key) => self.epic_open_incomplete(&key, window, cx),
             Request::Forget(key) => self.epic_open_forget(&key, window, cx),
             Request::EosInstall(app) => self.epic_open_eos_install(&app, window, cx),
             Request::EosToggle(key) => {
@@ -305,7 +384,9 @@ impl CollectionView {
         self.epic.pending = Some(match launch_blocker(cx, game) {
             Some(b) if b.is_busy() => Request::OpenDownloads,
             None if !game.installed => Request::Install { key: game.key.clone(), import: false },
+            Some(Blocker::StorageUnavailable(_)) => Request::StorageUnavailable(game.key.clone()),
             Some(Blocker::FolderMissing) => Request::FolderMissing(game.key.clone()),
+            Some(Blocker::FilesIncomplete) => Request::FilesIncomplete(game.key.clone()),
             // Before the update prompt: neither updating nor "Play anyway"
             // works without the sign-in.
             _ if self.runtime.needs_epic_sign_in(game) => Request::SignedOut(game.key.clone()),
@@ -316,36 +397,50 @@ impl CollectionView {
         true
     }
 
-    /// Overlay data of a card, if the game is being installed / updated /
-    /// verified or has an update.
+    /// Overlay data of a card: active install/update/verify progress, install
+    /// health badge (missing / incomplete / offline drive), or update hint.
     pub(super) fn epic_card(&self, key: &str, cx: &App) -> Option<CardEpic> {
-        let app = app_of(key)?;
-        let svc = self.epic.service.as_ref()?.read(cx);
-        if let Some(b) = svc.busy_of(app) {
-            let label = match b.percent {
-                Some(p) => format!("{} {}", b.label, fmt_percent(p as f64)),
-                None => format!("{}...", b.label),
-            };
-            return Some(CardEpic { label: label.into(), percent: b.percent, update: false });
+        let store_app = app_of(key);
+        let svc = store_app.and(self.epic.service.as_ref()).map(|s| s.read(cx));
+        if let (Some(app), Some(svc)) = (store_app, svc) {
+            if let Some(b) = svc.busy_of(app) {
+                let label = match b.percent {
+                    Some(p) => format!("{} {}", b.label, fmt_percent(p as f64)),
+                    None => format!("{}...", b.label),
+                };
+                return Some(CardEpic { label: label.into(), percent: b.percent, update: false, health: None });
+            }
+            if let Some(state) = svc.queue_state(app) {
+                let kind = svc.queued(app).map(|(_, e)| e.kind);
+                let verb = queue_verb(kind, false);
+                let p = svc.progress_of(app).map(|p| p.percent as f32);
+                let label = match (state, p) {
+                    (QueueState::Downloading, Some(p)) => format!("{verb} {}", fmt_percent(p as f64)),
+                    (QueueState::Downloading, None) => format!("{verb}..."),
+                    (QueueState::Paused, Some(p)) => format!("{} {}", queue_verb(kind, true), fmt_percent(p as f64)),
+                    (QueueState::Paused, None) => queue_verb(kind, true).into(),
+                    // Its place among the waiting ones (0 runs).
+                    (QueueState::Waiting, _) => match svc.queued(app) {
+                        Some((i, _)) => tr!("Queued \u{b7} #{n}", n = i),
+                        None => tr!("Queued").into(),
+                    },
+                };
+                return Some(CardEpic { label: label.into(), percent: p, update: false, health: None });
+            }
         }
-        if let Some(state) = svc.queue_state(app) {
-            let kind = svc.queued(app).map(|(_, e)| e.kind);
-            let verb = queue_verb(kind, false);
-            let p = svc.progress_of(app).map(|p| p.percent as f32);
-            let label = match (state, p) {
-                (QueueState::Downloading, Some(p)) => format!("{verb} {}", fmt_percent(p as f64)),
-                (QueueState::Downloading, None) => format!("{verb}..."),
-                (QueueState::Paused, Some(p)) => format!("{} {}", queue_verb(kind, true), fmt_percent(p as f64)),
-                (QueueState::Paused, None) => queue_verb(kind, true).into(),
-                // Its place among the waiting ones (0 runs).
-                (QueueState::Waiting, _) => match svc.queued(app) {
-                    Some((i, _)) => tr!("Queued \u{b7} #{n}", n = i),
-                    None => tr!("Queued").into(),
-                },
-            };
-            return Some(CardEpic { label: label.into(), percent: p, update: false });
+        let health = crate::services::install_health_started(cx).and_then(|svc| match svc.read(cx).presence(key) {
+            InstallPresence::Present => None,
+            InstallPresence::StorageUnavailable { .. } => Some(HealthBadge::Offline),
+            InstallPresence::Missing(MissingReason::Incomplete) => Some(HealthBadge::Incomplete),
+            InstallPresence::Missing(_) => Some(HealthBadge::Missing),
+        });
+        if health.is_some() {
+            return Some(CardEpic { label: SharedString::default(), percent: None, update: false, health });
         }
-        svc.has_update(app).then(|| CardEpic { label: SharedString::default(), percent: None, update: true })
+        if let (Some(app), Some(svc)) = (store_app, svc) {
+            return svc.has_update(app).then(|| CardEpic { label: SharedString::default(), percent: None, update: true, health: None });
+        }
+        None
     }
 
     fn epic_update(&mut self, key: &str, cx: &mut Context<Self>) {

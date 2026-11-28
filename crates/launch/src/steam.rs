@@ -245,6 +245,27 @@ impl SteamLocator {
         dedup_existing(roots)
     }
 
+    /// Libraries listed in `libraryfolders.vdf` whose volume is currently
+    /// unmounted (`StorageUnavailable`). Returns `(has_unmounted_unknown_apps,
+    /// known_unmounted_apps)` where `has_unmounted_unknown_apps` is only true
+    /// for legacy VDF entries that carry no `"apps"` table at all.
+    pub fn unmounted_library_apps(&self, mounts: &heronite_data::install_health::Mounts) -> (bool, HashSet<String>) {
+        let mut unknown = false;
+        let mut apps = HashSet::new();
+        let installs = std::iter::once(self.steam_path.clone()).chain(self.installs()).collect();
+        for install in dedup_existing(installs) {
+            for (path, ids) in library_folders_with_apps(&install.join("steamapps").join("libraryfolders.vdf")) {
+                if !path.exists() && heronite_data::install_health::is_path_storage_unavailable(&path, None, mounts) {
+                    match ids {
+                        Some(set) => apps.extend(set),
+                        None => unknown = true,
+                    }
+                }
+            }
+        }
+        (unknown, apps)
+    }
+
     /// Every Steam install on this machine: the chosen folder, then the
     /// native, Flatpak and Snap ones that exist (each once, symlinks
     /// resolved).
@@ -425,6 +446,13 @@ pub const KEY_CLOSE_AFTER_GAME: &str = "heroniteCloseSteamAfterGame";
 /// The absolute library paths a `libraryfolders.vdf` lists (none when the
 /// file is missing or broken).
 fn library_folders(vdf_file: &Path) -> Vec<PathBuf> {
+    library_folders_with_apps(vdf_file).into_iter().map(|(p, _)| p).collect()
+}
+
+/// Like [`library_folders`], paired with the app ids listed under each
+/// library's `"apps"` object (`None` for legacy VDF entries without an
+/// `"apps"` table).
+fn library_folders_with_apps(vdf_file: &Path) -> Vec<(PathBuf, Option<HashSet<String>>)> {
     let Ok(text) = fs::read_to_string(vdf_file) else {
         return Vec::new();
     };
@@ -442,12 +470,17 @@ fn library_folders(vdf_file: &Path) -> Vec<PathBuf> {
         .entries()
         .iter()
         .filter_map(|(_, folder)| match folder {
-            // Modern files nest `path`; very old ones map index -> path.
-            Vdf::Obj(_) => folder.str_of("path"),
-            Vdf::Str(s) => Some(s.as_str()),
+            // Modern files nest `path` and `apps`; very old ones map index -> path.
+            Vdf::Obj(_) => {
+                let p = folder.str_of("path").filter(|p| Path::new(p).is_absolute())?;
+                let apps = folder
+                    .get("apps")
+                    .map(|a| a.entries().iter().map(|(id, _)| id.clone()).filter(|id| id.bytes().all(|b| b.is_ascii_digit())).collect());
+                Some((PathBuf::from(p), apps))
+            }
+            Vdf::Str(s) if Path::new(s).is_absolute() => Some((PathBuf::from(s), None)),
+            _ => None,
         })
-        .filter(|p| Path::new(p).is_absolute())
-        .map(PathBuf::from)
         .collect()
 }
 
@@ -534,7 +567,19 @@ pub fn read_manifests(locator: &SteamLocator) -> Vec<SteamManifest> {
                 continue;
             }
             let text = fs::read_to_string(steamapps.join(&name)).unwrap_or_default();
-            let manifest = parse_app_manifest(&text, id);
+            let mut manifest = parse_app_manifest(&text, id);
+            // If the manifest names an `installdir` whose folder is gone on a
+            // mounted library (manually deleted leaving an orphan `.acf`), do
+            // not treat it as installed.
+            if manifest.fully_installed {
+                if let Ok(doc) = Vdf::parse(&text) {
+                    if let Some(dir) = doc.get("AppState").and_then(|s| s.str_of("installdir")).filter(|d| !d.is_empty()) {
+                        if !steamapps.join("common").join(dir).exists() {
+                            manifest.fully_installed = false;
+                        }
+                    }
+                }
+            }
             match seen.get(&manifest.app_id) {
                 None => {
                     seen.insert(manifest.app_id.clone(), out.len());

@@ -16,6 +16,8 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use heronite_data::install_health::{is_path_storage_unavailable, MountCache, Mounts};
+use heronite_data::install_origins::{self, same_install_path, Origin};
 use heronite_data::launchers::Launcher;
 use heronite_data::models::{LocalGameMeta, LocalMetaFile, TimestampFile};
 use heronite_data::{json_store, DataPaths};
@@ -55,6 +57,25 @@ pub enum Store {
 }
 
 impl Store {
+    /// The Collection runner name of this store.
+    pub fn runner(self) -> &'static str {
+        match self {
+            Store::Epic => "legendary",
+            Store::Gog => "gog",
+            Store::Amazon => "nile",
+        }
+    }
+
+    /// Parses a Collection runner name back to a Heroic store.
+    pub fn from_runner(runner: &str) -> Option<Self> {
+        match runner {
+            "legendary" => Some(Store::Epic),
+            "gog" => Some(Store::Gog),
+            "nile" => Some(Store::Amazon),
+            _ => None,
+        }
+    }
+
     fn source(self, heroic: &Path) -> PathBuf {
         match self {
             Store::Epic => heroic.join("legendaryConfig/legendary/installed.json"),
@@ -81,7 +102,18 @@ impl Store {
 
 fn list_by(list: Option<&Value>, id: &str) -> Vec<(String, Value)> {
     list.and_then(Value::as_array)
-        .map(|l| l.iter().filter_map(|e| Some((e.get(id)?.as_str()?.to_string(), e.clone()))).collect())
+        .map(|l| {
+            l.iter()
+                .filter_map(|e| {
+                    let key = match e.get(id)? {
+                        Value::String(s) if !s.is_empty() => s.clone(),
+                        Value::Number(n) => n.to_string(),
+                        _ => return None,
+                    };
+                    Some((key, e.clone()))
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -211,6 +243,7 @@ pub fn sync(paths: &DataPaths, lib: &Library, removed: &BTreeSet<String>) -> Res
     for installs in &lib.installs {
         report.added += merge_installs(paths, installs)?;
     }
+    record_matching_origins(paths, lib);
     let settings = copy_settings(paths, lib, removed)?;
     if settings > 0 {
         log::info!("Brought the game settings (Wine prefix) of {settings} game(s) from Heroic");
@@ -233,7 +266,8 @@ pub fn sync(paths: &DataPaths, lib: &Library, removed: &BTreeSet<String>) -> Res
     Ok(report)
 }
 
-/// Adds the records this app does not have. How many were added.
+/// Adds the records this app does not have and records Heroic as their origin
+/// so later syncs can reconcile uninstalls made in Heroic. How many were added.
 fn merge_installs(paths: &DataPaths, installs: &Installs) -> Result<usize> {
     let target = installs.kind.target(paths);
     let have: HashSet<String> = installs.kind.read_ids(&target);
@@ -274,7 +308,101 @@ fn merge_installs(paths: &DataPaths, installs: &Installs) -> Result<usize> {
         }
         Ok(())
     })?;
+    let path_key = installs.kind.path_key();
+    let runner = installs.kind.runner();
+    for (id, entry) in &missing {
+        if let Some(folder) = entry.get(path_key).and_then(Value::as_str).filter(|p| !p.is_empty()) {
+            let _ = install_origins::record(paths, runner, id, Origin::Heroic, folder);
+        }
+    }
     Ok(missing.len())
+}
+
+/// Backfills `Origin::Heroic` for store games imported by an earlier version
+/// of Heronite whose install folder still matches Heroic's record and that
+/// have no other origin recorded.
+fn record_matching_origins(paths: &DataPaths, lib: &Library) {
+    let existing = install_origins::load(paths);
+    for installs in &lib.installs {
+        let key = installs.kind.path_key();
+        let runner = installs.kind.runner();
+        let here = installs.kind.records(&installs.kind.target(paths));
+        fn entry_path<'a>(e: &'a Value, key: &str) -> Option<&'a str> {
+            e.get(key).and_then(Value::as_str).filter(|p| !p.is_empty())
+        }
+        for (id, theirs) in &installs.entries {
+            if existing.contains_key(&heronite_data::models::game_key(runner, id)) {
+                continue;
+            }
+            let Some(their_path) = entry_path(theirs, key) else { continue };
+            if here.iter().any(|(i, mine)| i == id && entry_path(mine, key).is_some_and(|mp| same_install_path(mp, their_path))) {
+                let _ = install_origins::record(paths, runner, id, Origin::Heroic, their_path);
+            }
+        }
+    }
+}
+
+/// Store installs previously imported from Heroic that Heroic no longer lists
+/// and whose folder is gone on a mounted volume (never returns installs on an
+/// unmounted/offline drive).
+pub fn gone_installs(paths: &DataPaths, lib: &Library, mounts: &Mounts) -> Vec<(Store, String)> {
+    let cache = MountCache::load(paths);
+    let heroic_raw = |store: Store| -> HashSet<String> { store.read_ids(&store.source(&lib.root)) };
+    let mut raw_by_store: [Option<HashSet<String>>; 3] = [None, None, None];
+    let store_idx = |s: Store| match s {
+        Store::Epic => 0,
+        Store::Gog => 1,
+        Store::Amazon => 2,
+    };
+
+    let mut gone = Vec::new();
+    for (runner, app, origin_path) in install_origins::by_origin(paths, Origin::Heroic) {
+        let Some(store) = Store::from_runner(&runner) else { continue };
+        let here = store.records(&store.target(paths));
+        let key = store.path_key();
+        let current_path = here
+            .iter()
+            .find(|(id, _)| id == &app)
+            .and_then(|(_, e)| e.get(key).and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|p| !p.is_empty());
+        let Some(current_path) = current_path else {
+            // Already gone from Heronite's installed file: clean up stale origin.
+            install_origins::forget(paths, &runner, &app);
+            continue;
+        };
+        if !same_install_path(current_path, &origin_path) {
+            // Reinstalled or moved by Heronite itself: no longer Heroic's.
+            install_origins::forget(paths, &runner, &app);
+            continue;
+        }
+        let idx = store_idx(store);
+        let in_heroic = raw_by_store[idx].get_or_insert_with(|| heroic_raw(store));
+        if in_heroic.contains(&app) {
+            continue;
+        }
+        let game_key = format!("{runner}_{app}");
+        if is_path_storage_unavailable(Path::new(current_path), cache.get(&game_key), mounts) {
+            continue;
+        }
+        // Heroic dropped the record and the drive is mounted: if the folder or
+        // its essential marker is gone, confirm external uninstall.
+        let dir = Path::new(current_path);
+        let files_present = match store {
+            Store::Gog => {
+                dir.is_dir()
+                    && (dir.join(format!("goggame-{app}.info")).is_file()
+                        || dir.join("start.sh").is_file()
+                        || dir.join("gameinfo").is_file())
+            }
+            Store::Amazon => dir.is_dir() && dir.join("fuel.json").is_file(),
+            Store::Epic => dir.is_dir() && std::fs::read_dir(dir).is_ok_and(|mut rd| rd.next().is_some()),
+        };
+        if !files_present {
+            gone.push((store, app));
+        }
+    }
+    gone
 }
 
 /// Copies Heroic's `GamesConfig/<app>.json` of each of its games that has
@@ -527,6 +655,72 @@ mod tests {
         w(&heroic.join("config.json"), "{}");
         assert!(detect(h.path(), &DataPaths::at(h.path().join("data"))).unwrap().is_some());
         assert!(detect(h.path(), &DataPaths::at(&heroic)).unwrap().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gone_installs_detects_heroic_uninstall_and_skips_unmounted_drive() {
+        use heronite_data::install_health::{MountCache, MountPoint, Mounts};
+
+        let h = tempfile::tempdir().unwrap();
+        let home = h.path().join("home");
+        let heroic = home.join(".config/heroic");
+        let paths = DataPaths::at(h.path().join("heronite"));
+        let g1 = h.path().join("games/Witcher3");
+        let g2 = h.path().join("games/StillHere");
+        std::fs::create_dir_all(&g1).unwrap();
+        std::fs::create_dir_all(&g2).unwrap();
+
+        // Heroic initially has g1 (numeric buildId as in issue #465) and g2 installed.
+        w(&heroic.join("config.json"), "{}");
+        w(
+            &heroic.join("gog_store/installed.json"),
+            &json!({"installed": [
+                {"appName": "1495134320", "buildId": 44535815, "install_path": g1, "platform": "windows"},
+                {"appName": "22222", "install_path": g2, "platform": "windows"}
+            ]})
+            .to_string(),
+        );
+        let found = detect(&home, &paths).unwrap().unwrap();
+        let lib = found.heroic.as_ref().unwrap();
+        assert_eq!(sync(&paths, lib, &BTreeSet::new()).unwrap(), Report { added: 2, updated: 0 });
+
+        // User uninstalls g1 in Heroic (removes from Heroic's installed.json and deletes folder).
+        w(
+            &heroic.join("gog_store/installed.json"),
+            &json!({"installed": [
+                {"appName": "22222", "install_path": g2, "platform": "windows"}
+            ]})
+            .to_string(),
+        );
+        std::fs::remove_dir_all(&g1).unwrap();
+
+        // Also simulate an unmounted drive game recorded under /run/media/offline/Game.
+        let offline_path = "/run/media/offline/Game";
+        install_origins::record(&paths, "gog", "99999", Origin::Heroic, offline_path).unwrap();
+        w(
+            &paths.gog_installed(),
+            &json!({"installed": [
+                {"appName": "1495134320", "buildId": 44535815, "install_path": g1, "platform": "windows"},
+                {"appName": "22222", "install_path": g2, "platform": "windows"},
+                {"appName": "99999", "install_path": offline_path, "platform": "windows"}
+            ]})
+            .to_string(),
+        );
+        let mounts_online = Mounts::from_entries(vec![
+            MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() },
+            MountPoint { point: PathBuf::from("/run/media/offline"), fs: "ext4".into(), source: "/dev/sdb1".into() },
+        ]);
+        let mut cache = MountCache::default();
+        cache.observe("gog_99999", Path::new(offline_path), &mounts_online);
+        cache.save(&paths);
+
+        let mounts_offline =
+            Mounts::from_entries(vec![MountPoint { point: PathBuf::from("/"), fs: "ext4".into(), source: "/dev/root".into() }]);
+        let found_after = detect(&home, &paths).unwrap().unwrap();
+        let lib_after = found_after.heroic.as_ref().unwrap();
+        let gone = gone_installs(&paths, lib_after, &mounts_offline);
+        assert_eq!(gone, vec![(Store::Gog, "1495134320".to_string())]);
     }
 
     #[test]

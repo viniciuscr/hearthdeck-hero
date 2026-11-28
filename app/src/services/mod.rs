@@ -7,6 +7,7 @@ pub mod compression;
 pub mod downloads;
 pub mod game_folders;
 pub mod hidden_lock;
+pub mod install_health;
 pub mod launch_blocker;
 pub mod launcher_imports;
 pub mod mods;
@@ -118,5 +119,23 @@ pub fn clients(cx: &mut App) -> Entity<clients::Clients> {
     }
     let entity = cx.new(|cx| clients::Clients::new(DataPaths::detect(), cx));
     cx.set_global(ClientsGlobal(entity.clone()));
+    entity
+}
+
+struct InstallHealthGlobal(Entity<install_health::InstallHealth>);
+impl Global for InstallHealthGlobal {}
+
+/// The install health cache when already started.
+pub fn install_health_started(cx: &App) -> Option<Entity<install_health::InstallHealth>> {
+    cx.try_global::<InstallHealthGlobal>().map(|g| g.0.clone())
+}
+
+/// The install health cache (created on first use).
+pub fn install_health(cx: &mut App) -> Entity<install_health::InstallHealth> {
+    if let Some(g) = cx.try_global::<InstallHealthGlobal>() {
+        return g.0.clone();
+    }
+    let entity = cx.new(|_| install_health::InstallHealth::new(DataPaths::detect()));
+    cx.set_global(InstallHealthGlobal(entity.clone()));
     entity
 }

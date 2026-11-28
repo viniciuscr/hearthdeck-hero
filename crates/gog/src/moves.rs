@@ -72,6 +72,7 @@ pub fn move_install(paths: &DataPaths, app_name: &str, new_base: &str, cancel: &
     on_percent(100.);
     entry.install_path = target.display().to_string();
     installed::upsert(paths, &entry)?;
+    heronite_data::install_origins::forget(paths, "gog", app_name);
     library::sync_install_state(paths, app_name, None);
     Ok(entry.install_path)
 }
@@ -95,6 +96,7 @@ pub fn relocate(paths: &DataPaths, app_name: &str, folder: &str) -> Result<Strin
     }
     entry.install_path = folder.to_string();
     installed::upsert(paths, &entry)?;
+    heronite_data::install_origins::forget(paths, "gog", app_name);
     library::sync_install_state(paths, app_name, dir.file_name().and_then(|n| n.to_str()));
     Ok(entry.install_path)
 }

@@ -143,7 +143,7 @@ pub fn classify_data(rel: &str) -> Class {
     if ["images-cache", "local_library/heroes", "local_library/screenshot-thumbnails"].iter().any(|d| under(rel, d)) {
         return Class::Out(Left::Images);
     }
-    if is_temp(rel) || rel == "local_library/running.json" {
+    if is_temp(rel) || rel == "local_library/running.json" || rel == "local_library/install-mounts.json" {
         return Class::Out(Left::Temp);
     }
     if LOGINS.contains(&rel) {
@@ -294,6 +294,7 @@ mod tests {
             ("local_library/statuses.json.bak-before-unnumber", Out(Left::Temp)),
             ("sideload_apps/library.json.bak-bloodborne-20261007011623", Out(Left::Temp)),
             ("store/.config.json.heronite-rs-12-1.tmp", Out(Left::Temp)),
+            ("local_library/install-mounts.json", Out(Left::Temp)),
         ] {
             assert_eq!(classify_data(rel), want, "{rel}");
         }

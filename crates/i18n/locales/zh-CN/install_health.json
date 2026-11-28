@@ -1,0 +1,22 @@
+{
+  "Drive unavailable": "驱动器不可用",
+  "Game files missing": "游戏文件缺失",
+  "INCOMPLETE": "不完整",
+  "Locate folder…": "定位文件夹…",
+  "Locate the moved folder or remove it from installed games.": "定位已移动的文件夹，或将其从已安装游戏中移除。",
+  "Locate…": "定位…",
+  "MISSING": "缺失",
+  "OFFLINE": "离线",
+  "ROM file not found": "未找到 ROM 文件",
+  "Reconnect the drive where this game is installed.": "请重新连接安装此游戏的驱动器。",
+  "Reconnect {path} to play this game.": "请重新连接 {path} 以游玩此游戏。",
+  "The ROM file for this game could not be found.": "找不到此游戏的 ROM 文件。",
+  "The drive holding {title} is not connected": "存放 {title} 的驱动器未连接",
+  "The folder exists, but the game's files were not found.": "文件夹存在，但未找到游戏文件。",
+  "The game files could not be found on disk.": "在磁盘上找不到游戏文件。",
+  "The game files of {title} are missing": "{title} 的游戏文件缺失",
+  "The game's files were not found": "未找到游戏文件",
+  "The install folder for {title} still exists at {path}, but the game's files were not found.\nIt may have been uninstalled outside Heronite with leftover files, or moved elsewhere.": "{title} 的安装文件夹仍位于 {path}，但未找到游戏文件。\n它可能在 Heronite 之外被卸载并留下了残留文件，或被移动到了其他位置。",
+  "{title} is installed on a drive that is not currently connected ({path}).\nReconnect the drive and check again to play.": "{title} 安装在当前未连接的驱动器上（{path}）。\n请重新连接驱动器并再次检查以游玩。",
+  "{title} is installed on a drive that is not currently connected.\nReconnect the drive and check again to play.": "{title} 安装在当前未连接的驱动器上。\n请重新连接驱动器并再次检查以游玩。"
+}

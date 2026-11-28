@@ -41,14 +41,38 @@ impl CollectionView {
         if busy || queued {
             return rows;
         }
-        if game.install_folder_missing() {
-            rows.push(
-                Row::action("epic:relocate", tr!("Change install location\u{2026}"))
-                    .icon(Icon::FolderOpen)
-                    .desc(tr!("The game's folder is missing")),
-            );
-            rows.push(Row::action("epic:forget", tr!("Remove from installed games\u{2026}")).icon(Icon::DeleteOutline).danger());
-            return rows;
+        match crate::services::launch_blocker::game_presence(cx, game) {
+            heronite_data::install_health::InstallPresence::StorageUnavailable { .. } => {
+                rows.push(
+                    Row::action("epic:relocate", tr!("Change install location\u{2026}"))
+                        .icon(Icon::FolderOpen)
+                        .desc(tr!("Drive unavailable")),
+                );
+                rows.push(Row::action("epic:forget", tr!("Remove from installed games\u{2026}")).icon(Icon::DeleteOutline).danger());
+                return rows;
+            }
+            heronite_data::install_health::InstallPresence::Missing(heronite_data::install_health::MissingReason::FolderGone) => {
+                rows.push(
+                    Row::action("epic:relocate", tr!("Change install location\u{2026}"))
+                        .icon(Icon::FolderOpen)
+                        .desc(tr!("The game's folder is missing")),
+                );
+                rows.push(Row::action("epic:forget", tr!("Remove from installed games\u{2026}")).icon(Icon::DeleteOutline).danger());
+                return rows;
+            }
+            heronite_data::install_health::InstallPresence::Missing(heronite_data::install_health::MissingReason::Incomplete) => {
+                if !flags.third_party && !playing {
+                    rows.push(Row::action("epic:verify", tr!("Verify and repair")).icon(Icon::Build));
+                }
+                rows.push(
+                    Row::action("epic:relocate", tr!("Change install location\u{2026}"))
+                        .icon(Icon::FolderOpen)
+                        .desc(tr!("The game's files were not found")),
+                );
+                rows.push(Row::action("epic:forget", tr!("Remove from installed games\u{2026}")).icon(Icon::DeleteOutline).danger());
+                return rows;
+            }
+            _ => {}
         }
         if !flags.third_party {
             if update {

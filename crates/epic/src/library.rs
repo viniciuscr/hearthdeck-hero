@@ -301,9 +301,10 @@ pub fn refresh(data_paths: &DataPaths, legendary: &Legendary) -> Result<RefreshR
     if let Some(e) = &list_error {
         log::error!("Failed to refresh library: {e}");
     }
-    // Windows: the games the Epic Games Launcher updated since, then the ones
-    // it installed (with the metadata the list just fetched).
+    // Windows: reconcile games uninstalled in the Epic Games Launcher, update
+    // ones it patched, then take in new ones.
     if list_error.is_none() {
+        crate::egl::reconcile_uninstalled(data_paths);
         crate::egl::retake_updated(data_paths, legendary);
     }
     let launcher_import = if list_error.is_none() { crate::egl::import_new(data_paths, legendary) } else { None };

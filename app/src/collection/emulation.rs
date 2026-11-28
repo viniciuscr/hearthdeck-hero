@@ -198,12 +198,32 @@ impl CollectionView {
         }
     }
 
+    /// Runs the background install-presence check on the current library,
+    /// skipping games currently downloading, moving, verifying, or running.
+    pub(super) fn scan_install_health(&self, stale_only: bool, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.clone() else { return };
+        let mut active: std::collections::HashSet<String> = self.playing.keys().cloned().collect();
+        active.extend(self.preparing.keys().cloned());
+        if let Some(d) = crate::services::try_downloads(cx) {
+            let d = d.read(cx);
+            active.extend(d.active_app_names());
+            active.extend(d.playing_app_names());
+        }
+        crate::services::install_health(cx).update(cx, |s, cx| {
+            if stale_only {
+                s.scan_if_stale(lib, active, cx);
+            } else {
+                s.scan(lib, active, cx);
+            }
+        });
+    }
+
     /// The refresh button: updates the install states (a game uninstalled
     /// from Steam), scans the saved ROM folders (`autoScanOnRefresh` ones)
     /// off the UI thread, then reloads the library; the spinner runs
-    /// for both. The Steam library and the other launchers turned on are
-    /// read again too. Like Heronite's `handleRefreshAll`: new games are added, none
-    /// are ever removed.
+    /// for both. The Steam library, store clients and other launchers turned
+    /// on are read again too. Like Heronite's `handleRefreshAll`: new games
+    /// are added, none are ever removed.
     pub(super) fn refresh_all(&mut self, cx: &mut Context<Self>) {
         if self.refreshing {
             return;
@@ -214,12 +234,20 @@ impl CollectionView {
             let res = cx
                 .background_spawn(async move {
                     refresh_install_states(&paths);
+                    #[cfg(windows)]
+                    {
+                        let _ = heronite_epic::egl::reconcile_uninstalled(&paths);
+                        let _ = heronite_amazon::amazon_app::reconcile_uninstalled(&paths);
+                    }
                     run_rom_scanners(&paths, None)
                 })
                 .await;
             this.update(cx, |this, cx| {
                 crate::services::steam_library(cx).update(cx, |s, cx| s.sync_if_ready(cx));
                 crate::services::launcher_imports(cx).update(cx, |s, cx| s.import_enabled(cx));
+                if heronite_platform::supported(heronite_platform::Feature::StoreClients) {
+                    crate::services::clients(cx).update(cx, |s, cx| s.sync_all(cx));
+                }
                 if heronite_platform::supported(heronite_platform::Feature::XboxStore) {
                     crate::services::xbox_library(cx).update(cx, |s, cx| s.sync_quietly(cx));
                 }

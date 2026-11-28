@@ -225,6 +225,16 @@ impl Downloads {
         self.busy.get(app_name)
     }
 
+    /// App names currently busy or waiting in the download queue.
+    pub fn active_app_names(&self) -> std::collections::BTreeSet<String> {
+        self.busy.keys().chain(self.snapshot.queue.iter().map(|e| &e.params.app_name)).cloned().collect()
+    }
+
+    /// App names currently running as games.
+    pub fn playing_app_names(&self) -> std::collections::BTreeSet<String> {
+        self.playing.iter().cloned().collect()
+    }
+
     pub fn progress_of(&self, app_name: &str) -> Option<&Progress> {
         self.progress.get(app_name)
     }
